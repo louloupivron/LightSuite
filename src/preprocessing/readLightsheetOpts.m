@@ -39,27 +39,52 @@ switch tifftype
     case 'channelperfile' % classic for BigStitcher
         fprintf('Using channelperfile loading, every channel should be in a different tiff\n')
         Nfiles = numel(tfiles);
+        opts.planes_in_time = false; % planes stored as Z (false) or T (true)
         if Nfiles == 1
              datainfo = BioformatsImage(fullfile(tfiles.folder, tfiles.name));
              opts.Nchans = datainfo.sizeC;
              fprintf('Found a single tiff with %d channels \n', opts.Nchans);
-             allnyxz = [datainfo.height datainfo.width datainfo.sizeZ];
+             sizeZ = datainfo.sizeZ;
+             sizeT = datainfo.sizeT;
+             allnyxz = [datainfo.height datainfo.width sizeZ];
         else
             opts.Nchans  = numel(tfiles);
             fprintf('Assuming each channel is a separate tiff. Found %d channels \n', opts.Nchans)
             allnyxz = nan(opts.Nchans, 3);
             for ichan = 1 : opts.Nchans
                 datainfo          = BioformatsImage(fullfile(tfiles(ichan).folder, tfiles(ichan).name));
+                if ichan == 1
+                    sizeZ = datainfo.sizeZ;
+                    sizeT = datainfo.sizeT;
+                end
                 allnyxz(ichan, :) = [datainfo.height datainfo.width datainfo.sizeZ];
             end
             opts.multitiffs = true;
             assert(all(allnyxz == allnyxz(1,:), "all"), ...
                 "some volumes do not have matching size, LightSuite cannot proceed")
         end
+        % Multi-page TIFFs often report sizeZ=1, sizeT=N (planes as time)
+        if sizeZ == 1 && sizeT > 1
+            opts.Nz = sizeT;
+            opts.planes_in_time = true;
+        else
+            opts.Nz = sizeZ;
+        end
+        % Fallback: imfinfo for TIFF when Bioformats reports only 1 plane
+        if opts.Nz == 1
+            tiffpath = fullfile(tfiles(1).folder, tfiles(1).name);
+            if endsWith(lower(tiffpath), {'.tif', '.tiff'})
+                ninfo = numel(imfinfo(tiffpath));
+                if ninfo > 1
+                    opts.Nz = ninfo;
+                    opts.planes_in_time = true;
+                    fprintf('Bioformats reported 1 plane; imfinfo found %d pages, using that.\n', ninfo);
+                end
+            end
+        end
         %--------------------------------------------------------------------------
         opts.Nx  = allnyxz(1, 2); 
         opts.Ny  = allnyxz(1, 1); 
-        opts.Nz  = allnyxz(1, 3); 
         fprintf('Volume size is %d x %d x %d px\n', opts.Ny, opts.Nx,  opts.Nz)
         %======================================================================
 end

@@ -3,12 +3,13 @@ function transinit = originalSimilarityTform(samppts, atlaspts, params, Tflip)
 
 %==========================================================================
 % downsample clouds to a reasonable size
+% maxNumPoints must be >= 6 for pcdownsample('nonuniformGridSample', ...)
 rng(1);
-Ndownls      = round(samppts.Count/1e4);
-Ndowntv      = round(atlaspts.Count/5e4);
+Ndownls      = max(6, round(samppts.Count/1e4));
+Ndowntv      = max(6, round(atlaspts.Count/5e4));
 
-ls_cloud_use = pcdownsample(samppts,'nonuniformGrid', Ndownls,'PreserveStructure',true);
-tv_cloud_use = pcdownsample(atlaspts,'nonuniformGrid',Ndowntv,'PreserveStructure',true);
+ls_cloud_use = pcdownsample(samppts,'nonuniformGridSample', Ndownls,'PreserveStructure',true);
+tv_cloud_use = pcdownsample(atlaspts,'nonuniformGridSample',Ndowntv,'PreserveStructure',true);
 tvpoints = tv_cloud_use.Location;
 lspoints = Tflip.transformPointsForward(ls_cloud_use.Location);
 %==========================================================================
