@@ -39,46 +39,48 @@ switch tifftype
     case 'channelperfile' % classic for BigStitcher
         fprintf('Using channelperfile loading, every channel should be in a different tiff\n')
         Nfiles = numel(tfiles);
-        opts.planes_in_time = false; % planes stored as Z (false) or T (true)
+        opts.planes_in_time = false;
+        tiffpath = fullfile(tfiles(1).folder, tfiles(1).name);
+        % Use imfinfo as primary source for Nz - most reliable for multi-page TIFFs
+        if endsWith(lower(tiffpath), {'.tif', '.tiff'})
+            try
+                ninfo = numel(imfinfo(tiffpath));
+                if ninfo > 1
+                    opts.Nz = ninfo;
+                    opts.planes_in_time = true;
+                    fprintf('imfinfo found %d pages in first TIFF.\n', ninfo);
+                end
+            catch ME
+                fprintf('imfinfo failed (%s), using Bioformats for dimensions.\n', ME.message);
+            end
+        end
         if Nfiles == 1
-             datainfo = BioformatsImage(fullfile(tfiles.folder, tfiles.name));
+             datainfo = BioformatsImage(tiffpath);
              opts.Nchans = datainfo.sizeC;
              fprintf('Found a single tiff with %d channels \n', opts.Nchans);
-             sizeZ = datainfo.sizeZ;
-             sizeT = datainfo.sizeT;
-             allnyxz = [datainfo.height datainfo.width sizeZ];
+             allnyxz = [datainfo.height datainfo.width datainfo.sizeZ];
+             if ~opts.planes_in_time
+                 opts.Nz = datainfo.sizeZ;
+             end
         else
             opts.Nchans  = numel(tfiles);
             fprintf('Assuming each channel is a separate tiff. Found %d channels \n', opts.Nchans)
             allnyxz = nan(opts.Nchans, 3);
             for ichan = 1 : opts.Nchans
                 datainfo          = BioformatsImage(fullfile(tfiles(ichan).folder, tfiles(ichan).name));
-                if ichan == 1
-                    sizeZ = datainfo.sizeZ;
-                    sizeT = datainfo.sizeT;
-                end
                 allnyxz(ichan, :) = [datainfo.height datainfo.width datainfo.sizeZ];
             end
             opts.multitiffs = true;
             assert(all(allnyxz == allnyxz(1,:), "all"), ...
                 "some volumes do not have matching size, LightSuite cannot proceed")
-        end
-        % Multi-page TIFFs often report sizeZ=1, sizeT=N (planes as time)
-        if sizeZ == 1 && sizeT > 1
-            opts.Nz = sizeT;
-            opts.planes_in_time = true;
-        else
-            opts.Nz = sizeZ;
-        end
-        % Fallback: imfinfo for TIFF when Bioformats reports only 1 plane
-        if opts.Nz == 1
-            tiffpath = fullfile(tfiles(1).folder, tfiles(1).name);
-            if endsWith(lower(tiffpath), {'.tif', '.tiff'})
-                ninfo = numel(imfinfo(tiffpath));
-                if ninfo > 1
-                    opts.Nz = ninfo;
+            if ~opts.planes_in_time
+                sizeZ = allnyxz(1, 3);
+                sizeT = datainfo.sizeT;
+                if sizeZ == 1 && sizeT > 1
+                    opts.Nz = sizeT;
                     opts.planes_in_time = true;
-                    fprintf('Bioformats reported 1 plane; imfinfo found %d pages, using that.\n', ninfo);
+                else
+                    opts.Nz = sizeZ;
                 end
             end
         end

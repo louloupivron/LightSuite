@@ -43,13 +43,21 @@ for ichannel = 1:opts.Nchans
             case 'channelperfile'
                 if opts.multitiffs
                     if getOr(opts, 'planes_in_time', false)
-                        currim = currbf.getPlane(1, 1, islice);
+                        try
+                            currim = currbf.getPlane(1, 1, islice);
+                        catch
+                            currim = currbf.getPlane(islice);
+                        end
                     else
                         currim = currbf.getPlane(islice, 1, 1);
                     end
                 else
                     if getOr(opts, 'planes_in_time', false)
-                        currim = currbf.getPlane(1, ichannel, islice);
+                        try
+                            currim = currbf.getPlane(1, ichannel, islice);
+                        catch
+                            currim = currbf.getPlane(islice);
+                        end
                     else
                         currim = currbf.getPlane(islice, ichannel, 1);
                     end
