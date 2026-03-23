@@ -21,7 +21,7 @@ usegpu  = isgpuarray(volumeuse);
 [fout, ~] = spatial_bandpass_3d(volumeuse, avgcellradius, 3, 3, usegpu, anisotropyratio);
 
 % find maxima in filtered space
-smax           = my_max(fout, 4*sigmause, 1:3);
+smax           = my_max(fout, ceil(4*sigmause), 1:3);
 
 % we keep maxima with a minimum snr
 % this snr should be probably in filtered space
@@ -61,7 +61,7 @@ cinfo  = regionprops3(imgidx, gather(volumeuse),...
 % [aa,bb] = pca(localfun);
 % iweird = find(localdist>80);
 prem   = 0;
-cellimages = zeros(0, prod(2*4*sigmause(1:2)+1));
+cellimages = zeros(0, prod(2*ceil(4*sigmause(1:2))+1));
 if ~isempty(cinfo)
 
     elips   = cinfo.PrincipalAxisLength(:,1)./cinfo.PrincipalAxisLength(:,2);
@@ -79,7 +79,7 @@ if ~isempty(cinfo)
     % imshowpair(uint8(max(volumeuse,[],3)*255/thresSNR(1)),max(imgidx,[],3));
 
     if saveim
-        cellimages = getCellImages2D(volumeuse, cinfo, sigmause*4);
+        cellimages = getCellImages2D(volumeuse, cinfo, ceil(sigmause*4));
         cellimages(iweird, :) = [];
     end
     cinfo(iweird, :) = [];    

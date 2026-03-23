@@ -19,7 +19,7 @@ background = volumeuse-dff2;
 background(background<0) = 0;
 %==========================================================================
 % detect local maxima and get candidate voxels
-smax      = my_max(dff2, 4*sigmause, 1:3);
+smax      = my_max(dff2, ceil(4*sigmause), 1:3);
 imgidx    = (dff2==smax) & (dff2 > sdthres(1)); 
 imgidx    = gather(imgidx);
 imgidx    = imdilate(imgidx, seuse) & gather(dff2 > sdthres(2));
@@ -51,7 +51,7 @@ if size(cinfo, 1) > 0
     ikeep  = ikeepz & ikeepx & ikeepy & ~ilong & ~ismall;
     cinfo  = cinfo(ikeep, :);
     if saveimages
-        cim = getCellImages2D(dff, cinfo, sigmause*6);
+        cim = getCellImages2D(dff, cinfo, ceil(sigmause*6));
     end
 end
 %=========================================================================

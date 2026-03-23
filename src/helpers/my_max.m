@@ -15,7 +15,7 @@ else
 end
 
 for i = 1:length(idims)
-    sig = sigall(i);
+    sig = max(1, ceil(sigall(i)));
     
     idim = idims(i);
     Nd = ndims(S1);

@@ -30,7 +30,7 @@ ampsignal = dff2 ./ background;
 % imagesc(max(ampsignal,[],3),[0.5 1])
 %==========================================================================
 % detect local maxima and get candidate voxels
-smax      = my_max(ampsignal, 4*sigmause, 1:3);
+smax      = my_max(ampsignal, ceil(4*sigmause), 1:3);
 % candidates should have at least a reasonable intensity
 minval    = quantile(dff2(isamp), 0.98, 'all');
 
@@ -75,7 +75,7 @@ if size(cinfo, 1) > 0
     ikeep  = ikeepz & ikeepx & ikeepy & ~ilong & ~ismall & ihigh;
     cinfo  = cinfo(ikeep, :);
     if saveimages
-        cim = getCellImages2D(dff2, cinfo, sigmause*6);
+        cim = getCellImages2D(dff2, cinfo, ceil(sigmause*6));
     end
 end
 if nargout > 2
