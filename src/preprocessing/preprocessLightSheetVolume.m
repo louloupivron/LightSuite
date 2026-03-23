@@ -31,17 +31,23 @@ for ichannel = 1:opts.Nchans
     msg = []; proctic = tic;
     %----------------------------------------------------------------------
     if ~contains(opts.tifftype, 'planeperfile')
-        if opts.multitiffs
-            currbf = BioformatsImage(opts.tfiles{ichannel});
+        if getOr(opts, 'use_imread_channelperfile', false) && opts.multitiffs
+            currinfo = imfinfo(opts.tfiles{ichannel});
         else
-            currbf = BioformatsImage(opts.tfiles{1});
+            if opts.multitiffs
+                currbf = BioformatsImage(opts.tfiles{ichannel});
+            else
+                currbf = BioformatsImage(opts.tfiles{1});
+            end
         end
     end
     %----------------------------------------------------------------------
     for islice = 1:Nz
         switch opts.tifftype
             case 'channelperfile'
-                if opts.multitiffs
+                if getOr(opts, 'use_imread_channelperfile', false) && opts.multitiffs
+                    currim = imread(opts.tfiles{ichannel}, 'Index', islice, 'Info', currinfo);
+                elseif opts.multitiffs
                     if getOr(opts, 'planes_in_time', false)
                         try
                             currim = currbf.getPlane(1, 1, islice);
