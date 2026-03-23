@@ -41,6 +41,7 @@ switch tifftype
         Nfiles = numel(tfiles);
         opts.planes_in_time = false;
         opts.use_imread_channelperfile = false;
+        opts.use_tiffreadvolume_channelperfile = false;
         tiffpath = fullfile(tfiles(1).folder, tfiles(1).name);
         if Nfiles == 1
              datainfo = BioformatsImage(tiffpath);
@@ -56,8 +57,21 @@ switch tifftype
                 currpath = fullfile(tfiles(ichan).folder, tfiles(ichan).name);
                 if endsWith(lower(currpath), {'.tif', '.tiff'})
                     tinfo = imfinfo(currpath);
-                    allnyxz(ichan, :) = [tinfo(1).Height tinfo(1).Width numel(tinfo)];
-                    opts.use_imread_channelperfile = true;
+                    Nzcurr = numel(tinfo);
+                    if Nzcurr == 1 && isfield(tinfo(1), 'ImageDescription')
+                        desc = tinfo(1).ImageDescription;
+                        tok = regexp(desc, '(images|slices)\s*=\s*(\d+)', 'tokens', 'once');
+                        if ~isempty(tok)
+                            Nzcurr = str2double(tok{2});
+                            if Nzcurr > 1
+                                opts.use_tiffreadvolume_channelperfile = true;
+                            end
+                        end
+                    end
+                    allnyxz(ichan, :) = [tinfo(1).Height tinfo(1).Width Nzcurr];
+                    if Nzcurr > 1 && ~opts.use_tiffreadvolume_channelperfile
+                        opts.use_imread_channelperfile = true;
+                    end
                 else
                     datainfo          = BioformatsImage(currpath);
                     allnyxz(ichan, :) = [datainfo.height datainfo.width datainfo.sizeZ];
@@ -69,6 +83,8 @@ switch tifftype
             opts.Nz = allnyxz(1, 3);
             if opts.use_imread_channelperfile
                 fprintf('Using native TIFF page reading for channel-per-file stacks.\n');
+            elseif opts.use_tiffreadvolume_channelperfile
+                fprintf('Using tiffreadVolume for channel-per-file TIFF stacks.\n');
             end
         end
         %--------------------------------------------------------------------------
