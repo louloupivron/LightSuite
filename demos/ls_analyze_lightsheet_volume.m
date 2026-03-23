@@ -3,28 +3,29 @@ opts = struct();
 % options to change
 %--------------------------------------------------------------------------
 % for naming
-opts.mousename  = 'DK001'; 
+opts.mousename  = 'Giulia';
 % change for the folder that contains stitched tiff files
-opts.datafolder = 'D:\DATA\DK001'; 
-opts.fproc      = fullfile('C:\DATA_sorted'); % where the processed volume is saved as a binary (fast SSD, at
+opts.datafolder = 'F:\Louis\mesoSPIM\Fanny\data';
+opts.fproc      = fullfile('D:\DATA_LightSuite_Temp'); % where the processed volume is saved as a binary (fast SSD, at
 % least 500 GB), will be deleted
+parallel.gpu.enableCUDAForwardCompatibility(true)
 % path to save results
-opts.savepath   = fullfile(opts.datafolder, 'lightsuite'); 
+opts.savepath   = fullfile(opts.datafolder, 'test_celldetection');
 %--------------------------------------------------------------------------
 % some processing options
-opts.tifftype           = 'channelperfile'; % can be planeperfile or channelperfile 
-opts.pxsize             = [20 20 20]; % voxel size, xy and z, in um
+opts.tifftype           = 'channelperfile'; % can be planeperfile or channelperfile
+opts.pxsize             = [5.26 5.26 5]; % voxel size, xy and z, in um
 opts.atlasres           = 10; % better keep this fixed for highest resolution, in um
 opts.registres          = 20; % resolution to do the nonrigid registration, keep fixed, in um
 % cell detection parameters
 opts.debug              = true; % toggle plotting (takes longer) for cell detections
 opts.savecellimages     = false; % toggle saving of individual cell images
-opts.celldiam           = 25; % approximate cell size in um
+opts.celldiam           = 14; % approximate cell size in um
 opts.thres_cell_detect  = [0.5 0.4]; % thresholds for detecting cells relative to background, first should be bigger than second
-opts.channelforcells    = 3; % channel to use for cell detection, leave empty ([]) for none
+opts.channelforcells    = []; % channel to use for cell detection, leave empty ([]) for none
 opts.writetocsv         = false; % write cells to csv file
 %  registration
-opts.channelforregister = 2; % channel to use for registration
+opts.channelforregister = 1; % channel to use for registration
 %--------------------------------------------------------------------------
 opts                   = readLightsheetOpts(opts);
 %=========================================================================
