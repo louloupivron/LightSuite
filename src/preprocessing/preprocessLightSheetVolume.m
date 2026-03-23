@@ -31,9 +31,7 @@ for ichannel = 1:opts.Nchans
     msg = []; proctic = tic;
     %----------------------------------------------------------------------
     if ~contains(opts.tifftype, 'planeperfile')
-        if getOr(opts, 'use_tiffreadvolume_channelperfile', false) && opts.multitiffs
-            currstack = tiffreadVolume(opts.tfiles{ichannel});
-        elseif getOr(opts, 'use_imread_channelperfile', false) && opts.multitiffs
+        if getOr(opts, 'use_imread_channelperfile', false) && opts.multitiffs
             currinfo = imfinfo(opts.tfiles{ichannel});
         else
             if opts.multitiffs
@@ -47,9 +45,7 @@ for ichannel = 1:opts.Nchans
     for islice = 1:Nz
         switch opts.tifftype
             case 'channelperfile'
-                if getOr(opts, 'use_tiffreadvolume_channelperfile', false) && opts.multitiffs
-                    currim = currstack(:, :, islice);
-                elseif getOr(opts, 'use_imread_channelperfile', false) && opts.multitiffs
+                if getOr(opts, 'use_imread_channelperfile', false) && opts.multitiffs
                     currim = imread(opts.tfiles{ichannel}, 'Index', islice, 'Info', currinfo);
                 elseif opts.multitiffs
                     if getOr(opts, 'planes_in_time', false)
