@@ -36,6 +36,7 @@ params = localBuildBsplineParams(optsreg, dualMi, cpwt, nhistbins, fixedvol, vol
 %==========================================================================
 pathtemp = fullfile(savepath, 'elastix_temp');
 makeNewDir(pathtemp);
+clearElastixWorkspaceForNewRun(pathtemp);
 
 movpath  = fullfile(pathtemp, 'moving.txt');
 fixpath  = fullfile(pathtemp, 'fixed.txt');
