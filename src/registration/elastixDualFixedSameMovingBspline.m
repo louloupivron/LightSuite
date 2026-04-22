@@ -1,15 +1,13 @@
 function [regimg, tform_bspline] = elastixDualFixedSameMovingBspline(movingVol, fixedVol1, fixedVol2, pathtemp, volscale, params, movpath, fixpath)
 %   VOLSCALE is voxel spacing in mm (scalar or [sx sy sz]) passed to mhd_write as
 %   ElementSpacing for all four volumes (must match single-channel registration).
-%ELASTIXDUALFIXEDSAMEMOVINGBSPLINE Run elastix with two fixed images and one moving image.
+%ELASTIXDUALFIXEDSAMEMOVINGBSPLINE Run elastix with dual sample contrasts + landmarks.
 %
-%   Elastix is invoked as:
-%     elastix -f0 fixedAF.mhd -m0 movingAtlas.mhd -f1 fixedSignal.mhd -m1 movingAtlas.mhd ...
-%
-%   The same moving volume is written twice (m0, m1) so each
-%   AdvancedMattesMutualInformation term pairs the warped Allen template with
-%   the autofluorescence and signal downsamples respectively. One shared
-%   B-spline transform is optimised (MultiMetricMultiResolutionRegistration).
+%   Elastix is invoked with three fixed/moving pairs (-f0/-m0 .. -f2/-m2) because
+%   MultiMetricMultiResolutionRegistration (Elastix 5.1) requires the number of
+%   fixed/moving pyramids to be 1 or equal to the number of metrics (3 here).
+%   Pairs 0 and 1 are AF+atlas and signal+atlas; pair 2 duplicates pair 0 so the
+%   landmark metric's pyramid chain receives valid images (data identical to f0/m0).
 %
 %   Requires matlab_elastix on the path (addElastixRepoPaths), elastix binary
 %   on the system PATH, and mhd_write / elastix_parameter_write from that package.
@@ -25,6 +23,8 @@ baseF0 = fullfile(root, [dirName '_dual_f0']);
 baseM0 = fullfile(root, [dirName '_dual_m0']);
 baseF1 = fullfile(root, [dirName '_dual_f1']);
 baseM1 = fullfile(root, [dirName '_dual_m1']);
+baseF2 = fullfile(root, [dirName '_dual_f2']);
+baseM2 = fullfile(root, [dirName '_dual_m2']);
 
 sp = volscale(:).';
 if isscalar(sp)
@@ -38,6 +38,9 @@ mhd_write(fixedVol1, baseF0, sp);
 mhd_write(movingVol, baseM0, sp);
 mhd_write(fixedVol2, baseF1, sp);
 mhd_write(movingVol, baseM1, sp);
+% Third pair duplicates f0/m0 (same arrays) so ITK has three image inputs for three metrics.
+mhd_write(fixedVol1, baseF2, sp);
+mhd_write(movingVol, baseM2, sp);
 
 paramFname = fullfile(root, sprintf('%s_parameters_dual.txt', dirName));
 elastix_parameter_write(paramFname, 'elastix_default.yml', params);
@@ -52,9 +55,9 @@ if nargin >= 8 && ~isempty(movpath) && ~isempty(fixpath) && ...
     ptsCmd = sprintf(' -fp "%s" -mp "%s" ', fixpath, movpath);
 end
 
-cmd = sprintf(['elastix -f0 "%s.mhd" -m0 "%s.mhd" -f1 "%s.mhd" -m1 "%s.mhd" -out "%s" ' ...
-    '%s-p "%s" '], ...
-    baseF0, baseM0, baseF1, baseM1, root, ptsCmd, paramFname);
+cmd = sprintf(['elastix -f0 "%s.mhd" -m0 "%s.mhd" -f1 "%s.mhd" -m1 "%s.mhd" ' ...
+    '-f2 "%s.mhd" -m2 "%s.mhd" -out "%s" %s-p "%s" '], ...
+    baseF0, baseM0, baseF1, baseM1, baseF2, baseM2, root, ptsCmd, paramFname);
 
 cmdFid = fopen(fullfile(root, 'CMD_dual'), 'w');
 fprintf(cmdFid, '%s\n', cmd);

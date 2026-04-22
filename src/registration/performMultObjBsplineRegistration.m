@@ -81,12 +81,15 @@ if dualMi
     w_sg = getOr(optsreg, 'dual_channel_mi_weight_signal', 0.5);
     params.Metric                      = {'AdvancedMattesMutualInformation', ...
         'AdvancedMattesMutualInformation', 'CorrespondingPointsEuclideanDistanceMetric'};
-    % Elastix 5.1 ITK: NumberOfInterpolators must be 1 or equal NumberOfMetrics (here 3).
-    % Only two fixed/moving image pairs (-f0/-f1, -m0/-m1): two pyramid + sampler
-    % chains for the AMI terms. ITK still requires three interpolators (one per metric).
-    params.FixedImagePyramid           = {'FixedRecursiveImagePyramid', 'FixedRecursiveImagePyramid'};
-    params.MovingImagePyramid          = {'MovingRecursiveImagePyramid', 'MovingRecursiveImagePyramid'};
-    params.ImageSampler                = {'RandomCoordinate', 'RandomCoordinate'};
+    % Elastix 5.1 ITK: counts of pyramids / samplers / interpolators must be 1 or equal
+    % NumberOfMetrics (3). Third image pair on disk duplicates AF+atlas (see
+    % elastixDualFixedSameMovingBspline) so pyramid 2 has valid inputs for the
+    % landmark metric slot.
+    params.FixedImagePyramid           = {'FixedRecursiveImagePyramid', 'FixedRecursiveImagePyramid', ...
+        'FixedRecursiveImagePyramid'};
+    params.MovingImagePyramid          = {'MovingRecursiveImagePyramid', 'MovingRecursiveImagePyramid', ...
+        'MovingRecursiveImagePyramid'};
+    params.ImageSampler                = {'RandomCoordinate', 'RandomCoordinate', 'RandomCoordinate'};
     params.Interpolator                = {'BSplineInterpolator', 'BSplineInterpolator', 'BSplineInterpolator'};
     params.Metric0Weight               = w_af;
     params.Metric1Weight               = w_sg;
