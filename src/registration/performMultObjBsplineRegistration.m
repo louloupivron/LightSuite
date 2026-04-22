@@ -84,6 +84,9 @@ if dualMi
     params.FixedImagePyramid           = {'FixedRecursiveImagePyramid', 'FixedRecursiveImagePyramid'};
     params.MovingImagePyramid          = {'MovingRecursiveImagePyramid', 'MovingRecursiveImagePyramid'};
     params.ImageSampler                = {'RandomCoordinate', 'RandomCoordinate'};
+    % One moving-image interpolator per image-based metric (Elastix 5.1:
+    % NumberOfMovingImagePyramids must not exceed NumberOfInterpolators).
+    params.Interpolator                = {'BSplineInterpolator', 'BSplineInterpolator'};
     params.Metric0Weight               = w_af;
     params.Metric1Weight               = w_sg;
     params.Metric2Weight               = cpwt;
