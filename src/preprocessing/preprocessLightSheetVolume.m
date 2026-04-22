@@ -42,9 +42,25 @@ for ichannel = 1:opts.Nchans
         switch opts.tifftype
             case 'channelperfile'
                 if opts.multitiffs
-                    currim = currbf.getPlane(islice,1,1);
+                    if getOr(opts, 'planes_in_time', false)
+                        try
+                            currim = currbf.getPlane(1, 1, islice);
+                        catch
+                            currim = currbf.getPlane(islice);
+                        end
+                    else
+                        currim = currbf.getPlane(islice, 1, 1);
+                    end
                 else
-                    currim = currbf.getPlane(islice, ichannel, 1);
+                    if getOr(opts, 'planes_in_time', false)
+                        try
+                            currim = currbf.getPlane(1, ichannel, islice);
+                        catch
+                            currim = currbf.getPlane(islice);
+                        end
+                    else
+                        currim = currbf.getPlane(islice, ichannel, 1);
+                    end
                 end
             case 'planeperfile'
                 currim = imread(opts.tfiles{islice});

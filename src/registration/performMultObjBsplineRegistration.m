@@ -43,12 +43,21 @@ params.Metric1Weight                   = cpwt; %cpwt;%[1  0.5 0.25 0.125] * cpwt
 params.Metric0Weight                   = 1.0;
 params.ImagePyramidSchedule            = [8*ones(1,3) 4*ones(1,3) 2*ones(1,3) 1*ones(1,3)];
 params.FinalGridSpacingInPhysicalUnits = bspscale*ones(1,3);
+% Elastix requires SampleRegionSize <= 1/3 of fixed image size (mm)
+fixed_size_mm     = size(fixedvol) .* volscale;
+max_sample_region = min(fixed_size_mm) / 3;
 if usemultistep
     % for quite damaged brains
-    params.SampleRegionSize            = [4.5*ones(1,3) 4*ones(1,3) 3*ones(1,3) 2*ones(1,3)];
+    base_sizes = [4.5 4 3 2];
 else
     % for the rest
-    params.SampleRegionSize            = 2*ones(1,3); %
+    base_sizes = [2];
+end
+base_sizes = min(base_sizes, max_sample_region);
+if usemultistep
+    params.SampleRegionSize = [base_sizes(1)*ones(1,3) base_sizes(2)*ones(1,3) base_sizes(3)*ones(1,3) base_sizes(4)*ones(1,3)];
+else
+    params.SampleRegionSize = base_sizes(1)*ones(1,3);
 end
 %--------------------------------------------------------------------------
 pathtemp = fullfile(savepath, 'elastix_temp');
