@@ -82,12 +82,11 @@ if dualMi
     params.Metric                      = {'AdvancedMattesMutualInformation', ...
         'AdvancedMattesMutualInformation', 'CorrespondingPointsEuclideanDistanceMetric'};
     % Elastix 5.1 ITK: NumberOfInterpolators must be 1 or equal NumberOfMetrics (here 3).
-    % Moving pyramids must not exceed interpolators; use one chain per metric.
-    params.FixedImagePyramid           = {'FixedRecursiveImagePyramid', 'FixedRecursiveImagePyramid', ...
-        'FixedRecursiveImagePyramid'};
-    params.MovingImagePyramid          = {'MovingRecursiveImagePyramid', 'MovingRecursiveImagePyramid', ...
-        'MovingRecursiveImagePyramid'};
-    params.ImageSampler                = {'RandomCoordinate', 'RandomCoordinate', 'RandomCoordinate'};
+    % Only two fixed/moving image pairs (-f0/-f1, -m0/-m1): two pyramid + sampler
+    % chains for the AMI terms. ITK still requires three interpolators (one per metric).
+    params.FixedImagePyramid           = {'FixedRecursiveImagePyramid', 'FixedRecursiveImagePyramid'};
+    params.MovingImagePyramid          = {'MovingRecursiveImagePyramid', 'MovingRecursiveImagePyramid'};
+    params.ImageSampler                = {'RandomCoordinate', 'RandomCoordinate'};
     params.Interpolator                = {'BSplineInterpolator', 'BSplineInterpolator', 'BSplineInterpolator'};
     params.Metric0Weight               = w_af;
     params.Metric1Weight               = w_sg;

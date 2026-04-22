@@ -41,6 +41,10 @@ mhd_write(movingVol, baseM1, sp);
 
 paramFname = fullfile(root, sprintf('%s_parameters_dual.txt', dirName));
 elastix_parameter_write(paramFname, 'elastix_default.yml', params);
+% matlab_elastix YAML validation omits Metric2Weight (not in default.yml); append if missing.
+if isfield(params, 'Metric2Weight')
+    localAppendElastixParamIfMissing(paramFname, 'Metric2Weight', params.Metric2Weight);
+end
 
 ptsCmd = '';
 if nargin >= 8 && ~isempty(movpath) && ~isempty(fixpath) && ...
@@ -82,6 +86,24 @@ tform_bspline.TransformParameters = {elastix_parameter_read(tform_bspline.Transf
 
 scaleStr = sprintf('%.12g ', volscale(:));
 fprintf('Done dual-channel B-spline. Voxel spacing (mm) used in MHD: %s\n', strtrim(scaleStr));
+end
+
+function localAppendElastixParamIfMissing(fname, key, val)
+% Append (Key value) line if the parameter file does not already define Key.
+if exist(fname, 'file') ~= 2
+    return
+end
+txt = fileread(fname);
+token = sprintf('(%s ', key);
+if contains(txt, token)
+    return
+end
+fid = fopen(fname, 'a');
+if fid < 0
+    return
+end
+fprintf(fid, '\n(%s %g)\n', key, val);
+fclose(fid);
 end
 
 function im = localLoadElastixResult(fname)
