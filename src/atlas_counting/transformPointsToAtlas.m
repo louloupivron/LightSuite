@@ -69,6 +69,9 @@ if strcmp(opMode, 'folder')
     trstruct   = load(trfile);
     loadedOpts = load(optfile);
     opts       = loadedOpts.opts;
+    atlas_opts = struct('brain_atlas', getOr(opts, 'brain_atlas', 'allen'), ...
+        'atlas_dir', getOr(opts, 'atlas_dir', []));
+    atlas_cfg  = resolveBrainAtlasConfig(atlas_opts);
     
     % Determine writetocsv fallback
     writetocsv = false;
@@ -92,10 +95,18 @@ if strcmp(opMode, 'folder')
         mkdir(registerpath);
     end
     
-    % Load Allen Atlas and Parcellation info once
-    fprintf('Loading Allen Atlas and parcellation data...\n');
-    atlasData = loadAtlasData();
-    groupinds = atlasData.areaidx;
+    % Load atlas (Allen: full parcellation tables; other atlases: annotation only)
+    if atlas_cfg.supports_parcellation
+        fprintf('Loading Allen atlas and parcellation data...\n');
+        atlasData = loadAtlasData();
+        groupinds = atlasData.areaidx;
+    else
+        fprintf(['Loading annotation for brain_atlas=%s (Allen parcellation ' ...
+            'and cell-count CSVs skipped).\n'], atlas_cfg.brain_atlas);
+        av = niftiread(atlas_cfg.annotation_path);
+        atlasData = struct('av', av);
+        groupinds = [];
+    end
     
     % Process each file
     all_final_pts = cell(length(files), 1);
@@ -115,9 +126,15 @@ if strcmp(opMode, 'folder')
         % 2. Sanitize and remove invalid points
         [cleanatlaspts, badpts] = sanitizeCellCoords(atlasptcoords, atlasData.av);
         
-        % 3. Group into brain regions and calculate stats
-        [areacounts, areavols, catids] = groupCellsIntoLeafRegions(...
-            cleanatlaspts, atlasData.av, groupinds);
+        % 3. Group into brain regions and calculate stats (Allen only)
+        if atlas_cfg.supports_parcellation
+            [areacounts, areavols, catids] = groupCellsIntoLeafRegions(...
+                cleanatlaspts, atlasData.av, groupinds);
+        else
+            areacounts = [];
+            areavols = [];
+            catids = [];
+        end
         
         % 4. Save locations in the volume_registered folder
         outname   = strrep(files(i).name, '_sample.mat', '_atlas.mat');
@@ -137,8 +154,10 @@ if strcmp(opMode, 'folder')
             ichan = str2double(tokens{1}{1});
         end
         
-        % 6. Save statistics
-        saveCellStats(registerpath, ichan, areacounts, areavols, atlasData, writetocsv);
+        % 6. Save statistics (Allen parcellation only)
+        if atlas_cfg.supports_parcellation
+            saveCellStats(registerpath, ichan, areacounts, areavols, atlasData, writetocsv);
+        end
         
         all_final_pts{i} = atlasptcoords;
         fprintf('  -> Done! Channel %d completed in %2.2f s.\n', ichan, toc(savetic));
@@ -151,7 +170,11 @@ if strcmp(opMode, 'folder')
             varargout{1} = all_final_pts;
         end
     end
-    fprintf('All points successfully registered and tabulated!\n');
+    if atlas_cfg.supports_parcellation
+        fprintf('All points successfully registered and tabulated!\n');
+    else
+        fprintf('All points successfully transformed to atlas space (parcellation skipped).\n');
+    end
     
 else
     % Points mode (direct transformation without statistics)

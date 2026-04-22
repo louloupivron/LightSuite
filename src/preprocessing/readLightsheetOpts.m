@@ -81,5 +81,17 @@ end
 opts.tfiles = fullfile({tfiles(:).folder},{tfiles(:).name})';
 makeNewDir(opts.savepath)
 %--------------------------------------------------------------------------
+% Brain atlas (Allen CCF default; Perens LSFM optional — see resolveBrainAtlasConfig)
+if ~isfield(opts, 'brain_atlas') || isempty(opts.brain_atlas)
+    opts.brain_atlas = 'allen';
+else
+    opts.brain_atlas = lower(strtrim(char(opts.brain_atlas)));
+end
+assert(any(strcmp(opts.brain_atlas, {'allen', 'perens'})), ...
+    'opts.brain_atlas must be ''allen'' or ''perens''.');
+if ~isfield(opts, 'atlas_dir')
+    opts.atlas_dir = [];
+end
+%--------------------------------------------------------------------------
 
 end

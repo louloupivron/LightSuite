@@ -77,5 +77,12 @@ for irepofile = 1:numel(reporelatedfiles)
         error("The %s atlas was not found, maybe you'll run into problems", reponames{irepofile})
     end
 end
+hasperens = which('gubra_template_olf.nii.gz');
+if isempty(hasperens)
+    fprintf(['Optional Perens LSFM atlas (gubra_template_olf.nii.gz) not on path; ' ...
+        'set opts.brain_atlas=''perens'' only after adding that atlas folder.\n']);
+else
+    fprintf('Found optional Perens LSFM atlas in %s\n', fileparts(hasperens));
+end
 
 %==========================================================================

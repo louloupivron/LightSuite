@@ -31,6 +31,9 @@ function allmedians = generateRegisteredBrainVolumes(savepath, varargin)
 trstruct   = load(fullfile(savepath, 'transform_params.mat'));
 loadedOpts = load(fullfile(savepath, 'regopts.mat'));
 opts       = loadedOpts.opts;
+atlas_opts = struct('brain_atlas', getOr(opts, 'brain_atlas', 'allen'), ...
+    'atlas_dir', getOr(opts, 'atlas_dir', []));
+atlas_cfg  = resolveBrainAtlasConfig(atlas_opts);
 %--------------------------------------------------------------------------
 % 2. Parse Inputs and establish defaults
 %--------------------------------------------------------------------------
@@ -103,71 +106,76 @@ end
 %==========================================================================
 fprintf('Calculating background fluoresence in atlas coords...\n'); proctic = tic;
 
-allen_atlas_path        = fileparts(which('annotation_10.nii.gz'));
-av                      = niftiread(fullfile(allen_atlas_path, 'annotation_10.nii.gz'));
-allen_atlas_parcel_path = fileparts(which('parcellation_to_parcellation_term_membership.csv'));
+if atlas_cfg.supports_parcellation
+    av                      = niftiread(atlas_cfg.annotation_path);
+    allen_atlas_parcel_path = fileparts(which('parcellation_to_parcellation_term_membership.csv'));
 
-parcelinfo       = readtable(fullfile(allen_atlas_parcel_path, 'parcellation_to_parcellation_term_membership.csv'));
-substridx        = strcmp(parcelinfo.parcellation_term_set_name, 'substructure');
-[areaidx, ib]    = unique(parcelinfo.parcellation_index(substridx));
-namessub         = parcelinfo.parcellation_term_name(substridx);
-stridx           = strcmp(parcelinfo.parcellation_term_set_name, 'structure');
-[~, ibstr]       = unique(parcelinfo.parcellation_index(stridx));
-namesstruct      = parcelinfo.parcellation_term_name(stridx);
-dividx           = strcmp(parcelinfo.parcellation_term_set_name, 'division');
-[~, ibdiv]       = unique(parcelinfo.parcellation_index(dividx));
-namesdiv         = parcelinfo.parcellation_term_name(dividx);
+    parcelinfo       = readtable(fullfile(allen_atlas_parcel_path, 'parcellation_to_parcellation_term_membership.csv'));
+    substridx        = strcmp(parcelinfo.parcellation_term_set_name, 'substructure');
+    [areaidx, ib]    = unique(parcelinfo.parcellation_index(substridx));
+    namessub         = parcelinfo.parcellation_term_name(substridx);
+    stridx           = strcmp(parcelinfo.parcellation_term_set_name, 'structure');
+    [~, ibstr]       = unique(parcelinfo.parcellation_index(stridx));
+    namesstruct      = parcelinfo.parcellation_term_name(stridx);
+    dividx           = strcmp(parcelinfo.parcellation_term_set_name, 'division');
+    [~, ibdiv]       = unique(parcelinfo.parcellation_index(dividx));
+    namesdiv         = parcelinfo.parcellation_term_name(dividx);
 
-Ngroups          = numel(areaidx);
-Nforaccum        = max(av, [], 'all') + 1;
-Npxlr            = size(av,3)/2;
+    Ngroups          = numel(areaidx);
+    Nforaccum        = max(av, [], 'all') + 1;
+    Npxlr            = size(av,3)/2;
 
-allmedians = nan(Ngroups, 2, opts.Nchans, 'single');
-for ichan = 1:opts.Nchans
+    allmedians = nan(Ngroups, 2, opts.Nchans, 'single');
+    for ichan = 1:opts.Nchans
 
-    medianoverareas  = nan(Ngroups, 2, 'single');
-    volumeoverareas  = nan(Ngroups, 2, 'single');
-    for iside = 1:2
-        istart = (iside - 1) * Npxlr + 1;
-        iend   = istart + Npxlr - 1;
-    
-        sideav    = reshape(av(:, :, istart:iend), [], 1);
-        sidevals  = reshape(straightvol(:, :, istart:iend, ichan), [], 1);
-        ikeep     = sideav>0;
-        medareas  = single(accumarray(sideav(ikeep)+1, sidevals(ikeep), [Nforaccum 1], @median));
-        medareas  = medareas(areaidx+1);
+        medianoverareas  = nan(Ngroups, 2, 'single');
+        volumeoverareas  = nan(Ngroups, 2, 'single');
+        for iside = 1:2
+            istart = (iside - 1) * Npxlr + 1;
+            iend   = istart + Npxlr - 1;
+        
+            sideav    = reshape(av(:, :, istart:iend), [], 1);
+            sidevals  = reshape(straightvol(:, :, istart:iend, ichan), [], 1);
+            ikeep     = sideav>0;
+            medareas  = single(accumarray(sideav(ikeep)+1, sidevals(ikeep), [Nforaccum 1], @median));
+            medareas  = medareas(areaidx+1);
 
-        volareas  = accumarray(sideav+1, 1, [Nforaccum 1], @sum);
-        volareas  = volareas(areaidx+1);
-        volumeoverareas(:, iside) = volareas * (opts.atlasres*1e-3)^3;
+            volareas  = accumarray(sideav+1, 1, [Nforaccum 1], @sum);
+            volareas  = volareas(areaidx+1);
+            volumeoverareas(:, iside) = volareas * (opts.atlasres*1e-3)^3;
 
-        % get index 0 level for background
-        backlevel                 = single(median(sidevals(~ikeep)));
-        medareas(areaidx == 0)    = backlevel;
-        medianoverareas(:, iside) = medareas;
+            % get index 0 level for background
+            backlevel                 = single(median(sidevals(~ikeep)));
+            medareas(areaidx == 0)    = backlevel;
+            medianoverareas(:, iside) = medareas;
+        end
+
+        allmedians(:, :, ichan) = medianoverareas;
+
+        % save as mat file for later processing
+        fmatname  = fullfile(registerpath, sprintf('chan%02d_intensities.mat', ichan));
+        save(fmatname, 'medianoverareas', 'areaidx', 'volumeoverareas')
+
+        % save as csv if asked
+        if writetocsv
+            currtable = array2table([areaidx medianoverareas volumeoverareas], ...
+                'VariableNames',...
+                {'parcellation_index', ...
+                'RightSideIntensity', 'LeftSideIntensity',...
+                 'RightSideVolume[mm3]', 'LeftSideVolume[mm3]'});
+            currtable = addvars(currtable, namessub(ib), namesstruct(ibstr),  namesdiv(ibdiv),...
+                'NewVariableNames',{'name', 'structure', 'division'},'Before','parcellation_index');
+            fsavename      = fullfile(registerpath, sprintf('chan%02d_intensities.csv', ichan));
+            writetable(currtable, fsavename)
+        end
+        %--------------------------------------------------------------------------
+        fprintf('Channel %d/%d done. Time %2.2f s. \n', ichan, opts.Nchans, toc(proctic));
+        %--------------------------------------------------------------------------
     end
-
-    allmedians(:, :, ichan) = medianoverareas;
-
-    % save as mat file for later processing
-    fmatname  = fullfile(registerpath, sprintf('chan%02d_intensities.mat', ichan));
-    save(fmatname, 'medianoverareas', 'areaidx', 'volumeoverareas')
-
-    % save as csv if asked
-    if writetocsv
-        currtable = array2table([areaidx medianoverareas volumeoverareas], ...
-            'VariableNames',...
-            {'parcellation_index', ...
-            'RightSideIntensity', 'LeftSideIntensity',...
-             'RightSideVolume[mm3]', 'LeftSideVolume[mm3]'});
-        currtable = addvars(currtable, namessub(ib), namesstruct(ibstr),  namesdiv(ibdiv),...
-            'NewVariableNames',{'name', 'structure', 'division'},'Before','parcellation_index');
-        fsavename      = fullfile(registerpath, sprintf('chan%02d_intensities.csv', ichan));
-        writetable(currtable, fsavename)
-    end
-    %--------------------------------------------------------------------------
-    fprintf('Channel %d/%d done. Time %2.2f s. \n', ichan, opts.Nchans, toc(proctic));
-    %--------------------------------------------------------------------------
+else
+    fprintf(['Skipping Allen-only intensity parcellation (brain_atlas=%s). ' ...
+        'Registered volumes were still saved if requested.\n'], atlas_cfg.brain_atlas);
+    allmedians = [];
 end
 %==========================================================================
 end

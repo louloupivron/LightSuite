@@ -87,10 +87,10 @@ end
 
 %==========================================================================
 % load atlas
-fprintf('Loading and warping Allen atlas... \n'); tic;
-allen_atlas_path = fileparts(which('average_template_10.nii.gz'));
-tv      = niftiread(fullfile(allen_atlas_path,'average_template_10.nii.gz'));
-av      = niftiread(fullfile(allen_atlas_path,'annotation_10.nii.gz'));
+fprintf('Loading and warping brain atlas... \n'); tic;
+atlas_cfg = resolveBrainAtlasConfig(regopts);
+tv      = niftiread(atlas_cfg.template_path);
+av      = niftiread(atlas_cfg.annotation_path);
 
 Rmoving  = imref3d(size(tv));
 Rfixed   = imref3d(size(volume));
@@ -136,6 +136,7 @@ params_pts_to_atlas = struct();
 params_pts_to_atlas.atlasres         = regopts.atlasres;
 params_pts_to_atlas.regvolsize       = regvolsize;
 params_pts_to_atlas.atlassize        = size(tv);
+params_pts_to_atlas.brain_atlas      = getOr(regopts, 'brain_atlas', 'allen');
 params_pts_to_atlas.ori_pxsize       = regopts.pxsize;
 params_pts_to_atlas.ori_size         = [regopts.Ny regopts.Nx regopts.Nz];
 params_pts_to_atlas.how_to_perm      = regopts.permute_sample_to_atlas;

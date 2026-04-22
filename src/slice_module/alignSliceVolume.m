@@ -82,12 +82,16 @@ Xinput     = [xvals, yvals, zvals];
 pcsample   = pointCloud(Xinput);
 %==========================================================================
 
-fprintf('Loading and processing Allen Atlas template... '); tic;
-allen_atlas_path = fileparts(which('average_template_10.nii.gz'));
-tv               = niftiread(fullfile(allen_atlas_path,'average_template_10.nii.gz'));
-av               = niftiread(fullfile(allen_atlas_path,'annotation_10.nii.gz'));
-tv               = tv(sliceinfo.atlasaplims(1):sliceinfo.atlasaplims(2), :, :);
-av               = av(sliceinfo.atlasaplims(1):sliceinfo.atlasaplims(2), :, :);
+fprintf('Loading and processing brain atlas template... '); tic;
+atlas_opts = struct('brain_atlas', getOr(sliceinfo, 'brain_atlas', 'allen'), ...
+    'atlas_dir', getOr(sliceinfo, 'atlas_dir', []));
+atlas_cfg = resolveBrainAtlasConfig(atlas_opts);
+tv               = niftiread(atlas_cfg.template_path);
+av               = niftiread(atlas_cfg.annotation_path);
+if atlas_cfg.supports_parcellation
+    tv               = tv(sliceinfo.atlasaplims(1):sliceinfo.atlasaplims(2), :, :);
+    av               = av(sliceinfo.atlasaplims(1):sliceinfo.atlasaplims(2), :, :);
+end
 tvreg            = imresize3(tv, sliceinfo.px_atlas/sliceinfo.px_register);
 avreg            = imresize3(av, sliceinfo.px_atlas/sliceinfo.px_register);
 atlasframe = size(tv, [2 3]);
@@ -137,11 +141,20 @@ regopts.howtoperm    = [3 1 2];
 regopts.procpath     = sliceinfo.procpath;
 regopts.registres    = sliceinfo.px_register;
 regopts.processres   = sliceinfo.px_process;
-regopts.allenres     = 10; % um
+regopts.brain_atlas  = atlas_cfg.brain_atlas;
+regopts.allenres     = sliceinfo.px_atlas;
 regopts.errall       = errall;
-regopts.atlasaplims  = sliceinfo.atlasaplims;
+if atlas_cfg.supports_parcellation
+    regopts.atlasaplims  = sliceinfo.atlasaplims;
+else
+    % slicePointsToAtlas adds atlasaplims(1) to AP; use 0 when atlas is uncropped (e.g. Perens)
+    regopts.atlasaplims  = [0, size(tv, 1)];
+end
 regopts.pxsizes      = [sliceinfo.slicethickness/sliceinfo.px_register 1 1];
 regopts.extentfactor = 6; % # slices to extend beyond rigid registration
+if isfield(sliceinfo, 'atlas_dir') && ~isempty(sliceinfo.atlas_dir)
+    regopts.atlas_dir = sliceinfo.atlas_dir;
+end
 save(fullfile(sliceinfo.procpath, 'regopts.mat'), '-struct', 'regopts')
 %--------------------------------------------------------------------------
 scalesize = [ceil(size(slicevol,[1 2])*sliceinfo.px_process/sliceinfo.px_register) Nslices];

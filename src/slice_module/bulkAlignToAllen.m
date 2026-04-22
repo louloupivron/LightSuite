@@ -9,12 +9,18 @@ fprintf('Loading data in memory... '); tic;
 alignedvol = loadLargeSliceVolume(sliceinfo.slicevolfin, 1);
 fprintf('Done! Took %2.2f s\n', toc); 
 %--------------------------------------------------------------------------
-fprintf('Loading and processing Allen Atlas template... '); tic;
-allenres = 10;
-allen_atlas_path = fileparts(which('average_template_10.nii.gz'));
-tv               = niftiread(fullfile(allen_atlas_path,'average_template_10.nii.gz'));
+fprintf('Loading and processing brain atlas template... '); tic;
+allenres = sliceinfo.px_atlas;
+atlas_opts = struct('brain_atlas', getOr(sliceinfo, 'brain_atlas', 'allen'), ...
+    'atlas_dir', getOr(sliceinfo, 'atlas_dir', []));
+atlas_cfg = resolveBrainAtlasConfig(atlas_opts);
+tv               = niftiread(atlas_cfg.template_path);
 tvreg            = imresize3(tv, allenres/sliceinfo.px_register);
-limskeep         = [55, size(tvreg, 1)-100]; % exclude cerebellum and olfactory
+if atlas_cfg.supports_parcellation
+    limskeep     = [55, size(tvreg, 1)-100]; % exclude cerebellum and olfactory (Allen AP)
+else
+    limskeep     = [1, size(tvreg, 1)];
+end
 tv_cloud         = extractHighSFVolumePoints(tvreg, sliceinfo.px_register, limskeep);
 Npts             = tv_cloud.Count;
 tv_cloud_use     = pcdownsample(tv_cloud,'random', 10000/Npts, 'PreserveStructure',true);

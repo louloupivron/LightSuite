@@ -33,12 +33,15 @@ end
 downfac_reg = regopts.allenres/regopts.registres;
 nfac        = ceil(regopts.extentfactor * 7.5/regopts.pxsizes(1));
 
-
-allen_atlas_path = fileparts(which('average_template_10.nii.gz'));
-tv      = niftiread(fullfile(allen_atlas_path,'average_template_10.nii.gz'));
-av      = niftiread(fullfile(allen_atlas_path,'annotation_10.nii.gz'));
-tv      = tv(regopts.atlasaplims(1):regopts.atlasaplims(2), :, :);
-av      = av(regopts.atlasaplims(1):regopts.atlasaplims(2), :, :);
+atlas_opts = struct('brain_atlas', getOr(regopts, 'brain_atlas', 'allen'), ...
+    'atlas_dir', getOr(regopts, 'atlas_dir', []));
+atlas_cfg = resolveBrainAtlasConfig(atlas_opts);
+tv      = niftiread(atlas_cfg.template_path);
+av      = niftiread(atlas_cfg.annotation_path);
+if atlas_cfg.supports_parcellation
+    tv      = tv(regopts.atlasaplims(1):regopts.atlasaplims(2), :, :);
+    av      = av(regopts.atlasaplims(1):regopts.atlasaplims(2), :, :);
+end
 tvdown  = imresize3(tv, downfac_reg);
 avdown  = imresize3(av, downfac_reg, "Method", "nearest");
 

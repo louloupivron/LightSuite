@@ -73,21 +73,17 @@ switch mode
         
         downfac_reg = opts.atlasres/opts.registres;
         permute_sample_to_atlas = getOr(opts, 'permute_sample_to_atlas', [1 3 2]);
-        % Load Atlas (Standard Allen CCF Logic)
-        allen_atlas_path = fileparts(which('average_template_10.nii.gz'));
-        if isempty(allen_atlas_path)
-            error('No CCF atlas found (add CCF atlas to path)')
-        end
-        disp('Loading Allen CCF atlas...');
+        atlas_cfg = resolveBrainAtlasConfig(opts);
+        disp(['Loading brain atlas (' atlas_cfg.brain_atlas ')...']);
         
-        tv_raw = niftiread(fullfile(allen_atlas_path,'average_template_10.nii.gz'));
+        tv_raw = niftiread(atlas_cfg.template_path);
         gui_data.tv = imresize3(tv_raw, downfac_reg);
 
         % factv  = 255/single(max(tv_raw,[],"all"));
         factv = 255/single(max(gui_data.tv,[],"all"));
         gui_data.tv = uint8(single( gui_data.tv)*factv);
         
-        av_raw = niftiread(fullfile(allen_atlas_path,'annotation_10.nii.gz'));
+        av_raw = niftiread(atlas_cfg.annotation_path);
         gui_data.av = imresize3(av_raw, downfac_reg, "Method","nearest");
         
         gui_data.Rmoving = imref3d(size(gui_data.av));

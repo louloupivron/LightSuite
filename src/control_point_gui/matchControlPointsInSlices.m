@@ -6,17 +6,21 @@ gui_data = struct;
 opts.downfac_reg = opts.allenres/opts.registres;
 
 % Load atlas
-allen_atlas_path = fileparts(which('average_template_10.nii.gz'));
-if isempty(allen_atlas_path)
-    error('No CCF atlas found (add CCF atlas to path)')
+atlas_cfg = resolveBrainAtlasConfig(opts);
+disp(['Loading brain atlas (' atlas_cfg.brain_atlas ')...'])
+tv_full = niftiread(atlas_cfg.template_path);
+av_full = niftiread(atlas_cfg.annotation_path);
+if atlas_cfg.supports_parcellation
+    ap1 = opts.atlasaplims(1);
+    ap2 = opts.atlasaplims(2);
+else
+    ap1 = 1;
+    ap2 = size(tv_full, 1);
 end
-disp('Loading Allen CCF atlas...')
-gui_data.tv      = niftiread(fullfile(allen_atlas_path,'average_template_10.nii.gz'));
-factv            = 255/single(max(gui_data.tv,[],"all"));
-gui_data.tv      = uint8(single(gui_data.tv(opts.atlasaplims(1):opts.atlasaplims(2), :, :))*factv);
+factv            = 255/single(max(tv_full(ap1:ap2, :, :),[],"all"));
+gui_data.tv      = uint8(single(tv_full(ap1:ap2, :, :))*factv);
 gui_data.tv      = imresize3(gui_data.tv,opts.downfac_reg);
-gui_data.av      = niftiread(fullfile(allen_atlas_path,'annotation_10.nii.gz'));
-gui_data.av      = imresize3(gui_data.av(opts.atlasaplims(1):opts.atlasaplims(2), :, :),...
+gui_data.av      = imresize3(av_full(ap1:ap2, :, :),...
     opts.downfac_reg, "Method","nearest");
 disp('Done.')
 

@@ -2,6 +2,12 @@ function [medianoverareas, areaidx] = backSliceVolumeToAtlas(inputvolpath, trstr
 %UNTITLED Summary of this function goes here
 %   Detailed explanation goes here
 %--------------------------------------------------------------------------
+if isfield(trstruct, 'brain_atlas') && ~strcmpi(trstruct.brain_atlas, 'allen')
+    error('LightSuite:Atlas', ...
+        'backSliceVolumeToAtlas supports Allen parcellation only (brain_atlas=%s).', ...
+        trstruct.brain_atlas);
+end
+%--------------------------------------------------------------------------
 fprintf('Loading data in memory... '); tic;
 slicevol             = loadLargeSliceVolume(inputvolpath, 1);
 fprintf('Done! Took %2.2f s\n', toc); 
@@ -11,7 +17,9 @@ fprintf('Calculating background fluoresence in atlas coords... '); tic;
 
 allen_atlas_path = fileparts(which('annotation_10.nii.gz'));
 av               = niftiread(fullfile(allen_atlas_path, 'annotation_10.nii.gz'));
-av               = av(trstruct.atlasaplims(1):trstruct.atlasaplims(2), :, :);
+if isfield(trstruct, 'atlasaplims')
+    av           = av(trstruct.atlasaplims(1):trstruct.atlasaplims(2), :, :);
+end
 parcelinfo       = readtable(fullfile(allen_atlas_path, 'parcellation_to_parcellation_term_membership.csv'));
 areaidx          = unique(parcelinfo.parcellation_index);
 Ngroups          = numel(areaidx);

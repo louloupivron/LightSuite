@@ -21,6 +21,12 @@ if ~isempty(optsfile)
     opts = load(fullfile(optsfile.folder, optsfile.name));
     opts = opts.opts;
 end
+if ~isfield(opts, 'brain_atlas') || isempty(opts.brain_atlas)
+    opts.brain_atlas = 'allen';
+end
+if ~isfield(opts, 'atlas_dir')
+    opts.atlas_dir = [];
+end
 %==========================================================================
 if ~isempty(params.Volume)
     backvol = params.Volume;
@@ -29,8 +35,8 @@ else
 end
 downfac = opts.atlasres/opts.registres;
 %==========================================================================
-allen_atlas_path = fileparts(which('average_template_10.nii.gz'));
-tv               = niftiread(fullfile(allen_atlas_path,'average_template_10.nii.gz'));
+atlas_cfg = resolveBrainAtlasConfig(opts);
+tv               = niftiread(atlas_cfg.template_path);
 tvreg            = imresize3(tv, downfac);
 %==========================================================================
 bofile = fullfile(opts.savepath, 'brain_orientation.txt');
@@ -67,7 +73,7 @@ fprintf('Done! Took %2.1f s. Found %d points.\n', toc, ls_cloud.Count);
 %==========================================================================
 % load atlas and extract corresponding points
 fprintf('Loading atlas data and generating the atlas cloud... '); tic;
-av      = niftiread(fullfile(allen_atlas_path,'annotation_10.nii.gz'));
+av      = niftiread(atlas_cfg.annotation_path);
 avreg   = imresize3(av, downfac, 'Method','nearest');
 
 % tv_cloud = extractVolumePoints(tvreg, 15);
