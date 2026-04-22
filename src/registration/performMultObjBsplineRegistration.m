@@ -81,12 +81,14 @@ if dualMi
     w_sg = getOr(optsreg, 'dual_channel_mi_weight_signal', 0.5);
     params.Metric                      = {'AdvancedMattesMutualInformation', ...
         'AdvancedMattesMutualInformation', 'CorrespondingPointsEuclideanDistanceMetric'};
-    params.FixedImagePyramid           = {'FixedRecursiveImagePyramid', 'FixedRecursiveImagePyramid'};
-    params.MovingImagePyramid          = {'MovingRecursiveImagePyramid', 'MovingRecursiveImagePyramid'};
-    params.ImageSampler                = {'RandomCoordinate', 'RandomCoordinate'};
-    % One moving-image interpolator per image-based metric (Elastix 5.1:
-    % NumberOfMovingImagePyramids must not exceed NumberOfInterpolators).
-    params.Interpolator                = {'BSplineInterpolator', 'BSplineInterpolator'};
+    % Elastix 5.1 ITK: NumberOfInterpolators must be 1 or equal NumberOfMetrics (here 3).
+    % Moving pyramids must not exceed interpolators; use one chain per metric.
+    params.FixedImagePyramid           = {'FixedRecursiveImagePyramid', 'FixedRecursiveImagePyramid', ...
+        'FixedRecursiveImagePyramid'};
+    params.MovingImagePyramid          = {'MovingRecursiveImagePyramid', 'MovingRecursiveImagePyramid', ...
+        'MovingRecursiveImagePyramid'};
+    params.ImageSampler                = {'RandomCoordinate', 'RandomCoordinate', 'RandomCoordinate'};
+    params.Interpolator                = {'BSplineInterpolator', 'BSplineInterpolator', 'BSplineInterpolator'};
     params.Metric0Weight               = w_af;
     params.Metric1Weight               = w_sg;
     params.Metric2Weight               = cpwt;
