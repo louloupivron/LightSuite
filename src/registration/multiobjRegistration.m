@@ -18,6 +18,17 @@ regvolsize = size(volume);
 
 % we permute the volume to match atlas
 volume  = permuteBrainVolume(volume, regopts.permute_sample_to_atlas);
+volume_secondary = [];
+if isfield(opts, 'regvolpath_secondary') && ~isempty(opts.regvolpath_secondary)
+    dp2 = opts.regvolpath_secondary;
+    fprintf('Loading secondary registration channel from %s\n', dp2);
+    volume_secondary = readDownStack(dp2);
+    volume_secondary = permuteBrainVolume(volume_secondary, regopts.permute_sample_to_atlas);
+    assert(isequal(size(volume_secondary), size(volume)), ...
+        'LightSuite:multiobjRegistration:secondarySize', ...
+        'Secondary registration volume size [%s] must match primary [%s].', ...
+        mat2str(size(volume_secondary)), mat2str(size(volume)));
+end
 fprintf('Done! Took %2.2f s\n', toc);
 %==========================================================================
 % we load automated control points
@@ -110,9 +121,16 @@ end
 optsreg.usemultistep          = usemultistep;
 optsreg.cpwt                  = contol_point_wt;
 optsreg.bspline_spatial_scale = getOr(opts, 'bspline_spatial_scale', 0.64);
+optsreg.dual_channel_mi_weight_autofluor = getOr(opts, 'dual_channel_mi_weight_autofluor', 1.0);
+optsreg.dual_channel_mi_weight_signal    = getOr(opts, 'dual_channel_mi_weight_signal', 0.5);
 
-[reg, ~, bspltformpath, pathbspl] = performMultObjBsplineRegistration(tvaffine, volume, opts.registres*1e-3, ...
-    cpaffine, cptshistology, regopts.savepath, optsreg);
+if isempty(volume_secondary)
+    [reg, ~, bspltformpath, pathbspl] = performMultObjBsplineRegistration(tvaffine, volume, opts.registres*1e-3, ...
+        cpaffine, cptshistology, regopts.savepath, optsreg);
+else
+    [reg, ~, bspltformpath, pathbspl] = performMultObjBsplineRegistration(tvaffine, volume, opts.registres*1e-3, ...
+        cpaffine, cptshistology, regopts.savepath, optsreg, 'FixedSampleSecondary', volume_secondary);
+end
 
 avreg = transformAnnotationVolume(bspltformpath, avaffine, opts.registres*1e-3);
 %==========================================================================
@@ -145,6 +163,14 @@ params_pts_to_atlas.tform_bspline_samp20um_to_atlas_20um_px = tformpath;
 params_pts_to_atlas.tform_affine_samp20um_to_atlas_10um_px  = tform_aff.invert;
 params_pts_to_atlas.contol_pt_weight = contol_point_wt;
 params_pts_to_atlas.use_multistep    = usemultistep;
+params_pts_to_atlas.use_dual_channel_mi = ~isempty(volume_secondary);
+if params_pts_to_atlas.use_dual_channel_mi
+    params_pts_to_atlas.dual_channel_mi_weight_autofluor = optsreg.dual_channel_mi_weight_autofluor;
+    params_pts_to_atlas.dual_channel_mi_weight_signal    = optsreg.dual_channel_mi_weight_signal;
+    if isfield(opts, 'channelforregister_secondary') && ~isempty(opts.channelforregister_secondary)
+        params_pts_to_atlas.channelforregister_secondary = opts.channelforregister_secondary;
+    end
+end
 save(fullfile(opts.savepath, 'transform_params.mat'), '-struct', 'params_pts_to_atlas')
 %==========================================================================
 end

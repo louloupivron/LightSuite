@@ -1,65 +1,39 @@
 function [regimg,tform_bspline, tformpath, pathtemp] = performMultObjBsplineRegistration(movingvol,fixedvol,...
-    volscale, movingpts, fixedpts, savepath, optsreg)
-%UNTITLED Summary of this function goes here
-%   Detailed explanation goes here
+    volscale, movingpts, fixedpts, savepath, optsreg, varargin)
+%UNTITLED3 B-spline registration with elastix (single or dual sample-channel AMI).
+%
+%   Optional name-value pair:
+%     'FixedSampleSecondary' — second fixed image (e.g. fluorescent signal at the same
+%       grid as fixedvol). When provided, elastix uses two AdvancedMattesMutualInformation
+%       terms (shared moving atlas volume) plus the landmark metric, with weights
+%       dual_channel_mi_weight_autofluor, dual_channel_mi_weight_signal, and cpwt.
+%
+%   See also: multiobjRegistration, elastixDualFixedSameMovingBspline
+
 %==========================================================================
-usemultistep = getOr(optsreg, 'usemultistep', true);
-bspscale     = getOr(optsreg, 'bspline_spatial_scale', 0.64);
+ip = inputParser;
+ip.addParameter('FixedSampleSecondary', [], @(x) isempty(x) || isnumeric(x));
+ip.parse(varargin{:});
+fixedSecondary = ip.Results.FixedSampleSecondary;
+%==========================================================================
 cpwt         = getOr(optsreg, 'cpwt', 0.2);
 nhistbins    = getOr(optsreg, 'n_histogram_bins', 48);
 
-if isempty(movingpts) | isempty(fixedpts)
-	cpwt = 0;
+if isempty(movingpts) || isempty(fixedpts)
+    cpwt = 0;
 end
+
+dualMi = ~isempty(fixedSecondary);
+if dualMi
+    assert(isequal(size(fixedSecondary), size(fixedvol)), ...
+        'LightSuite:performMultObjBsplineRegistration:sizeMismatch', ...
+        'FixedSampleSecondary must match fixedvol size [%s], got [%s].', ...
+        mat2str(size(fixedvol)), mat2str(size(fixedSecondary)));
+end
+
+params = localBuildBsplineParams(optsreg, dualMi, cpwt, nhistbins, fixedvol, volscale);
+
 %==========================================================================
-addElastixRepoPaths;
-params = struct();
-%==========================================================================
-% general parameters, probably won't touch
-params.Registration                  = 'MultiMetricMultiResolutionRegistration';
-params.Metric                        = {'AdvancedMattesMutualInformation',...
-    'CorrespondingPointsEuclideanDistanceMetric'};
-params.Transform                       = 'RecursiveBSplineTransform';%'RecursiveBSplineTransform';
-params.Optimizer                       = 'AdaptiveStochasticGradientDescent';
-params.ImageSampler                    = 'RandomCoordinate';
-params.AutomaticParameterEstimation    = true;
-params.AutomaticScalesEstimation       = false;
-params.BSplineInterpolationOrder       = 3;
-params.FinalBSplineInterpolationOrder  = 3;
-params.FixedImageDimension             = 3;
-params.MovingImageDimension            = 3;
-params.FixedImagePyramid               = 'FixedRecursiveImagePyramid';
-params.MovingImagePyramid              = 'MovingRecursiveImagePyramid';
-params.UseRandomSampleRegion           = true;
-params.NewSamplesEveryIteration        = true;
-params.NumberOfResolutions             = 4;
-params.NumberOfHistogramBins           = nhistbins;
-params.SP_A                            = 20;
-%--------------------------------------------------------------------------
-% these may affect more
-params.MaximumNumberOfIterations       = [500  1000 1500 2000]; %1000; %[1000 1500 2000 2500]; %
-params.NumberOfSpatialSamples          = 5000;%[1000 1000 2000 2000];% [2000 2500 3000 3000];%
-params.Metric1Weight                   = cpwt; %cpwt;%[1  0.5 0.25 0.125] * cpwt; %
-params.Metric0Weight                   = 1.0;
-params.ImagePyramidSchedule            = [8*ones(1,3) 4*ones(1,3) 2*ones(1,3) 1*ones(1,3)];
-params.FinalGridSpacingInPhysicalUnits = bspscale*ones(1,3);
-% Elastix requires SampleRegionSize <= 1/3 of fixed image size (mm)
-fixed_size_mm     = size(fixedvol) .* volscale;
-max_sample_region = min(fixed_size_mm) / 3;
-if usemultistep
-    % for quite damaged brains
-    base_sizes = [4.5 4 3 2];
-else
-    % for the rest
-    base_sizes = [2];
-end
-base_sizes = min(base_sizes, max_sample_region);
-if usemultistep
-    params.SampleRegionSize = [base_sizes(1)*ones(1,3) base_sizes(2)*ones(1,3) base_sizes(3)*ones(1,3) base_sizes(4)*ones(1,3)];
-else
-    params.SampleRegionSize = base_sizes(1)*ones(1,3);
-end
-%--------------------------------------------------------------------------
 pathtemp = fullfile(savepath, 'elastix_temp');
 makeNewDir(pathtemp);
 
@@ -70,11 +44,21 @@ fixpath  = fullfile(pathtemp, 'fixed.txt');
 writePointsFile(movpath, (movingpts-1)*volscale)
 writePointsFile(fixpath, (fixedpts-1)*volscale)
 
-
+addElastixRepoPaths;
 fprintf('Performing B-spline registration with elastix...\n'); tic;
-[regimg,tform_bspline] = elastix(movingvol, fixedvol, pathtemp,'elastix_default.yml','paramstruct',params,...
-    'movingpoints', movpath,  'fixedpoints', fixpath,...
-    'movingscale', volscale*[1 1 1],  'fixedscale', volscale*[1 1 1]);
+if dualMi
+    fprintf(['Dual-channel MI: atlas moving vs fixed AF + fixed signal ', ...
+        '(weights AF=%.3g signal=%.3g landmarks=%.3g).\n'], ...
+        getOr(optsreg, 'dual_channel_mi_weight_autofluor', 1), ...
+        getOr(optsreg, 'dual_channel_mi_weight_signal', 0.5), ...
+        cpwt);
+    [regimg,tform_bspline] = elastixDualFixedSameMovingBspline(movingvol, fixedvol, fixedSecondary, ...
+        pathtemp, volscale, params, movpath, fixpath);
+else
+    [regimg,tform_bspline] = elastix(movingvol, fixedvol, pathtemp,'elastix_default.yml','paramstruct',params,...
+        'movingpoints', movpath,  'fixedpoints', fixpath,...
+        'movingscale', volscale*[1 1 1],  'fixedscale', volscale*[1 1 1]);
+end
 fprintf('Done! Took %2.2f s.\n', toc)
 
 % copy file and delete temporary folder
@@ -82,4 +66,66 @@ tformpath = fullfile(savepath, 'bspline_atlas_to_samp_20um.txt');
 copyfile(tform_bspline.TransformParametersFname{1}, tformpath)
 % rmdir(pathtemp, 's');
 %==========================================================================
+end
+
+%--------------------------------------------------------------------------
+function params = localBuildBsplineParams(optsreg, dualMi, cpwt, nhistbins, fixedvol, volscale)
+
+usemultistep = getOr(optsreg, 'usemultistep', true);
+bspscale     = getOr(optsreg, 'bspline_spatial_scale', 0.64);
+
+params = struct();
+params.Registration                  = 'MultiMetricMultiResolutionRegistration';
+if dualMi
+    w_af = getOr(optsreg, 'dual_channel_mi_weight_autofluor', 1.0);
+    w_sg = getOr(optsreg, 'dual_channel_mi_weight_signal', 0.5);
+    params.Metric                      = {'AdvancedMattesMutualInformation', ...
+        'AdvancedMattesMutualInformation', 'CorrespondingPointsEuclideanDistanceMetric'};
+    params.FixedImagePyramid           = {'FixedRecursiveImagePyramid', 'FixedRecursiveImagePyramid'};
+    params.MovingImagePyramid          = {'MovingRecursiveImagePyramid', 'MovingRecursiveImagePyramid'};
+    params.ImageSampler                = {'RandomCoordinate', 'RandomCoordinate'};
+    params.Metric0Weight               = w_af;
+    params.Metric1Weight               = w_sg;
+    params.Metric2Weight               = cpwt;
+else
+    params.Metric                      = {'AdvancedMattesMutualInformation', ...
+        'CorrespondingPointsEuclideanDistanceMetric'};
+    params.FixedImagePyramid           = 'FixedRecursiveImagePyramid';
+    params.MovingImagePyramid          = 'MovingRecursiveImagePyramid';
+    params.ImageSampler                = 'RandomCoordinate';
+    params.Metric1Weight                = cpwt;
+    params.Metric0Weight               = 1.0;
+end
+
+params.Transform                       = 'RecursiveBSplineTransform';
+params.Optimizer                       = 'AdaptiveStochasticGradientDescent';
+params.AutomaticParameterEstimation    = true;
+params.AutomaticScalesEstimation       = false;
+params.BSplineInterpolationOrder       = 3;
+params.FinalBSplineInterpolationOrder  = 3;
+params.FixedImageDimension             = 3;
+params.MovingImageDimension            = 3;
+params.UseRandomSampleRegion           = true;
+params.NewSamplesEveryIteration        = true;
+params.NumberOfResolutions             = 4;
+params.NumberOfHistogramBins           = nhistbins;
+params.SP_A                            = 20;
+params.MaximumNumberOfIterations       = [500  1000 1500 2000];
+params.NumberOfSpatialSamples          = 5000;
+params.ImagePyramidSchedule            = [8*ones(1,3) 4*ones(1,3) 2*ones(1,3) 1*ones(1,3)];
+params.FinalGridSpacingInPhysicalUnits   = bspscale*ones(1,3);
+
+fixed_size_mm     = size(fixedvol) .* volscale;
+max_sample_region = min(fixed_size_mm) / 3;
+if usemultistep
+    base_sizes = [4.5 4 3 2];
+else
+    base_sizes = [2];
+end
+base_sizes = min(base_sizes, max_sample_region);
+if usemultistep
+    params.SampleRegionSize = [base_sizes(1)*ones(1,3) base_sizes(2)*ones(1,3) base_sizes(3)*ones(1,3) base_sizes(4)*ones(1,3)];
+else
+    params.SampleRegionSize = base_sizes(1)*ones(1,3);
+end
 end

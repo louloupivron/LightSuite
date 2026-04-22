@@ -123,6 +123,16 @@ for ichannel = 1:opts.Nchans
     %----------------------------------------------------------------------
 end
 opts.regvolpath = regvolpaths{opts.channelforregister};
+ich2 = getOr(opts, 'channelforregister_secondary', []);
+if ~isempty(ich2)
+    assert(ich2 >= 1 && ich2 <= opts.Nchans && ich2 == round(ich2), ...
+        'channelforregister_secondary must be an integer channel index in 1..Nchans');
+    assert(ich2 ~= opts.channelforregister, ...
+        'channelforregister_secondary must differ from channelforregister');
+    opts.regvolpath_secondary = regvolpaths{ich2};
+elseif isfield(opts, 'regvolpath_secondary')
+    opts = rmfield(opts, 'regvolpath_secondary');
+end
 save(fullfile(opts.savepath, sprintf('regopts.mat')), 'opts')
 %--------------------------------------------------------------------------
 

@@ -25,7 +25,11 @@ opts.thres_cell_detect  = [0.5 0.4]; % thresholds for detecting cells relative t
 opts.channelforcells    = []; % channel to use for cell detection, leave empty ([]) for none
 opts.writetocsv         = false; % write cells to csv file
 %  registration
-opts.channelforregister = 1; % channel to use for registration
+opts.channelforregister = 1; % channel to use for registration (autofluorescence / structural)
+% Optional: second channel for dual-AMI B-spline (same Allen template, two sample contrasts)
+% opts.channelforregister_secondary = 2;
+% opts.dual_channel_mi_weight_autofluor = 1.0;
+% opts.dual_channel_mi_weight_signal    = 0.5;
 %--------------------------------------------------------------------------
 opts                   = readLightsheetOpts(opts);
 %=========================================================================
