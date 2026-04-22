@@ -40,7 +40,7 @@ end
 
 i0 = 0; itrack = 0; % counters
 cell_locations = nan(1e6, 5, 'single');
-nsigma         = prod(2*4*sigmause(1:2)+1);
+nsigma         = prod(2*ceil(4*sigmause(1:2))+1);
 if opts.savecellimages
     cell_images    = nan(1e6, nsigma, 'single');
 end

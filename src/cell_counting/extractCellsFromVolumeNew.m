@@ -28,7 +28,8 @@ end
 
 cellradius  = round(opts.celldiam/2.5);
 anisotropy  = min(opts.pxsize)./opts.pxsize;
-sigmause    = max(ceil(anisotropy.*cellradius/2), 2);
+sigmause    = max(anisotropy.*cellradius/2, 2);
+sigmauseim  = ceil(sigmause);
 voxelvolume = prod(opts.pxsize);
 %------------------------------------------------------------------------
 % let's figure out batches. TODO: make dependent on cell diameter
@@ -46,7 +47,7 @@ fid = fopen(opts.fproc,'r');
 
 i0 = 0; itrack = 0; % counters
 cell_locations = nan(1e6, 6, 'single');
-nsigma         = sum(prod(2*6*sigmause(nchoosek(1:3,2))+1,2));
+nsigma         = sum(prod(2*6*sigmauseim(nchoosek(1:3,2))+1,2));
 
 if opts.savecellimages
     cell_images    = nan(1e6, nsigma, 'single');
@@ -187,7 +188,7 @@ if isfield(opts, 'savepath')
         fsavename = fullfile(opts.savepath, sprintf('%scell_locations_sample.mat', opts.prefix));
         save(fsavename, 'cell_locations')
         if opts.savecellimages
-            imwindow = sigmause*6;
+            imwindow = sigmauseim*6;
             save(fsavename, 'cell_locations', 'cell_images', 'imwindow')
         end
         if writetocsv

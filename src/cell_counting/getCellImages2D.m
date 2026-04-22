@@ -2,6 +2,7 @@ function [cellimages] = getCellImages2D(volumeuse, cinfo, sigmause)
 %UNTITLED3 Summary of this function goes here
 %   Detailed explanation goes here
 
+sigmause = ceil(sigmause);
 dty = single(-sigmause(1):sigmause(1));
 dtx = single(-sigmause(2):sigmause(2));
 dtz = single(-sigmause(3):sigmause(3));
