@@ -5,12 +5,12 @@ opts = struct();
 % for naming
 opts.mousename  = 'Giulia';
 % change for the folder that contains stitched tiff files
-opts.datafolder = 'F:\Louis\mesoSPIM\Fanny\data';
+opts.datafolder = 'F:\Louis\mesoSPIM\Fanny\2515\LLS';
 opts.fproc      = fullfile('D:\DATA_LightSuite_Temp'); % where the processed volume is saved as a binary (fast SSD, at
 % least 500 GB), will be deleted
 parallel.gpu.enableCUDAForwardCompatibility(true)
 % path to save results
-opts.savepath   = fullfile(opts.datafolder, 'test_celldetection');
+opts.savepath   = fullfile(opts.datafolder, 'test');
 %--------------------------------------------------------------------------
 % some processing options
 opts.tifftype           = 'channelperfile'; % can be planeperfile or channelperfile
@@ -26,10 +26,7 @@ opts.channelforcells    = []; % channel to use for cell detection, leave empty (
 opts.writetocsv         = false; % write cells to csv file
 %  registration
 opts.channelforregister = 1; % channel to use for registration (autofluorescence / structural)
-% Optional: second channel for dual-AMI B-spline (same Allen template, two sample contrasts)
-% opts.channelforregister_secondary = 2;
-% opts.dual_channel_mi_weight_autofluor = 1.0;
-% opts.dual_channel_mi_weight_signal    = 0.5;
+opts.channelforregister_secondary = 2; % Optional: second channel for dual-AMI B-spline (same Allen template, two sample contrasts)
 %--------------------------------------------------------------------------
 opts                   = readLightsheetOpts(opts);
 %=========================================================================
@@ -56,6 +53,8 @@ end
 % options for registration
 opts.augmentpoints         = false; % whether to augment user-defined points with automatic ones
 opts.weight_usr_pts        = 0.2;   % weight of user-defined points for atlas fitting, set to zero for image-only information
+opts.dual_channel_mi_weight_autofluor = 0.4;
+opts.dual_channel_mi_weight_signal    = 0.4;
 opts.bspline_spatial_scale = 0.64;  % in mm, how much you allow the bspline to bend (smaller is higher, but more prone to noise)
 transform_params           = multiobjRegistration(opts, opts.weight_usr_pts, true);
 
