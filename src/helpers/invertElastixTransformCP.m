@@ -10,6 +10,8 @@ function stats = invertElastixTransformCP(transformDir, outputDir)
 %
 %   Forwards fixedscale/movingscale to elastix from ElementSpacing in the fixed MHD (same
 %   idea as performMultObjBsplineRegistration) so temporary MHDs are not written with zero spacing.
+%   If the parameter file includes CorrespondingPointsEuclideanDistanceMetric, passes
+%   fixed.txt / moving.txt from transformDir as fixedpoints/movingpoints (-fp/-mp).
 %
 %   See also: elastix, elastixDualFixedSameMovingBspline, clearElastixWorkspaceForNewRun
 
@@ -113,8 +115,24 @@ elseif numel(sp) > nd
     sp = sp(1:nd);
 end
 
-[~, stats] = elastix(fixedImage, fixedImage, outputDir, params, ...
-    't0', coefFiles, 'fixedscale', sp, 'movingscale', sp);
+% Multi-metric B-spline params (e.g. dual MI + landmarks) still include
+% CorrespondingPointsEuclideanDistanceMetric; elastix needs -fp/-mp for that slot.
+fixpath = fullfile(transformDir, 'fixed.txt');
+movpath = fullfile(transformDir, 'moving.txt');
+needsLandmarks = localParamFileNeedsLandmarks(params);
+if needsLandmarks && (exist(fixpath, 'file') ~= 2 || exist(movpath, 'file') ~= 2)
+    error('LightSuite:invertElastixTransformCP:LandmarkFilesMissing', ...
+        ['Parameter file uses CorrespondingPointsEuclideanDistanceMetric but ', ...
+        'fixed.txt / moving.txt were not found in %s. Keep elastix_temp until inversion finishes.'], ...
+        transformDir);
+end
+elastixArgs = {'t0', coefFiles, 'fixedscale', sp, 'movingscale', sp};
+if exist(fixpath, 'file') == 2 && exist(movpath, 'file') == 2
+    fprintf('Using landmark files: %s , %s\n', fixpath, movpath);
+    elastixArgs = [elastixArgs, {'fixedpoints', fixpath, 'movingpoints', movpath}];
+end
+
+[~, stats] = elastix(fixedImage, fixedImage, outputDir, params, elastixArgs{:});
 
 if ~isa(stats, 'struct') || ~isfield(stats, 'TransformParameters') || ...
         ~iscell(stats.TransformParameters) || isempty(stats.TransformParameters)
@@ -253,4 +271,20 @@ if isempty(nums) || any(~isfinite(nums)) || any(nums <= 0)
     return
 end
 sp = nums(:).';
+end
+
+%--------------------------------------------------------------------------
+function tf = localParamFileNeedsLandmarks(paramPaths)
+tf = false;
+for ii = 1:numel(paramPaths)
+    p = paramPaths{ii};
+    if exist(p, 'file') ~= 2
+        continue
+    end
+    t = fileread(p);
+    if contains(t, 'CorrespondingPointsEuclideanDistanceMetric')
+        tf = true;
+        return
+    end
+end
 end
