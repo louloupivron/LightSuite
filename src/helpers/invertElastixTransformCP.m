@@ -5,7 +5,8 @@ function stats = invertElastixTransformCP(transformDir, outputDir)
 %   parsing fixes for Elastix 5.1 logs: -f0 … -m0 with or without quotes (Windows logs),
 %   a single -p flag (quoted or not), deduplication of repeated -p lines, and no false
 %   matches on -fp / -mp. If the log omits the CLI, falls back to *_dual_f0.mhd in the
-%   same folder (LightSuite dual-channel temp layout).
+%   same folder (LightSuite dual-channel temp layout). Parameter file path can also be
+%   taken from elastix lines "end of ParameterFile: <path>".
 %
 %   See also: elastix, elastixDualFixedSameMovingBspline, clearElastixWorkspaceForNewRun
 
@@ -39,7 +40,7 @@ end
 paths = localParseParameterFilePaths(txt);
 if isempty(paths)
     error('LightSuite:invertElastixTransformCP:NoParams', ...
-        'Could not find -p parameter file path in %s', logFile);
+        ['Could not find parameter file path (-p or "end of ParameterFile:") in %s'], logFile);
 end
 params = unique(paths, 'stable');
 
@@ -136,15 +137,57 @@ end
 
 %--------------------------------------------------------------------------
 function paths = localParseParameterFilePaths(txt)
-% Quoted "-p ""...""", or unquoted -p F:\path\file.txt (not -fp / -mp).
-toks = regexp(txt, '(?<![fm])-p\s+(?:"([^"]+)"|(\S+))', 'tokens');
+% Elastix logs the parameter path after "end of ParameterFile:" even when the CLI is
+% not echoed. Also parse -p (quoted or unquoted); use separate single-capture regexes
+% because alternation token layouts differ across MATLAB releases.
 paths = {};
-for k = 1:numel(toks)
-    t = toks{k};
-    if ~isempty(t{1})
-        paths{end+1} = t{1}; %#ok<AGROW>
-    elseif numel(t) >= 2 && ~isempty(t{2})
-        paths{end+1} = t{2}; %#ok<AGROW>
+pfTok = [regexp(txt, 'end of ParameterFile:\s*([^\r\n]+)', 'tokens'), ...
+    regexp(txt, 'begin of ParameterFile:\s*([^\r\n]+)', 'tokens')];
+for k = 1:numel(pfTok)
+    t = pfTok{k};
+    p = localFirstNonemptyToken(t);
+    if isempty(p)
+        continue
+    end
+    p = strtrim(p);
+    p = regexprep(p, '\s*=+\s*$', '');
+    p = localStripOuterQuotes(p);
+    if ~isempty(p)
+        paths{end+1} = p; %#ok<AGROW>
+    end
+end
+% Quoted -p (not -fp / -mp)
+toksQ = regexp(txt, '(?<![fm])-p\s+"([^"]+)"', 'tokens');
+for k = 1:numel(toksQ)
+    p = localFirstNonemptyToken(toksQ{k});
+    if ~isempty(p)
+        paths{end+1} = p; %#ok<AGROW>
+    end
+end
+% Unquoted -p: next token must not start with " (those are handled above)
+toksU = regexp(txt, '(?<![fm])-p\s+(?!")(\S+)', 'tokens');
+for k = 1:numel(toksU)
+    p = localFirstNonemptyToken(toksU{k});
+    if isempty(p)
+        continue
+    end
+    p = localStripOuterQuotes(p);
+    if ~isempty(p)
+        paths{end+1} = p; %#ok<AGROW>
+    end
+end
+end
+
+%--------------------------------------------------------------------------
+function p = localFirstNonemptyToken(t)
+p = '';
+if isempty(t) || ~iscell(t)
+    return
+end
+for ii = 1:numel(t)
+    if ~isempty(t{ii})
+        p = t{ii};
+        return
     end
 end
 end
