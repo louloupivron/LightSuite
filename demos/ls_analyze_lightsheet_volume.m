@@ -1,3 +1,6 @@
+% Make sure which invertElastixTransformCP -all returns 
+% C:\Users\ALICE_lightsheet\Documents\LightSuite-feature-multi-channel-registration\src\helpers\invertElastixTransformCP.m
+% otherwise add to path 
 opts = struct();
 %=========================================================================
 % options to change
