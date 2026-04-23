@@ -8,6 +8,9 @@ function stats = invertElastixTransformCP(transformDir, outputDir)
 %   same folder (LightSuite dual-channel temp layout). Parameter file path can also be
 %   taken from elastix lines "end of ParameterFile: <path>".
 %
+%   Forwards fixedscale/movingscale to elastix from ElementSpacing in the fixed MHD (same
+%   idea as performMultObjBsplineRegistration) so temporary MHDs are not written with zero spacing.
+%
 %   See also: elastix, elastixDualFixedSameMovingBspline, clearElastixWorkspaceForNewRun
 
 % Based on Rob Campbell's invertElastixTransform (matlab_elastix), modified for LightSuite.
@@ -15,6 +18,8 @@ function stats = invertElastixTransformCP(transformDir, outputDir)
 if nargin < 2
     outputDir = [];
 end
+
+addElastixRepoPaths;
 
 logFile = fullfile(transformDir, 'elastix.log');
 if exist(logFile, 'file') ~= 2
@@ -88,7 +93,35 @@ end
 fprintf('\n');
 
 fixedImage = mhd_read(fixedFile);
-[~, stats] = elastix(fixedImage, fixedImage, outputDir, params, 't0', coefFiles);
+sp = localReadMhdElementSpacing(fixedFile);
+nd = ndims(fixedImage);
+if isempty(sp) || any(sp <= 0) || any(~isfinite(sp))
+    error('LightSuite:invertElastixTransformCP:BadSpacing', ...
+        ['Could not read positive ElementSpacing from %s. ', ...
+        'Inversion needs the same voxel spacing (mm) as the forward B-spline run.'], fixedFile);
+end
+sp = sp(:).';
+if numel(sp) < nd
+    if isscalar(sp)
+        sp = repmat(sp, 1, nd);
+    else
+        error('LightSuite:invertElastixTransformCP:SpacingDims', ...
+            'ElementSpacing in %s has %d values but image has %d dimensions.', ...
+            fixedFile, numel(sp), nd);
+    end
+elseif numel(sp) > nd
+    sp = sp(1:nd);
+end
+
+[~, stats] = elastix(fixedImage, fixedImage, outputDir, params, ...
+    't0', coefFiles, 'fixedscale', sp, 'movingscale', sp);
+
+if ~isa(stats, 'struct') || ~isfield(stats, 'TransformParameters') || ...
+        ~iscell(stats.TransformParameters) || isempty(stats.TransformParameters)
+    error('LightSuite:invertElastixTransformCP:ElastixFailed', ...
+        ['elastix inversion did not return TransformParameters. ', ...
+        'See elastix.log in %s and the elastix console output above.'], outputDir);
+end
 
 stats.TransformParameters{1}.InitialTransformParametersFileName = 'NoInitialTransform';
 end
@@ -190,4 +223,34 @@ for ii = 1:numel(t)
         return
     end
 end
+end
+
+%--------------------------------------------------------------------------
+function sp = localReadMhdElementSpacing(mhdPath)
+% Read ElementSpacing (or ElementSize) from an MHD header; values are in mm as written by mhd_write.
+sp = [];
+if exist(mhdPath, 'file') ~= 2
+    return
+end
+txt = fileread(mhdPath);
+tok = regexp(txt, '(?i)ElementSpacing\s*=\s*([^\r\n]+)', 'tokens', 'once');
+if isempty(tok)
+    tok = regexp(txt, '(?i)ElementSize\s*=\s*([^\r\n]+)', 'tokens', 'once');
+end
+if isempty(tok)
+    return
+end
+line = strtrim(tok{1});
+if contains(line, '#')
+    line = strtrim(strtok(line, '#'));
+end
+if contains(line, '%')
+    line = strtrim(strtok(line, '%'));
+end
+line = strrep(line, ',', ' ');
+nums = sscanf(line, '%f');
+if isempty(nums) || any(~isfinite(nums)) || any(nums <= 0)
+    return
+end
+sp = nums(:).';
 end
