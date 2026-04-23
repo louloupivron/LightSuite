@@ -6,19 +6,16 @@ function atlasNavigator
 gui_data = struct;
 
 % --- Load Atlas Data ---
-% Ensure the Allen CCF atlas files are in your MATLAB path.
-allen_atlas_path = fileparts(which('average_template_10.nii.gz'));
-if isempty(allen_atlas_path)
-    error('Allen CCF atlas not found. Please add the atlas to your MATLAB path.');
-end
+% Default: Allen CCF. Add that atlas folder to the MATLAB path (or set atlas_dir).
+atlas_cfg = resolveBrainAtlasConfig(struct('brain_atlas', 'allen'));
 
-disp('Loading Allen CCF atlas...');
+disp(['Loading brain atlas (' atlas_cfg.brain_atlas ')...']);
 % Load the average template and annotation volumes
 % Note: permute is used to make the AP axis the first dimension for consistency
 % with the original code's navigation logic.
-gui_data.tv = niftiread(fullfile(allen_atlas_path, 'average_template_10.nii.gz'));
+gui_data.tv = niftiread(atlas_cfg.template_path);
 gui_data.tv = imresize3(gui_data.tv, 0.5);
-gui_data.av = niftiread(fullfile(allen_atlas_path, 'annotation_10.nii.gz'));
+gui_data.av = niftiread(atlas_cfg.annotation_path);
 gui_data.av = imresize3(gui_data.av, 0.5, 'nearest');
 gui_data.tv = uint8(255*single(gui_data.tv)/single(quantile(gui_data.tv, 0.99, 'all')));
 disp('Atlas loaded.');

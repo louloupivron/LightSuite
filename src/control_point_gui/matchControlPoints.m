@@ -7,16 +7,13 @@ function matchControlPoints(opts)
 gui_data = struct;
 
 % Load atlas
-allen_atlas_path = fileparts(which('average_template_10.nii.gz'));
-if isempty(allen_atlas_path)
-    error('No CCF atlas found (add CCF atlas to path)')
-end
-disp('Loading Allen CCF atlas...')
-gui_data.tv = niftiread(fullfile(allen_atlas_path,'average_template_10.nii.gz'));
+atlas_cfg = resolveBrainAtlasConfig(opts);
+disp(['Loading brain atlas (' atlas_cfg.brain_atlas ')...'])
+gui_data.tv = niftiread(atlas_cfg.template_path);
 factv       = 255/single(max(gui_data.tv,[],"all"));
 gui_data.tv = uint8(single(gui_data.tv)*factv);
 gui_data.tv = imresize3(gui_data.tv,opts.downfac_reg);
-gui_data.av = niftiread(fullfile(allen_atlas_path,'annotation_10.nii.gz'));
+gui_data.av = niftiread(atlas_cfg.annotation_path);
 gui_data.av = imresize3(gui_data.av,opts.downfac_reg, "Method","nearest");
 gui_data.Rmoving  = imref3d(size(gui_data.av));
 disp('Done.')

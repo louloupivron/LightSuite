@@ -18,8 +18,10 @@ opts.savepath   = fullfile(opts.datafolder, 'test');
 % some processing options
 opts.tifftype           = 'channelperfile'; % can be planeperfile or channelperfile
 opts.pxsize             = [5.26 5.26 5]; % voxel size, xy and z, in um
-opts.atlasres           = 10; % better keep this fixed for highest resolution, in um
+opts.atlasres           = 10; % atlas isotropic voxel size in um (use 20 with opts.brain_atlas = 'perens')
 opts.registres          = 20; % resolution to do the nonrigid registration, keep fixed, in um
+% opts.brain_atlas      = 'perens'; % optional: Perens LSFM mouse atlas (folder on path with gubra_template_olf.nii.gz)
+% opts.atlas_dir        = '';      % optional: explicit atlas folder; if empty, which() finds the template
 % cell detection parameters
 opts.debug              = true; % toggle plotting (takes longer) for cell detections
 opts.savecellimages     = false; % toggle saving of individual cell images

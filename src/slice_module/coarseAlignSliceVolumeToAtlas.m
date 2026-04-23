@@ -6,17 +6,23 @@ rng(1);
 regopts.howtoperm = [3 1 2];
 regopts.procpath  = sliceinfo.procpath;
 regopts.registres = sliceinfo.px_register;
-regopts.allenres  = 10; % um
+regopts.allenres  = sliceinfo.px_atlas;
 [Nchan, Nslices]  = size(slicevol, [3 4]);
 pxthick           = sliceinfo.slicethickness/sliceinfo.px_register;
 %--------------------------------------------------------------------------
-fprintf('Loading and processing Allen Atlas template... '); tic;
-allen_atlas_path = fileparts(which('average_template_10.nii.gz'));
-tv               = niftiread(fullfile(allen_atlas_path,'average_template_10.nii.gz'));
-av               = niftiread(fullfile(allen_atlas_path,'annotation_10.nii.gz'));
+fprintf('Loading and processing brain atlas template... '); tic;
+atlas_opts = struct('brain_atlas', getOr(sliceinfo, 'brain_atlas', 'allen'), ...
+    'atlas_dir', getOr(sliceinfo, 'atlas_dir', []));
+atlas_cfg = resolveBrainAtlasConfig(atlas_opts);
+tv               = niftiread(atlas_cfg.template_path);
+av               = niftiread(atlas_cfg.annotation_path);
 tvreg            = imresize3(tv, regopts.allenres/sliceinfo.px_register);
 avreg            = imresize3(av, regopts.allenres/sliceinfo.px_register, "Method", "nearest", 'AntiAliasing',true);
-limskeep         = [55, size(tvreg, 1)-100]; % exclude cerebellum and olfactory
+if atlas_cfg.supports_parcellation
+    limskeep     = [55, size(tvreg, 1)-100]; % exclude cerebellum and olfactory (Allen AP)
+else
+    limskeep     = [1, size(tvreg, 1)];
+end
 tv_cloud         = extractHighSFVolumePoints(tvreg, sliceinfo.px_register, limskeep);
 Npts             = tv_cloud.Count;
 tv_cloud_use     = pcdownsample(tv_cloud,'random', 10000/Npts, 'PreserveStructure',true);
@@ -189,6 +195,10 @@ end
 
 regopts.tform_rigid_AllenToSample_20um = tformrigidfin;
 regopts.pxsizes                        = pxsizes;
+regopts.brain_atlas                    = atlas_cfg.brain_atlas;
+if isfield(sliceinfo, 'atlas_dir') && ~isempty(sliceinfo.atlas_dir)
+    regopts.atlas_dir = sliceinfo.atlas_dir;
+end
 save(fullfile(sliceinfo.procpath, 'regopts.mat'), '-struct', 'regopts')
 %--------------------------------------------------------------------------
 fprintf('Done! Took %2.2f s\n', toc); 

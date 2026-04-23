@@ -2,6 +2,12 @@ function [medianoverareas, areaidx] = backVolumeToAtlas(inputvol, trstruct)
 %UNTITLED Summary of this function goes here
 %   Detailed explanation goes here
 %--------------------------------------------------------------------------
+if isfield(trstruct, 'brain_atlas') && ~strcmpi(trstruct.brain_atlas, 'allen')
+    error('LightSuite:Atlas', ...
+        'backVolumeToAtlas supports Allen parcellation only (brain_atlas=%s).', ...
+        trstruct.brain_atlas);
+end
+%--------------------------------------------------------------------------
 registeredvolume = atlasSpaceFromVolumeParams(inputvol, trstruct);
 %--------------------------------------------------------------------------
 % we reduce the signal to atlas areas
