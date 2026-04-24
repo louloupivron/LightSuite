@@ -1,10 +1,28 @@
 function cfg = resolveBrainAtlasConfig(opts)
 %RESOLVEBRAINATLASCONFIG Resolve brain atlas folder and NIfTI paths from opts.
 %
-%   opts.brain_atlas - 'allen' (default) or 'perens'. Allen uses the Allen CCF
-%                      v3 10 um template and annotation. Perens uses the
-%                      Gubra LSFM mouse atlas (native space, 20 um isotropic
-%                      in the packaged volumes).
+%   opts.brain_atlas - Atlas id (default 'allen'):
+%       'allen'        - Allen CCF v3 (10 um): average_template_10.nii.gz,
+%                        annotation_10.nii.gz
+%       'perens'       - Perens et al. ~2020 / Gubra LSFM mouse brain atlas
+%                        (20 um, orientation ial in BrainGlobe packaging):
+%                        gubra_template_olf.nii.gz, gubra_ano_olf.nii.gz
+%       'perens2023'   - Perens et al. 2023 multimodal atlas, LSFM modality only
+%                        (25 um, orientation lai): lsfm_temp.nii.gz,
+%                        lsfm_ano.nii.gz — volumes from the archive subfolder
+%                        Multimodal_mouse_brain_atlas_files/LSFM_space_oriented/
+%                        (see perens_multimodal_lsfm BrainGlobe packager).
+%
+%   LSFM component (2023): The multimodal release includes several spaces; the
+%   LSFM_space_oriented pair is the template and parcellation in the coordinate
+%   frame of the LSFM-based reference (distinct from MRI etc. in the same
+%   package). Structure IDs follow the Allen ontology (via brainglobe_atlasapi
+%   allen_mouse_25um in the packager), but voxel geometry differs from Allen CCF
+%   and from the 2020 Gubra LSFM atlas — it is not a drop-in replacement for
+%   opts.brain_atlas='perens': use opts.atlasres matching the atlas (20 vs 25),
+%   re-run orientation and registration; do not reuse transform_params from the
+%   other Perens edition.
+%
 %   opts.atlas_dir   - Optional char/string. Folder that contains the template
 %                      and annotation files for the selected atlas. If empty,
 %                      the folder is found via which() on the template filename
@@ -18,7 +36,7 @@ if nargin < 1 || isempty(opts)
 end
 
 brain_atlas = lower(strtrim(char(getOr(opts, 'brain_atlas', 'allen'))));
-valid = {'allen', 'perens'};
+valid = {'allen', 'perens', 'perens2023'};
 assert(any(strcmp(brain_atlas, valid)), ...
     'LightSuite:BrainAtlas', ...
     'opts.brain_atlas must be one of: %s (got "%s").', ...
@@ -31,6 +49,9 @@ switch brain_atlas
     case 'perens'
         tpl = 'gubra_template_olf.nii.gz';
         ann = 'gubra_ano_olf.nii.gz';
+    case 'perens2023'
+        tpl = 'lsfm_temp.nii.gz';
+        ann = 'lsfm_ano.nii.gz';
 end
 
 if isfield(opts, 'atlas_dir') && ~isempty(opts.atlas_dir)

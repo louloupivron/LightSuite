@@ -87,8 +87,8 @@ if ~isfield(opts, 'brain_atlas') || isempty(opts.brain_atlas)
 else
     opts.brain_atlas = lower(strtrim(char(opts.brain_atlas)));
 end
-assert(any(strcmp(opts.brain_atlas, {'allen', 'perens'})), ...
-    'opts.brain_atlas must be ''allen'' or ''perens''.');
+assert(any(strcmp(opts.brain_atlas, {'allen', 'perens', 'perens2023'})), ...
+    'opts.brain_atlas must be ''allen'', ''perens'', or ''perens2023''.');
 if ~isfield(opts, 'atlas_dir')
     opts.atlas_dir = [];
 end

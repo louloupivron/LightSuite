@@ -79,10 +79,17 @@ for irepofile = 1:numel(reporelatedfiles)
 end
 hasperens = which('gubra_template_olf.nii.gz');
 if isempty(hasperens)
-    fprintf(['Optional Perens LSFM atlas (gubra_template_olf.nii.gz) not on path; ' ...
-        'set opts.brain_atlas=''perens'' only after adding that atlas folder.\n']);
+    fprintf(['Optional Perens 2020/Gubra LSFM atlas (gubra_template_olf.nii.gz) not on path; ' ...
+        'add folder before opts.brain_atlas=''perens''.\n']);
 else
-    fprintf('Found optional Perens LSFM atlas in %s\n', fileparts(hasperens));
+    fprintf('Found optional Perens 2020 LSFM atlas in %s\n', fileparts(hasperens));
+end
+hasperens23 = which('lsfm_temp.nii.gz');
+if isempty(hasperens23)
+    fprintf(['Optional Perens 2023 multimodal LSFM (lsfm_temp.nii.gz) not on path; ' ...
+        'copy LSFM_space_oriented/*.nii.gz from the neuropedia 7z before opts.brain_atlas=''perens2023''.\n']);
+else
+    fprintf('Found optional Perens 2023 LSFM atlas in %s\n', fileparts(hasperens23));
 end
 
 %==========================================================================
