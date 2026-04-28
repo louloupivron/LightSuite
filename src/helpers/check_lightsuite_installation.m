@@ -84,12 +84,5 @@ if isempty(hasperens)
 else
     fprintf('Found optional Perens 2020 LSFM atlas in %s\n', fileparts(hasperens));
 end
-hasperens23 = which('lsfm_temp.nii.gz');
-if isempty(hasperens23)
-    fprintf(['Optional Perens 2023 multimodal LSFM (lsfm_temp.nii.gz) not on path; ' ...
-        'copy LSFM_space_oriented/*.nii.gz from the neuropedia 7z before opts.brain_atlas=''perens2023''.\n']);
-else
-    fprintf('Found optional Perens 2023 LSFM atlas in %s\n', fileparts(hasperens23));
-end
 
 %==========================================================================
