@@ -20,9 +20,10 @@ opts.tifftype           = 'channelperfile'; % can be planeperfile or channelperf
 opts.pxsize             = [5.26 5.26 5]; % voxel size, xy and z, in um
 opts.atlasres           = 10; % atlas isotropic voxel size in um (20 for perens, 25 for perens2023)
 opts.registres          = 20; % resolution to do the nonrigid registration, keep fixed, in um
-% opts.brain_atlas      = 'perens';    % optional: Perens 2020 Gubra LSFM (gubra_template_olf.nii.gz + gubra_ano_olf.nii.gz)
+% opts.brain_atlas      = 'perens'; % optional: Perens 2020 Gubra LSFM (gubra NIfTIs + ARA2_annotation_info_avail_regions.csv)
 % opts.brain_atlas      = 'perens2023'; % optional: Perens 2023 multimodal LSFM only (lsfm_temp.nii.gz + lsfm_ano.nii.gz from LSFM_space_oriented/)
 % opts.atlas_dir        = '';      % optional: explicit atlas folder; if empty, which() finds the template
+% opts.perens_ml_axis   = 2;       % optional (Perens only): atlas axis (1–3) for left/right split plane via COM
 % cell detection parameters
 opts.debug              = true; % toggle plotting (takes longer) for cell detections
 opts.savecellimages     = false; % toggle saving of individual cell images

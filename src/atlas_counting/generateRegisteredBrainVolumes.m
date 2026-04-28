@@ -21,6 +21,10 @@ function allmedians = generateRegisteredBrainVolumes(savepath, varargin)
 %       saveregisteredvolume - (logical) If true, saves the registered volume 
 %                              stack. [Defaults to opts.saveregisteredvol or false]
 %
+%   Parcellation (loaded from regopts.mat): Allen uses parcellation membership CSV.
+%   Perens requires ARA2_annotation_info_avail_regions.csv beside the NIfTIs in
+%   opts.atlas_dir; hemisphere split uses opts.perens_ml_axis (default 2) at COM.
+%
 %   Outputs:
 %       allmedians           - (single) Ngroups x 2 x Nchans array containing 
 %                              median intensities over brain areas and
@@ -106,7 +110,7 @@ end
 %==========================================================================
 fprintf('Calculating background fluoresence in atlas coords...\n'); proctic = tic;
 
-if atlas_cfg.supports_parcellation
+if strcmp(atlas_cfg.brain_atlas, 'allen') && atlas_cfg.supports_parcellation
     av                      = niftiread(atlas_cfg.annotation_path);
     allen_atlas_parcel_path = fileparts(which('parcellation_to_parcellation_term_membership.csv'));
 
@@ -172,8 +176,124 @@ if atlas_cfg.supports_parcellation
         fprintf('Channel %d/%d done. Time %2.2f s. \n', ichan, opts.Nchans, toc(proctic));
         %--------------------------------------------------------------------------
     end
+
+elseif strcmp(atlas_cfg.brain_atlas, 'perens') && atlas_cfg.supports_parcellation
+    % Perens LSFM: ARA-style label IDs (sparse large integers); hemisphere split by ML plane
+    % through COM (opts.perens_ml_axis), not Allen-style Z-slabs (see resolveBrainAtlasConfig).
+    av = niftiread(atlas_cfg.annotation_path);
+    assert(isequal(size(av), trstruct.atlassize), 'LightSuite:PerensParcel', ...
+        'Annotation volume size %s must match transform_params.atlassize %s.', ...
+        mat2str(size(av)), mat2str(trstruct.atlassize));
+
+    stTab = readtable(atlas_cfg.structures_csv_path);
+    areaidx = stTab.id(:);
+    Ngroups = numel(areaidx);
+
+    ml_axis = double(getOr(opts, 'perens_ml_axis', 2));
+    assert(ml_axis >= 1 && ml_axis <= 3 && ml_axis == floor(ml_axis), ...
+        'LightSuite:PerensParcel', 'opts.perens_ml_axis must be 1, 2, or 3 (got %g).', ml_axis);
+
+    sz = size(av);
+    brain = av > 0;
+    switch ml_axis
+        case 1
+            coord = repmat(single((1:sz(1))'), [1, sz(2), sz(3)]);
+        case 2
+            coord = repmat(single(1:sz(2)), [sz(1), 1, sz(3)]);
+        otherwise
+            coord = repmat(reshape(single(1:sz(3)), [1, 1, sz(3)]), [sz(1), sz(2), 1]);
+    end
+    split_plane = round(mean(coord(brain)));
+    sideLower = coord <= split_plane & brain;
+    sideUpper = coord > split_plane & brain;
+
+    fprintf(['Perens parcellation: ML split along axis %d at plane %d (lower idx = Right slot, ' ...
+        'higher = Left slot; compare Allen orientation before Brainglobe export).\n'], ...
+        ml_axis, split_plane);
+
+    parent_acronym = cell(Ngroups, 1);
+    id_col = double(stTab.id(:));
+    pid_col = stTab.parent_id(:);
+    acr_raw = stTab.acronym;
+
+    for g = 1:Ngroups
+        pid = pid_col(g);
+        if isempty(pid) || (isnumeric(pid) && isnan(double(pid)))
+            parent_acronym{g} = '';
+            continue
+        end
+        ix = find(id_col == double(pid), 1);
+        if isempty(ix)
+            parent_acronym{g} = '';
+        else
+            parent_acronym{g} = char(acr_raw(ix));
+        end
+    end
+
+    acronyms_cell = cellstr(stTab.acronym);
+    structure_names = cellstr(stTab.name);
+
+    voxel_mm3 = (opts.atlasres * 1e-3)^3;
+    allmedians = nan(Ngroups, 2, opts.Nchans, 'single');
+
+    for ichan = 1:opts.Nchans
+        medianoverareas = nan(Ngroups, 2, 'single');
+        volumeoverareas = nan(Ngroups, 2, 'single');
+        sv = straightvol(:, :, :, ichan);
+
+        for iside = 1:2
+            if iside == 1
+                sm = sideLower;
+            else
+                sm = sideUpper;
+            end
+            lab = av(sm);
+            vals = double(sv(sm));
+            mask = lab > 0;
+            lab = lab(mask);
+            vals = vals(mask);
+            if isempty(lab)
+                continue
+            end
+            [G, uids] = findgroups(lab);
+            meds = splitapply(@median, vals, G);
+            nvox_per = splitapply(@numel, vals, G);
+            for k = 1:numel(uids)
+                row = find(areaidx == uids(k), 1);
+                if isempty(row)
+                    continue
+                end
+                medianoverareas(row, iside) = single(meds(k));
+                volumeoverareas(row, iside) = nvox_per(k) * voxel_mm3;
+            end
+        end
+
+        allmedians(:, :, ichan) = medianoverareas;
+
+        fmatname = fullfile(registerpath, sprintf('chan%02d_intensities.mat', ichan));
+        save(fmatname, 'medianoverareas', 'areaidx', 'volumeoverareas')
+
+        if writetocsv
+            currtable = array2table([double(areaidx), medianoverareas, volumeoverareas], ...
+                'VariableNames', ...
+                {'parcellation_index', ...
+                'RightSideIntensity', 'LeftSideIntensity', ...
+                'RightSideVolume[mm3]', 'LeftSideVolume[mm3]'});
+            currtable = addvars(currtable, acronyms_cell, structure_names, ...
+                parent_acronym, ...
+                'NewVariableNames', {'name', 'structure', 'division'}, 'Before', 'parcellation_index');
+            fsavename = fullfile(registerpath, sprintf('chan%02d_intensities.csv', ichan));
+            writetable(currtable, fsavename)
+        end
+        fprintf('Channel %d/%d done (Perens). Time %2.2f s. \n', ichan, opts.Nchans, toc(proctic));
+    end
+
+elseif strcmp(atlas_cfg.brain_atlas, 'perens') && isempty(atlas_cfg.structures_csv_path)
+    fprintf(['Skipping Perens parcellation: ARA2_annotation_info_avail_regions.csv not found ' ...
+        'in atlas dir %s\n'], atlas_cfg.atlas_dir);
+    allmedians = [];
 else
-    fprintf(['Skipping Allen-only intensity parcellation (brain_atlas=%s). ' ...
+    fprintf(['Skipping intensity parcellation (brain_atlas=%s). ' ...
         'Registered volumes were still saved if requested.\n'], atlas_cfg.brain_atlas);
     allmedians = [];
 end

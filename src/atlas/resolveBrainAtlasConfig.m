@@ -27,9 +27,12 @@ function cfg = resolveBrainAtlasConfig(opts)
 %                      and annotation files for the selected atlas. If empty,
 %                      the folder is found via which() on the template filename
 %                      (add that atlas directory to the MATLAB path).
+%                      For split Gubra layouts (template under LSFM_atlas_files/perens/),
+%                      copy both NIfTIs into one folder or use FINDLSFMATLASNIFTIS.
 %
 %   Output cfg fields: brain_atlas, atlas_dir, template_path, annotation_path,
-%   template_file, annotation_file, supports_parcellation (true only for Allen).
+%   template_file, annotation_file, structures_csv_path (Perens: ARA2 CSV if present),
+%   supports_parcellation (Allen always; Perens when ARA2 CSV is next to the NIfTIs).
 
 if nargin < 1 || isempty(opts)
     opts = struct();
@@ -76,5 +79,15 @@ cfg.template_file = tpl;
 cfg.annotation_file = ann;
 cfg.template_path = fullfile(atlas_dir, tpl);
 cfg.annotation_path = fullfile(atlas_dir, ann);
-cfg.supports_parcellation = strcmp(brain_atlas, 'allen');
+
+cfg.structures_csv_path = '';
+if strcmp(brain_atlas, 'perens')
+    cf = fullfile(atlas_dir, 'ARA2_annotation_info_avail_regions.csv');
+    if isfile(cf)
+        cfg.structures_csv_path = cf;
+    end
+end
+
+cfg.supports_parcellation = strcmp(brain_atlas, 'allen') ...
+    || (strcmp(brain_atlas, 'perens') && ~isempty(cfg.structures_csv_path));
 end

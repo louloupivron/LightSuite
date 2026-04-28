@@ -1,3 +1,8 @@
+scripts/lsfm_atlas_inspect/.venv/
+scripts/lsfm_atlas_inspect/lsfm_atlas_inspect_out/
+
+.DS_Store
+
 *.asv
 script_analyze_slices.m
 script_analyze_slices_in_batch.m

@@ -1,0 +1,14 @@
+[project]
+name = "lsfm-atlas-inspect"
+version = "0.1.0"
+description = "Debug plots and stats for Gubra LSFM mouse brain atlas files"
+requires-python = ">=3.10"
+dependencies = [
+    "nibabel>=5.0",
+    "numpy>=1.24",
+    "matplotlib>=3.7",
+    "pandas>=2.0",
+]
+
+[tool.uv]
+package = false
