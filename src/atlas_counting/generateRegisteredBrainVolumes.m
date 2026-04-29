@@ -28,7 +28,7 @@ function allmedians = generateRegisteredBrainVolumes(savepath, varargin)
 %   Outputs:
 %       allmedians           - (single) Ngroups x 2 x Nchans array containing 
 %                              median intensities over brain areas and
-%                              hemispheres.
+%                              hemispheres (per-region std: chan*intensities.mat stdoverareas).
 %--------------------------------------------------------------------------
 % 1. Load configuration and transforms
 %--------------------------------------------------------------------------
@@ -133,6 +133,7 @@ if strcmp(atlas_cfg.brain_atlas, 'allen') && atlas_cfg.supports_parcellation
     for ichan = 1:opts.Nchans
 
         medianoverareas  = nan(Ngroups, 2, 'single');
+        stdoverareas     = nan(Ngroups, 2, 'single');
         volumeoverareas  = nan(Ngroups, 2, 'single');
         for iside = 1:2
             istart = (iside - 1) * Npxlr + 1;
@@ -144,6 +145,9 @@ if strcmp(atlas_cfg.brain_atlas, 'allen') && atlas_cfg.supports_parcellation
             medareas  = single(accumarray(sideav(ikeep)+1, sidevals(ikeep), [Nforaccum 1], @median));
             medareas  = medareas(areaidx+1);
 
+            stdareas  = single(accumarray(sideav(ikeep)+1, double(sidevals(ikeep)), [Nforaccum 1], @localStdPerVoxelGroup));
+            stdareas  = stdareas(areaidx+1);
+
             volareas  = accumarray(sideav+1, 1, [Nforaccum 1], @sum);
             volareas  = volareas(areaidx+1);
             volumeoverareas(:, iside) = volareas * (opts.atlasres*1e-3)^3;
@@ -152,20 +156,30 @@ if strcmp(atlas_cfg.brain_atlas, 'allen') && atlas_cfg.supports_parcellation
             backlevel                 = single(median(sidevals(~ikeep)));
             medareas(areaidx == 0)    = backlevel;
             medianoverareas(:, iside) = medareas;
+
+            bg = double(sidevals(~ikeep));
+            if numel(bg) < 2
+                backstd = single(0);
+            else
+                backstd = single(std(bg, 0, 1));
+            end
+            stdareas(areaidx == 0) = backstd;
+            stdoverareas(:, iside) = stdareas;
         end
 
         allmedians(:, :, ichan) = medianoverareas;
 
         % save as mat file for later processing
         fmatname  = fullfile(registerpath, sprintf('chan%02d_intensities.mat', ichan));
-        save(fmatname, 'medianoverareas', 'areaidx', 'volumeoverareas')
+        save(fmatname, 'medianoverareas', 'stdoverareas', 'areaidx', 'volumeoverareas')
 
         % save as csv if asked
         if writetocsv
-            currtable = array2table([areaidx medianoverareas volumeoverareas], ...
+            currtable = array2table([areaidx, medianoverareas, stdoverareas, volumeoverareas], ...
                 'VariableNames',...
                 {'parcellation_index', ...
-                'RightSideIntensity', 'LeftSideIntensity',...
+                'RightSideIntensity', 'LeftSideIntensity', ...
+                'RightSideIntensityStd', 'LeftSideIntensityStd', ...
                  'RightSideVolume[mm3]', 'LeftSideVolume[mm3]'});
             currtable = addvars(currtable, namessub(ib), namesstruct(ibstr),  namesdiv(ibdiv),...
                 'NewVariableNames',{'name', 'structure', 'division'},'Before','parcellation_index');
@@ -238,6 +252,7 @@ elseif strcmp(atlas_cfg.brain_atlas, 'perens') && atlas_cfg.supports_parcellatio
 
     for ichan = 1:opts.Nchans
         medianoverareas = nan(Ngroups, 2, 'single');
+        stdoverareas = nan(Ngroups, 2, 'single');
         volumeoverareas = nan(Ngroups, 2, 'single');
         sv = straightvol(:, :, :, ichan);
 
@@ -257,6 +272,7 @@ elseif strcmp(atlas_cfg.brain_atlas, 'perens') && atlas_cfg.supports_parcellatio
             end
             [G, uids] = findgroups(lab);
             meds = splitapply(@median, vals, G);
+            stds = splitapply(@localStdPerVoxelGroup, vals, G);
             nvox_per = splitapply(@numel, vals, G);
             for k = 1:numel(uids)
                 row = find(areaidx == uids(k), 1);
@@ -264,6 +280,7 @@ elseif strcmp(atlas_cfg.brain_atlas, 'perens') && atlas_cfg.supports_parcellatio
                     continue
                 end
                 medianoverareas(row, iside) = single(meds(k));
+                stdoverareas(row, iside) = single(stds(k));
                 volumeoverareas(row, iside) = nvox_per(k) * voxel_mm3;
             end
         end
@@ -271,13 +288,14 @@ elseif strcmp(atlas_cfg.brain_atlas, 'perens') && atlas_cfg.supports_parcellatio
         allmedians(:, :, ichan) = medianoverareas;
 
         fmatname = fullfile(registerpath, sprintf('chan%02d_intensities.mat', ichan));
-        save(fmatname, 'medianoverareas', 'areaidx', 'volumeoverareas')
+        save(fmatname, 'medianoverareas', 'stdoverareas', 'areaidx', 'volumeoverareas')
 
         if writetocsv
-            currtable = array2table([double(areaidx), medianoverareas, volumeoverareas], ...
+            currtable = array2table([double(areaidx), medianoverareas, stdoverareas, volumeoverareas], ...
                 'VariableNames', ...
                 {'parcellation_index', ...
                 'RightSideIntensity', 'LeftSideIntensity', ...
+                'RightSideIntensityStd', 'LeftSideIntensityStd', ...
                 'RightSideVolume[mm3]', 'LeftSideVolume[mm3]'});
             currtable = addvars(currtable, acronyms_cell, structure_names, ...
                 parent_acronym, ...
@@ -298,4 +316,14 @@ else
     allmedians = [];
 end
 %==========================================================================
+end
+
+function s = localStdPerVoxelGroup(v)
+% Sample std of voxel intensities in one region; 0 if fewer than 2 voxels (MATLAB std is NaN for n=1).
+v = double(v(:));
+if numel(v) < 2
+    s = single(0);
+else
+    s = single(std(v, 0, 1));
+end
 end

@@ -173,11 +173,11 @@ This stage refines the alignment further using your control points and a deforma
 Applies the registration to all channels and computes regional statistics:
 
 * Warps each channel's registration volume into 10 µm Allen Atlas space using the B-spline transform.
-* For each brain region and hemisphere, computes the **median signal intensity** and **volume in mm³**.
+* For each brain region and hemisphere, computes the **median signal intensity**, **sample standard deviation of voxel intensities** (0 when fewer than two voxels in the region), and **volume in mm³**.
 
 **Outputs** (in `volume_registered/`):
-* `chan0X_intensities.mat` — median intensity and volume per region, per hemisphere
-* `chan0X_intensities.csv` — same data as a table (if `writetocsv = true`), with columns: `name`, `structure`, `division`, `parcellation_index`, `RightIntensity`, `LeftIntensity`, `RightVolume[mm3]`, `LeftVolume[mm3]`
+* `chan0X_intensities.mat` — `medianoverareas`, `stdoverareas`, `volumeoverareas`, `areaidx` per hemisphere
+* `chan0X_intensities.csv` — same data as a table (if `writetocsv = true`), with columns: `name`, `structure`, `division`, `parcellation_index`, `RightSideIntensity`, `LeftSideIntensity`, `RightSideIntensityStd`, `LeftSideIntensityStd`, `RightSideVolume[mm3]`, `LeftSideVolume[mm3]`
 
 ---
 
