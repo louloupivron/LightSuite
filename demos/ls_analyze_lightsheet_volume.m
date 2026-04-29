@@ -59,8 +59,8 @@ end
 % options for registration
 opts.augmentpoints         = false; % whether to augment user-defined points with automatic ones
 opts.weight_usr_pts        = 0.2;   % weight of user-defined points for atlas fitting, set to zero for image-only information
-opts.dual_channel_mi_weight_autofluor = 0.4;
-opts.dual_channel_mi_weight_signal    = 0.4;
+opts.dual_channel_mi_weight_autofluor = 0.3;
+opts.dual_channel_mi_weight_signal    = 0.7s;
 opts.bspline_spatial_scale = 0.64;  % in mm, how much you allow the bspline to bend (smaller is higher, but more prone to noise)
 transform_params           = multiobjRegistration(opts, opts.weight_usr_pts, true);
 

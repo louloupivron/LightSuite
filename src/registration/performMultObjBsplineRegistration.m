@@ -16,8 +16,8 @@ ip.addParameter('FixedSampleSecondary', [], @(x) isempty(x) || isnumeric(x));
 ip.parse(varargin{:});
 fixedSecondary = ip.Results.FixedSampleSecondary;
 %==========================================================================
-cpwt         = getOr(optsreg, 'cpwt', 0.2);
-nhistbins    = getOr(optsreg, 'n_histogram_bins', 48);
+cpwt         = getOr(optsreg, 'cpwt', 0.3);
+nhistbins    = getOr(optsreg, 'n_histogram_bins', 88);
 
 if isempty(movingpts) || isempty(fixedpts)
     cpwt = 0;
@@ -78,8 +78,8 @@ bspscale     = getOr(optsreg, 'bspline_spatial_scale', 0.64);
 params = struct();
 params.Registration                  = 'MultiMetricMultiResolutionRegistration';
 if dualMi
-    w_af = getOr(optsreg, 'dual_channel_mi_weight_autofluor', 1.0);
-    w_sg = getOr(optsreg, 'dual_channel_mi_weight_signal', 0.5);
+    w_af = getOr(optsreg, 'dual_channel_mi_weight_autofluor', 0.5);
+    w_sg = getOr(optsreg, 'dual_channel_mi_weight_signal', 1.0);
     params.Metric                      = {'AdvancedMattesMutualInformation', ...
         'AdvancedMattesMutualInformation', 'CorrespondingPointsEuclideanDistanceMetric'};
     % Elastix 5.1 ITK: counts of pyramids / samplers / interpolators must be 1 or equal

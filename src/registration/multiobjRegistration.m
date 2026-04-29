@@ -121,9 +121,9 @@ end
 optsreg.usemultistep          = usemultistep;
 optsreg.cpwt                  = contol_point_wt;
 optsreg.bspline_spatial_scale = getOr(opts, 'bspline_spatial_scale', 0.64);
-optsreg.n_histogram_bins      = getOr(opts, 'n_histogram_bins', 48);
-optsreg.dual_channel_mi_weight_autofluor = getOr(opts, 'dual_channel_mi_weight_autofluor', 1.0);
-optsreg.dual_channel_mi_weight_signal    = getOr(opts, 'dual_channel_mi_weight_signal', 0.5);
+optsreg.n_histogram_bins      = getOr(opts, 'n_histogram_bins', 88);
+optsreg.dual_channel_mi_weight_autofluor = getOr(opts, 'dual_channel_mi_weight_autofluor', 0.5);
+optsreg.dual_channel_mi_weight_signal    = getOr(opts, 'dual_channel_mi_weight_signal', 1.0);
 
 if isempty(volume_secondary)
     [reg, ~, bspltformpath, pathbspl] = performMultObjBsplineRegistration(tvaffine, volume, opts.registres*1e-3, ...
