@@ -32,7 +32,7 @@ sigmause    = max(anisotropy.*cellradius/2, 2);
 sigmauseim  = ceil(sigmause);
 voxelvolume = prod(opts.pxsize);
 %------------------------------------------------------------------------
-% let's figure out batches. TODO: make dependent on cell diameter
+% let's figure out batches.
 batchsizez  = getOr(opts, 'batchsizez', 32);
 batchsizexy = getOr(opts, 'batchsizexy', 1800);
 buffsizez   = ceil(cellradius);
@@ -141,7 +141,8 @@ for ibatchz = 1:NbatchesZ
                 %----------------------------------------------------------
                 if opts.debug & size(ccents,1) > 1
                     pathslice = fullfile(folderdebug, ...
-                        sprintf('%03d_batch_%d_detections.png', itrack, size(ccents,1)));
+                        sprintf('%03d_batch_x%03d_y%03d_z%03d_%d_detections.png', ...
+                        itrack, ibatchx,ibatchy,ibatchz, size(ccents,1)));
                     ampmax   = max(ampmax,[], 3);
                     imtosave = gather(uint8(255 * ampmax/thresuse(1)));
                     imtosave(imgout) = 255;
@@ -161,6 +162,7 @@ for ibatchz = 1:NbatchesZ
         end
     end
 end
+%%
 %--------------------------------------------------------------------------
 fclose(fid);
 %--------------------------------------------------------------------------

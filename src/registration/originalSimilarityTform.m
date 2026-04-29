@@ -1,4 +1,4 @@
-function transinit = originalSimilarityTform(samppts, atlaspts, params, Tflip)
+function transinit = originalSimilarityTform(samppts, atlaspts, params)
 %UNTITLED Summary of this function goes here
 
 %==========================================================================
@@ -11,7 +11,7 @@ Ndowntv      = max(6, round(atlaspts.Count/5e4));
 ls_cloud_use = pcdownsample(samppts,'nonuniformGridSample', Ndownls,'PreserveStructure',true);
 tv_cloud_use = pcdownsample(atlaspts,'nonuniformGridSample',Ndowntv,'PreserveStructure',true);
 tvpoints = tv_cloud_use.Location;
-lspoints = Tflip.transformPointsForward(ls_cloud_use.Location);
+lspoints = ls_cloud_use.Location;
 %==========================================================================
 
 % Perform basic similarity transform
@@ -31,6 +31,6 @@ irem2 = Dclosest2 >25;
 % [~, Dclosest2] = knnsearch(yreg, lspoints);
 
 tformfit  = bfit.invert;
-transinit = affinetform3d(tformfit.A*Tflip.A);
+transinit = affinetform3d(tformfit.A);
 %==========================================================================
 end
