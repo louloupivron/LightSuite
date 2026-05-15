@@ -46,8 +46,30 @@ switch tifftype
              datainfo = BioformatsImage(tiffpath);
              opts.Nchans = datainfo.sizeC;
              fprintf('Found a single tiff with %d channels \n', opts.Nchans);
-             allnyxz = [datainfo.height datainfo.width datainfo.sizeZ];
-             opts.Nz = datainfo.sizeZ;
+             sizeZ = datainfo.sizeZ;
+             if isprop(datainfo, 'sizeT')
+                 sizeT = datainfo.sizeT;
+             else
+                 sizeT = 1;
+             end
+             % Multi-page / OME stacks often report depth as T (time) not Z
+             if sizeZ == 1 && sizeT > 1
+                 opts.Nz = sizeT;
+                 opts.planes_in_time = true;
+             else
+                 opts.Nz = sizeZ;
+             end
+             % When Bio-Formats still reports a single plane, count TIFF IFDs
+             if opts.Nz == 1 && endsWith(lower(tiffpath), {'.tif', '.tiff'})
+                 ninfo = numel(imfinfo(tiffpath));
+                 if ninfo > 1
+                     opts.Nz = ninfo;
+                     opts.planes_in_time = true;
+                     fprintf(['Bio-Formats reported 1 Z-plane; imfinfo found %d ' ...
+                         'TIFF directories — using that as depth.\n'], ninfo);
+                 end
+             end
+             allnyxz = [datainfo.height datainfo.width opts.Nz];
         else
             opts.Nchans  = numel(tfiles);
             fprintf('Assuming each channel is a separate tiff. Found %d channels \n', opts.Nchans)
