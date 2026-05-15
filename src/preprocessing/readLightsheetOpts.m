@@ -74,13 +74,20 @@ switch tifftype
             opts.Nchans  = numel(tfiles);
             fprintf('Assuming each channel is a separate tiff. Found %d channels \n', opts.Nchans)
             allnyxz = nan(opts.Nchans, 3);
+            allTiffChannels = true;
+            allPreferImread = true;
             for ichan = 1 : opts.Nchans
                 currpath = fullfile(tfiles(ichan).folder, tfiles(ichan).name);
                 if endsWith(lower(currpath), {'.tif', '.tiff'})
-                    tinfo = imfinfo(currpath);
-                    allnyxz(ichan, :) = [tinfo(1).Height tinfo(1).Width numel(tinfo)];
-                    opts.use_imread_channelperfile = true;
+                    [nyC, nxC, nzC, planeT, preferImread] = tiffChannelStackDims(currpath);
+                    allnyxz(ichan, :) = [nyC nxC nzC];
+                    allPreferImread = allPreferImread && preferImread;
+                    if planeT
+                        opts.planes_in_time = true;
+                    end
                 else
+                    allTiffChannels = false;
+                    allPreferImread = false;
                     datainfo          = BioformatsImage(currpath);
                     allnyxz(ichan, :) = [datainfo.height datainfo.width datainfo.sizeZ];
                 end
@@ -89,8 +96,12 @@ switch tifftype
             assert(all(allnyxz == allnyxz(1,:), "all"), ...
                 "some volumes do not have matching size, LightSuite cannot proceed")
             opts.Nz = allnyxz(1, 3);
+            opts.use_imread_channelperfile = allTiffChannels && allPreferImread;
             if opts.use_imread_channelperfile
                 fprintf('Using native TIFF page reading for channel-per-file stacks.\n');
+            elseif allTiffChannels && ~opts.use_imread_channelperfile && opts.Nz > 1
+                fprintf(['Reading channel TIFFs with Bio-Formats (imfinfo did not list ' ...
+                    'multiple IFDs; planes_in_time=%d).\n'], opts.planes_in_time);
             end
         end
         %--------------------------------------------------------------------------
@@ -116,4 +127,38 @@ if ~isfield(opts, 'atlas_dir')
 end
 %--------------------------------------------------------------------------
 
+end
+
+function [ny, nx, nz, planesInTime, preferImread] = tiffChannelStackDims(path)
+%TIFFCHANNELSTACKDIMS Height/width/depth for one channel file.
+%   preferImread is true when numel(imfinfo)>1 (classic multi-IFD stack).
+%   When imfinfo reports a single directory (OME-TIFF, SubIFDs, etc.),
+%   use Bio-Formats sizeZ/sizeT instead and set preferImread false.
+tinfo  = imfinfo(path);
+nPages = numel(tinfo);
+ny     = tinfo(1).Height;
+nx     = tinfo(1).Width;
+if nPages > 1
+    nz             = nPages;
+    planesInTime   = false;
+    preferImread   = true;
+    return;
+end
+preferImread = false;
+datainfo = BioformatsImage(path);
+ny       = datainfo.height;
+nx       = datainfo.width;
+sizeZ    = datainfo.sizeZ;
+if isprop(datainfo, 'sizeT')
+    sizeT = datainfo.sizeT;
+else
+    sizeT = 1;
+end
+if sizeZ == 1 && sizeT > 1
+    nz           = sizeT;
+    planesInTime = true;
+else
+    nz           = sizeZ;
+    planesInTime = false;
+end
 end
