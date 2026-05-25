@@ -1,39 +1,77 @@
-# Welcome to LightSuite
+# LightSuite (Python)
 
-**LightSuite** is a MATLAB-based pipeline designed for the registration and analysis of large-scale microscopy datasets. It provides modular workflows for whole-brain lightsheet volumes, coronal slice series, and spinal cord data, bridging the gap between raw microscopy images and anatomical reference atlases (CCF).
+**LightSuite** registers large microscopy volumes to standard brain atlases and exports atlas-space intensities and (eventually) cell coordinates. The Python version runs as a command-line tool (`lightsuite`) with optional Napari GUIs for manual registration refinement.
 
-## What can I do with LightSuite?
+This documentation covers the **Python pipeline** on branch `feature/python-migration`. The original MATLAB workflows remain in the repository for spinal cord and slice data until those modules are ported.
 
-LightSuite automates the complex tasks of mapping experimental data to standard anatomical coordinates and quantifying labeled cells.
+## What works today
 
-* **Whole-Brain Lightsheet Analysis:** Process continuous 3D volumes. The pipeline handles preprocessing (median filtering, binary conversion), automated cell detection (SNR-based local maxima), and registration to the Allen Brain Atlas.
-* **Spinal Cord Analysis:** Specialized tools for straightening and registering spinal cord volumes. It includes a dedicated GUI for defining the central canal and anterior/posterior axes to unroll and map the cord before registration.
-* **Slice Analysis:** Optimized for conventional wide-field microscope data (e.g., coronal slices). It registers individual 2D planes to the atlas and outputs registered image stacks and cell coordinates.
+| Workflow | Status |
+|----------|--------|
+| **Brain lightsheet** (3D whole-brain volumes) | Preprocess → init registration → match points → register → export |
+| **Spinal cord lightsheet** | MATLAB only ([usage guide](usage_spinal_cord.md)) |
+| **Widefield coronal slices** | MATLAB only ([usage guide](usage_slice.md)) |
 
-## Hardware Requirements
+### Brain pipeline capabilities
 
-* **Standard Workstations:** The **Slice Analysis** module is optimized for efficiency and has been tested on standard computers without GPUs.
-* **High-Performance Workstations:** For **Large-scale lightsheet volumes**, we recommend a system with a dedicated GPU to accelerate 3D operations (such as spatial band-pass filtering and cell detection).
+- TIFF discovery (channel-per-file and plane-per-file layouts)
+- Downsampling to registration resolution (default 20 µm)
+- Coarse similarity alignment (Open3D ICP)
+- Interactive control-point matching (Napari dual-pane GUI)
+- Deformable B-spline registration (Elastix 5.1)
+- Export of atlas-space registered volumes and parcellation intensity tables
+- Allen and Perens brain atlas providers
 
-## Supported Data Formats
+### Not yet ported from MATLAB
 
-### 1. Large-scale Lightsheet Volumes
-The pipeline currently supports data formatted as a series of **2D TIFF planes** representing a single channel, sliced axially, multi-channel volume TIFFs and single-channel channel volume TIFFs split acroos files. Support for other brain orientations is planned.
+- 3D cell detection and atlas mapping of cell coordinates
+- Spinal cord and slice pipelines
+- OME-Zarr / Imaris readers (planned plugin layer)
+- GPU-accelerated detection
 
-### 2. Spinal Cord Data
-We support low-resolution whole cord volumes. Channels can be stored within the same TIFF volume or separated.
+## Quick start
 
-### 3. Slice Volumes
-We support:
+```bash
+# Install (see Installation guide)
+uv sync --extra dev --extra gui
 
-* A series of **2D TIFF planes** (one file per slice).
-* Direct output from AxioScan scanners (**`.czi`** files).
+# Verify environment
+uv run lightsuite doctor -c examples/brain_lightsheet.yaml
 
-## Getting Started
+# Run the brain pipeline (one stage at a time)
+uv run lightsuite brain preprocess           -c my_sample.yaml
+uv run lightsuite brain init-registration    -c my_sample.yaml
+uv run lightsuite brain match-points         -c my_sample.yaml
+uv run lightsuite brain register             -c my_sample.yaml
+uv run lightsuite brain export               -c my_sample.yaml --save-volume --write-csv
+```
 
-1.  **Installation:** Follow the instructions in [Installation](installation.md) to set up MATLAB dependencies and external tools (Elastix).
-2.  **Configuration:** LightSuite uses script-based configuration. You will adjust parameters (such as cell diameter or file paths) directly within the analysis scripts.
-3.  **Select your Workflow:**
-    * [Lightsheet Brain Analysis](usage_lightsheet_brain.md)
-    * [Spinal Cord Analysis](usage_spinal_cord.md)
-    * [Slice Analysis](usage_slice.md)
+Copy [`examples/brain_lightsheet.yaml`](../examples/brain_lightsheet.yaml), edit paths and voxel size, then follow the [brain lightsheet guide](usage_lightsheet_brain.md).
+
+## Hardware recommendations
+
+| Task | Recommendation |
+|------|----------------|
+| Preprocess + registration | Workstation with fast SSD scratch space (≥50 GB free; 500 GB+ for very large samples) |
+| Match-points GUI | Display with enough resolution for dual-pane Napari; `--extra gui` install |
+| Cell detection (future) | GPU recommended for large volumes |
+
+## Supported input formats (brain)
+
+| Format | Status |
+|--------|--------|
+| Multi-page TIFF, channel per file (`channelperfile`) | Supported |
+| One TIFF per Z plane (`planeperfile`) | Supported |
+| CZI, OME-Zarr, Imaris | Planned |
+
+## Documentation map
+
+1. **[Installation](installation.md)** — Python, `uv`, Elastix, atlas files
+2. **[Brain lightsheet usage](usage_lightsheet_brain.md)** — YAML config, CLI stages, outputs, GUI
+3. **[Spinal cord](usage_spinal_cord.md)** — MATLAB workflow (not yet in Python)
+4. **[Slice module](usage_slice.md)** — MATLAB workflow (not yet in Python)
+
+## Getting help
+
+- Run `uv run lightsuite doctor` to diagnose missing dependencies
+- Open an [issue on GitHub](https://github.com/dimokaramanlis/LightSuite/issues) with OS, Python version, config (redacted paths), and the full error message
