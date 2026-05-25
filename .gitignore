@@ -1,6 +1,11 @@
 scripts/lsfm_atlas_inspect/.venv/
 scripts/lsfm_atlas_inspect/lsfm_atlas_inspect_out/
 
+.venv/
+__pycache__/
+.pytest_cache/
+*.egg-info/
+
 .DS_Store
 
 *.asv

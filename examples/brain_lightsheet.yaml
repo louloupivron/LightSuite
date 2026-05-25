@@ -1,0 +1,42 @@
+# Example brain lightsheet config (Approach 1 — desktop monolith).
+# Copy and edit paths for your sample before running:
+#   uv run lightsuite doctor -c examples/brain_lightsheet.yaml
+#   uv run lightsuite brain validate-config -c examples/brain_lightsheet.yaml
+
+sample:
+  name: example_mouse
+  source:
+    format: tiff_stack
+    path: /path/to/stitched/tiff/folder
+    tiff_type: channelperfile
+  scratch: /fastssd/lightsuite_scratch
+  save_path: /path/to/results/example_mouse
+  voxel_um: [5.26, 5.26, 5.0]
+
+atlas:
+  provider: allen
+  resolution_um: 10
+  atlas_dir: null
+
+registration:
+  resolution_um: 20
+  channel_primary: 1
+  channel_secondary: 2
+  bspline_spatial_scale_mm: 0.64
+  control_point_weight: 0.2
+
+detection:
+  enabled: true
+  backend: classical
+  cell_diameter_um: 14
+  thresholds: [0.5, 0.4]
+  channel: null
+  debug: false
+
+compute:
+  use_gpu: true
+  workers: 4
+
+export:
+  registered_volume_format: ome_zarr
+  write_pyramid: true
