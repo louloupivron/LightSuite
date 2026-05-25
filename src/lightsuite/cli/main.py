@@ -44,6 +44,36 @@ def validate_config(
     typer.echo(f"Config valid for sample '{cfg.sample.name}' ({cfg.sample.source.format.value}).")
 
 
+@brain_app.command("export")
+def brain_export(
+    config: str = typer.Option(..., "--config", "-c", help="Pipeline YAML config."),
+    write_csv: bool = typer.Option(
+        None,
+        "--write-csv/--no-write-csv",
+        help="Write parcellation intensity CSVs (default: export.write_cells_csv).",
+    ),
+    save_volume: bool = typer.Option(
+        None,
+        "--save-volume/--no-save-volume",
+        help="Save registered atlas-space volumes (default: export.save_registered_volume).",
+    ),
+) -> None:
+    """Apply transforms and export registered volumes (generateRegisteredBrainVolumes.m)."""
+    from lightsuite.config.loader import load_config
+    from lightsuite.export.brain_export import export_registered_brain_volumes
+
+    cfg = load_config(config)
+    result = export_registered_brain_volumes(
+        cfg,
+        write_csv=write_csv,
+        save_registered_volume=save_volume,
+    )
+    if result.registered_volumes:
+        typer.echo(f"Registered volumes: {len(result.registered_volumes)} channel(s)")
+    if result.parcellation_paths:
+        typer.echo(f"Parcellation CSVs: {len(result.parcellation_paths)} channel(s)")
+
+
 @brain_app.command("register")
 def brain_register(
     config: str = typer.Option(..., "--config", "-c", help="Pipeline YAML config."),
