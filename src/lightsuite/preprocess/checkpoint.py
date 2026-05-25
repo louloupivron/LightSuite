@@ -25,6 +25,12 @@ class RegOptsCheckpoint:
     tiff_type: str
     channel_primary: int
     channel_secondary: int | None
+    permute_sample_to_atlas: list[int] | None = None
+    original_trans: list[list[float]] | None = None
+    downfac_reg: float | None = None
+    autocpsample: list[list[float]] | None = None
+    autocpatlas: list[list[float]] | None = None
+    brain_atlas: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

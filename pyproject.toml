@@ -21,6 +21,7 @@ dependencies = [
     "matplotlib>=3.8",
     "dask[array]>=2024.1",
     "imagecodecs>=2024.1",
+    "open3d>=0.18",
 ]
 
 [project.optional-dependencies]

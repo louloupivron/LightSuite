@@ -44,6 +44,20 @@ def validate_config(
     typer.echo(f"Config valid for sample '{cfg.sample.name}' ({cfg.sample.source.format.value}).")
 
 
+@brain_app.command("init-registration")
+def brain_init_registration(
+    config: str = typer.Option(..., "--config", "-c", help="Pipeline YAML config."),
+) -> None:
+    """Coarse-align sample to atlas (initializeRegistration.m)."""
+    from lightsuite.config.loader import load_config
+    from lightsuite.registration.init_brain import initialize_brain_registration
+
+    cfg = load_config(config)
+    checkpoint = initialize_brain_registration(cfg)
+    n_pairs = len(checkpoint.autocpsample or [])
+    typer.echo(f"Initial registration complete. Auto control point pairs: {n_pairs}")
+
+
 @brain_app.command("preprocess")
 def brain_preprocess(
     config: str = typer.Option(..., "--config", "-c", help="Pipeline YAML config."),

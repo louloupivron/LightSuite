@@ -76,10 +76,12 @@ class RegistrationConfig(BaseModel):
     augment_points: bool = False
     dual_channel_mi_weight_autofluor: float = Field(default=0.4, ge=0, le=1)
     dual_channel_mi_weight_signal: float = Field(default=0.4, ge=0, le=1)
-
-    @model_validator(mode="after")
-    def atlas_resolution_matches_provider(self) -> RegistrationConfig:
-        return self
+    orientation: Annotated[list[int], Field(min_length=3, max_length=3)] | None = Field(
+        default=None,
+        description="Axis permutation e.g. [1, 2, 3]. Loaded from brain_orientation.txt if unset.",
+    )
+    cloud_threshold: float = Field(default=5.0, gt=0)
+    outlier_ratio: float = Field(default=0.01, ge=0, le=1)
 
 
 class DetectionBackend(str, Enum):
