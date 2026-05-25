@@ -44,6 +44,42 @@ def validate_config(
     typer.echo(f"Config valid for sample '{cfg.sample.name}' ({cfg.sample.source.format.value}).")
 
 
+@brain_app.command("register")
+def brain_register(
+    config: str = typer.Option(..., "--config", "-c", help="Pipeline YAML config."),
+    single_step: bool = typer.Option(
+        False,
+        "--single-step",
+        help="Use a single-resolution B-spline schedule (faster, lower quality).",
+    ),
+) -> None:
+    """Run elastix registration (multiobjRegistration.m)."""
+    from lightsuite.config.loader import load_config
+    from lightsuite.registration.brain_register import run_brain_registration
+
+    cfg = load_config(config)
+    path = run_brain_registration(cfg, use_multistep=not single_step)
+    typer.echo(f"Transform parameters: {path}")
+
+
+@brain_app.command("match-points")
+def brain_match_points(
+    config: str = typer.Option(..., "--config", "-c", help="Pipeline YAML config."),
+    headless: bool = typer.Option(
+        False,
+        "--headless",
+        help="Load data and write an empty session without opening napari (for tests).",
+    ),
+) -> None:
+    """Interactive control-point matching (matchControlPoints_unified.m)."""
+    from lightsuite.config.loader import load_config
+    from lightsuite.gui.match_points_brain import run_brain_match_points
+
+    cfg = load_config(config)
+    path = run_brain_match_points(cfg, headless=headless)
+    typer.echo(f"Control points session: {path}")
+
+
 @brain_app.command("init-registration")
 def brain_init_registration(
     config: str = typer.Option(..., "--config", "-c", help="Pipeline YAML config."),
