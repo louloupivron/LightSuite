@@ -20,6 +20,7 @@ dependencies = [
     "pandas>=2.0",
     "matplotlib>=3.8",
     "dask[array]>=2024.1",
+    "imagecodecs>=2024.1",
 ]
 
 [project.optional-dependencies]

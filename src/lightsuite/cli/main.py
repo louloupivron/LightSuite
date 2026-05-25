@@ -44,6 +44,19 @@ def validate_config(
     typer.echo(f"Config valid for sample '{cfg.sample.name}' ({cfg.sample.source.format.value}).")
 
 
+@brain_app.command("preprocess")
+def brain_preprocess(
+    config: str = typer.Option(..., "--config", "-c", help="Pipeline YAML config."),
+) -> None:
+    """Downsample sample volumes for registration (preprocessLightSheetVolume.m)."""
+    from lightsuite.config.loader import load_config
+    from lightsuite.preprocess.brain import preprocess_lightsheet_volume
+
+    cfg = load_config(config)
+    result = preprocess_lightsheet_volume(cfg)
+    typer.echo(f"Primary registration volume: {result.checkpoint.regvolpath}")
+
+
 def run() -> None:
     app()
 
