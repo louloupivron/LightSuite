@@ -4,6 +4,13 @@ from __future__ import annotations
 
 import numpy as np
 from skimage.exposure import equalize_adapthist
+from skimage.transform import resize
+
+PROJECTION_AXIS_LABELS = [
+    "Projection 0 — mean over axis 0 (Y)",
+    "Projection 1 — mean over axis 1 (X)",
+    "Projection 2 — mean over axis 2 (Z)",
+]
 
 
 def normalize_projection(image: np.ndarray) -> np.ndarray:
@@ -33,29 +40,34 @@ def mean_projections(volume: np.ndarray) -> list[np.ndarray]:
     ]
 
 
-def projection_layout(
+def projection_pair(
     atlas_projections: list[np.ndarray],
     sample_projections: list[np.ndarray],
-) -> tuple[list[tuple[np.ndarray, tuple[float, float], tuple[float, float]]], float]:
-    """Compute napari layer data, translate, and scale for side-by-side projections."""
-    atlas_norm = [normalize_projection(p) for p in atlas_projections]
-    sample_norm = [normalize_projection(p) for p in sample_projections]
+    axis: int,
+    *,
+    match_height: bool = True,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return normalized atlas and sample projections for one axis at full sample resolution."""
+    if axis not in {0, 1, 2}:
+        msg = f"axis must be 0, 1, or 2, got {axis}"
+        raise ValueError(msg)
 
-    row_gap = float(max(p.shape[0] for p in atlas_norm + sample_norm))
-    x_atlas = 0.0
-    atlas_layers: list[tuple[np.ndarray, tuple[float, float], tuple[float, float]]] = []
-    for idx, proj in enumerate(atlas_norm):
-        translate = (x_atlas, 0.0)
-        atlas_layers.append((proj, translate, (1.0, 1.0)))
-        x_atlas += proj.shape[1]
+    atlas = normalize_projection(atlas_projections[axis])
+    sample = normalize_projection(sample_projections[axis])
 
-    sample_layers: list[tuple[np.ndarray, tuple[float, float], tuple[float, float]]] = []
-    x_sample = row_gap
-    for idx, (proj, ref) in enumerate(zip(sample_norm, atlas_norm, strict=True)):
-        scale_y = ref.shape[0] / max(proj.shape[0], 1)
-        scale_x = ref.shape[1] / max(proj.shape[1], 1)
-        translate = (x_sample, 0.0)
-        sample_layers.append((proj, translate, (scale_y, scale_x)))
-        x_sample += ref.shape[1]
+    if match_height and atlas.shape != sample.shape:
+        # Upscale atlas to sample grid for comparison; never downscale the sample.
+        atlas = resize(
+            atlas,
+            sample.shape,
+            order=1,
+            preserve_range=True,
+            anti_aliasing=True,
+        ).astype(np.float32)
 
-    return atlas_layers + sample_layers, row_gap
+    return atlas, sample
+
+
+def dual_panel_translate(atlas_shape: tuple[int, int], gap: int = 24) -> tuple[float, float]:
+    """Place the sample panel to the right of the atlas panel."""
+    return float(atlas_shape[1] + gap), 0.0

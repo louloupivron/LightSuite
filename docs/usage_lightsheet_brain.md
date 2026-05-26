@@ -165,8 +165,11 @@ Requires `uv sync --extra gui`.
 **Workflow:**
 
 1. Use the three dropdowns to map sample dimensions to atlas dimensions (with optional flips).
-2. Click **Update preview** after each change.
-3. When anatomical axes align (AP, DV, LR), click **Save orientation && close**.
+2. Pick a **Projection view** (axis 0/1/2) to compare atlas (left) and sample (right) at full resolution.
+3. Click **Update preview** after each change.
+4. When anatomical axes align (AP, DV, LR), click **Save orientation && close**.
+
+The viewer uses a **dual-panel layout** (atlas left, sample right) so projections do not overlap. The sample is always shown at native pixel size; the atlas is upscaled to match when sizes differ.
 
 **Output:** `brain_orientation.txt` — used by init-registration and downstream stages.
 

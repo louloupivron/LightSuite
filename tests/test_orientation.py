@@ -7,7 +7,11 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from lightsuite.gui.orientation_views import mean_projections, projection_layout
+from lightsuite.gui.orientation_views import (
+    dual_panel_translate,
+    mean_projections,
+    projection_pair,
+)
 from lightsuite.registration.orientation import (
     DEFAULT_PERMVEC,
     permute_for_atlas,
@@ -44,12 +48,18 @@ def test_mean_projections_shapes() -> None:
     assert projs[2].shape == (5, 6)
 
 
-def test_projection_layout_returns_six_layers() -> None:
+def test_projection_pair_keeps_sample_resolution() -> None:
     atlas = [np.ones((4, 8)), np.ones((6, 5)), np.ones((3, 9))]
-    sample = [np.ones((2, 4)), np.ones((3, 5)), np.ones((3, 3))]
-    layers, row_gap = projection_layout(atlas, sample)
-    assert len(layers) == 6
-    assert row_gap == 6
+    sample = [np.ones((8, 16)), np.ones((10, 12)), np.ones((6, 6))]
+    atlas_img, sample_img = projection_pair(atlas, sample, axis=0)
+    assert sample_img.shape == (8, 16)
+    assert atlas_img.shape == (8, 16)
+
+
+def test_dual_panel_translate() -> None:
+    tx, ty = dual_panel_translate((100, 200), gap=24)
+    assert tx == 224
+    assert ty == 0
 
 
 def test_save_orientation(tmp_path: Path) -> None:
