@@ -11,12 +11,7 @@ from rich.console import Console
 
 from lightsuite.atlas.registry import resolve_brain_atlas
 from lightsuite.config.models import BrainPipelineConfig
-from lightsuite.gui.orientation_views import (
-    PROJECTION_AXIS_LABELS,
-    dual_panel_translate,
-    mean_projections,
-    projection_pair,
-)
+from lightsuite.gui.orientation_views import build_dual_panel_projections, mean_projections
 from lightsuite.preprocess.checkpoint import RegOptsCheckpoint
 from lightsuite.registration.orientation import (
     DEFAULT_PERMVEC,
@@ -33,7 +28,7 @@ from lightsuite.registration.volume import load_registration_volume, resize_atla
 
 console = Console()
 
-PANEL_GAP_PX = 24
+PANEL_GAP_X = 24
 
 
 @dataclass
@@ -100,7 +95,6 @@ def run_brain_orientation_check(config: BrainPipelineConfig, *, headless: bool =
     idx0, idx1, idx2 = indices_from_permvec(data.permvec)
 
     viewer = napari.Viewer(title=f"LightSuite orientation — {config.sample.name}")
-    state = {"axis": 0}
 
     atlas_layer = viewer.add_image(
         np.zeros((10, 10), dtype=np.float32),
@@ -115,41 +109,36 @@ def run_brain_orientation_check(config: BrainPipelineConfig, *, headless: bool =
         blending="opaque",
     )
 
-    def _layout_panels(atlas_shape: tuple[int, int]) -> None:
-        tx, ty = dual_panel_translate(atlas_shape, gap=PANEL_GAP_PX)
-        sample_layer.translate = (tx, ty)
-        sample_layer.scale = (1.0, 1.0)
-
-    def _show_projections(permvec: list[int], axis: int) -> None:
+    def _show_projections(permvec: list[int]) -> None:
         sample_oriented = permute_for_atlas(data.sample_volume, permvec)
         atlas_proj = mean_projections(data.atlas_volume)
         sample_proj = mean_projections(sample_oriented)
-        atlas_img, sample_img = projection_pair(atlas_proj, sample_proj, axis)
+        atlas_panel, sample_panel, sample_x = build_dual_panel_projections(
+            atlas_proj,
+            sample_proj,
+            gap_x=PANEL_GAP_X,
+        )
 
-        atlas_layer.data = atlas_img
-        sample_layer.data = sample_img
-        _layout_panels(atlas_img.shape)
+        atlas_layer.data = atlas_panel
+        sample_layer.data = sample_panel
+        sample_layer.translate = (sample_x, 0.0)
+        sample_layer.scale = (1.0, 1.0)
 
         viewer.status = (
-            f"permvec={permvec} | {PROJECTION_AXIS_LABELS[axis]} | "
-            f"atlas {atlas_img.shape} px, sample {sample_img.shape} px (native)"
+            f"permvec={permvec} | atlas {atlas_panel.shape} px, "
+            f"sample {sample_panel.shape} px (native, 3 projections stacked)"
         )
 
     @magicgui(
         atlas_dim_1={"choices": option_labels, "label": "Map to atlas dim 1 (Y)"},
         atlas_dim_2={"choices": option_labels, "label": "Map to atlas dim 2 (X)"},
         atlas_dim_3={"choices": option_labels, "label": "Map to atlas dim 3 (Z)"},
-        projection_axis={
-            "choices": PROJECTION_AXIS_LABELS,
-            "label": "Projection view",
-        },
         call_button="Update preview",
     )
     def controls(
         atlas_dim_1: str = option_labels[idx0],
         atlas_dim_2: str = option_labels[idx1],
         atlas_dim_3: str = option_labels[idx2],
-        projection_axis: str = PROJECTION_AXIS_LABELS[0],
     ) -> None:
         indices = (
             option_labels.index(atlas_dim_1),
@@ -162,9 +151,7 @@ def run_brain_orientation_check(config: BrainPipelineConfig, *, headless: bool =
             show_info(str(exc))
             return
         data.permvec = permvec
-        axis = PROJECTION_AXIS_LABELS.index(projection_axis)
-        state["axis"] = axis
-        _show_projections(permvec, axis)
+        _show_projections(permvec)
 
     @magicgui(call_button="Save orientation && close")
     def save_controls() -> None:
@@ -182,11 +169,11 @@ def run_brain_orientation_check(config: BrainPipelineConfig, *, headless: bool =
     controls.atlas_dim_1.value = option_labels[idx0]
     controls.atlas_dim_2.value = option_labels[idx1]
     controls.atlas_dim_3.value = option_labels[idx2]
-    _show_projections(data.permvec, state["axis"])
+    _show_projections(data.permvec)
 
     console.print(
         "[bold]Orientation checker[/bold] — atlas on the left, permuted sample on the right. "
-        "Use the projection view dropdown to compare each axis at full resolution."
+        "Three axis projections are stacked in each panel. Adjust dropdowns and Update preview."
     )
     napari.run()
     return data.orientation_file

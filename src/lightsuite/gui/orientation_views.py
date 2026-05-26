@@ -6,12 +6,6 @@ import numpy as np
 from skimage.exposure import equalize_adapthist
 from skimage.transform import resize
 
-PROJECTION_AXIS_LABELS = [
-    "Projection 0 — mean over axis 0 (Y)",
-    "Projection 1 — mean over axis 1 (X)",
-    "Projection 2 — mean over axis 2 (Z)",
-]
-
 
 def normalize_projection(image: np.ndarray) -> np.ndarray:
     data = np.asarray(image, dtype=np.float32)
@@ -68,6 +62,29 @@ def projection_pair(
     return atlas, sample
 
 
-def dual_panel_translate(atlas_shape: tuple[int, int], gap: int = 24) -> tuple[float, float]:
-    """Place the sample panel to the right of the atlas panel."""
-    return float(atlas_shape[1] + gap), 0.0
+def _stack_projections(images: list[np.ndarray], gap_y: int) -> np.ndarray:
+    if not images:
+        return np.zeros((1, 1), dtype=np.float32)
+    col_width = max(img.shape[1] for img in images)
+    total_h = sum(img.shape[0] for img in images) + gap_y * (len(images) - 1)
+    canvas = np.zeros((total_h, col_width), dtype=np.float32)
+    y = 0
+    for img in images:
+        canvas[y : y + img.shape[0], : img.shape[1]] = img
+        y += img.shape[0] + gap_y
+    return canvas
+
+
+def build_dual_panel_projections(
+    atlas_projections: list[np.ndarray],
+    sample_projections: list[np.ndarray],
+    *,
+    gap_x: int = 24,
+    gap_y: int = 12,
+) -> tuple[np.ndarray, np.ndarray, float]:
+    """Stack all three axis projections into left (atlas) and right (sample) panels."""
+    pairs = [projection_pair(atlas_projections, sample_projections, axis) for axis in range(3)]
+    atlas_panel = _stack_projections([pair[0] for pair in pairs], gap_y)
+    sample_panel = _stack_projections([pair[1] for pair in pairs], gap_y)
+    sample_translate_x = float(atlas_panel.shape[1] + gap_x)
+    return atlas_panel, sample_panel, sample_translate_x
