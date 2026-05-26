@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import typer
 
+from lightsuite import __version__
 from lightsuite.cli.doctor import doctor_command
 
 app = typer.Typer(
@@ -13,6 +14,26 @@ app = typer.Typer(
 )
 brain_app = typer.Typer(help="Brain lightsheet pipeline stages.")
 app.add_typer(brain_app, name="brain")
+
+
+def _version_callback(value: bool) -> None:
+    if value:
+        typer.echo(f"lightsuite {__version__}")
+        raise typer.Exit()
+
+
+@app.callback()
+def main_callback(
+    version: bool = typer.Option(
+        False,
+        "--version",
+        "-V",
+        help="Show package version and exit.",
+        callback=_version_callback,
+        is_eager=True,
+    ),
+) -> None:
+    """LightSuite CLI."""
 
 
 @app.command("doctor")

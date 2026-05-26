@@ -53,6 +53,26 @@ def _check_python() -> CheckResult:
     return CheckResult("Python", ok, detail)
 
 
+def _check_package_install() -> CheckResult:
+    """Verify the installed CLI includes the current brain subcommands."""
+    import lightsuite
+    import lightsuite.cli.main as main_module
+
+    main_path = Path(main_module.__file__).resolve()
+    source = main_path.read_text(encoding="utf-8")
+    required_commands = ("check-orientation", "export", "match-points")
+    missing = [name for name in required_commands if f'"{name}"' not in source and f"'{name}'" not in source]
+    ok = not missing
+    detail = f"v{lightsuite.__version__} from {main_path}"
+    if missing:
+        detail += (
+            f"; missing commands: {', '.join(missing)}. "
+            "On branch feature/python-migration run: "
+            "uv sync --extra dev --reinstall-package lightsuite"
+        )
+    return CheckResult("LightSuite package", ok, detail)
+
+
 def _check_elastix_binary(name: str) -> CheckResult:
     path = shutil.which(name)
     if path is None:
@@ -201,6 +221,7 @@ def run_doctor(
 ) -> DoctorReport:
     report = DoctorReport()
     report.add(_check_python())
+    report.add(_check_package_install())
     report.add(_check_elastix_binary("elastix"))
     report.add(_check_elastix_binary("transformix"))
     report.results.extend(_check_brain_atlas(config, strict))

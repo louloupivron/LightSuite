@@ -46,9 +46,31 @@ This creates a virtual environment in `.venv` and installs the `lightsuite` comm
 Verify:
 
 ```bash
+uv run lightsuite --version
 uv run lightsuite --help
 uv run lightsuite brain --help
 ```
+
+You should see `check-orientation` listed under `lightsuite brain` commands.
+
+---
+
+## Updating after `git pull`
+
+If a new CLI command is missing after pulling, the virtualenv is usually still pointing at an old install. From the repo root:
+
+```bash
+git fetch origin
+git checkout feature/python-migration
+git pull origin feature/python-migration
+git log -1 --oneline    # latest Python work is on this branch
+
+uv sync --extra dev --extra gui --reinstall-package lightsuite
+uv run lightsuite doctor
+uv run lightsuite brain --help
+```
+
+Always run the CLI with **`uv run lightsuite`** (or activate `.venv` first). A `lightsuite` binary elsewhere on your PATH may be an older global install.
 
 ---
 
