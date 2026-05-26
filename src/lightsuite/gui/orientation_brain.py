@@ -100,6 +100,7 @@ def run_brain_orientation_check(config: BrainPipelineConfig, *, headless: bool =
         import napari
         from magicgui import magicgui
         from napari.utils.notifications import show_info
+        from qtpy.QtCore import QTimer
     except ImportError as exc:
         msg = "Napari GUI requires: uv sync --extra gui"
         raise RuntimeError(msg) from exc
@@ -172,7 +173,8 @@ def run_brain_orientation_check(config: BrainPipelineConfig, *, headless: bool =
             return
         path = save_orientation(config.sample.save_path, data.permvec)
         show_info(f"Saved {path}")
-        viewer.close()
+        # Defer close so magicgui can re-enable its call button before widgets are destroyed.
+        QTimer.singleShot(0, viewer.close)
 
     viewer.window.add_dock_widget(controls, area="right", name="Orientation")
     viewer.window.add_dock_widget(save_controls, area="right", name="Save")

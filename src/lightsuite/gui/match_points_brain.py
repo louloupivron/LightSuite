@@ -97,6 +97,7 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
         import napari
         from magicgui import magicgui
         from napari.utils.notifications import show_info
+        from qtpy.QtCore import QTimer
     except ImportError as exc:
         msg = "Napari GUI requires: uv sync --extra gui"
         raise RuntimeError(msg) from exc
@@ -193,7 +194,7 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
     def save_controls() -> None:
         data.session.save(data.session_path)
         show_info(f"Saved {data.session_path}")
-        viewer.close()
+        QTimer.singleShot(0, viewer.close)
 
     @magicgui(call_button="Clear slice points")
     def clear_slice() -> None:
