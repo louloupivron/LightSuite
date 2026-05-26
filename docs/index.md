@@ -16,7 +16,7 @@ This documentation covers the **Python pipeline** on branch `feature/python-migr
 
 - TIFF discovery (channel-per-file and plane-per-file layouts)
 - Downsampling to registration resolution (default 20 µm)
-- Interactive orientation checker (Napari mean-projection GUI)
+- Interactive orientation checker (Napari 3D volume GUI)
 - Coarse similarity alignment (Open3D ICP)
 - Interactive control-point matching (Napari dual-pane GUI)
 - Deformable B-spline registration (Elastix 5.1)

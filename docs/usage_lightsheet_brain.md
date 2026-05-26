@@ -154,7 +154,7 @@ uv run lightsuite brain preprocess -c my_mouse.yaml
 
 ### 2. Check orientation (manual)
 
-Compare mean projections of your sample against the atlas before coarse registration. Opens a Napari viewer with atlas projections (top) and permuted sample projections (bottom).
+Compare your sample against the atlas before coarse registration. Opens a Napari viewer with the atlas volume on the left and the permuted sample on the right.
 
 ```bash
 uv run lightsuite brain check-orientation -c my_mouse.yaml
@@ -166,9 +166,10 @@ Requires `uv sync --extra gui`.
 
 1. Use the three dropdowns to map sample dimensions to atlas dimensions (with optional flips).
 2. Click **Update preview** after each change.
-3. When anatomical axes align (AP, DV, LR), click **Save orientation && close**.
+3. Scroll through slices and use Napari's **change order of visible axes** control (**Ctrl+E**) to inspect different projections.
+4. When anatomical axes align (AP, DV, LR), click **Save orientation && close**.
 
-The viewer uses a **dual-panel layout** (atlas left, sample right) with all three axis projections stacked vertically in each panel. The sample is always shown at native pixel size; the atlas is upscaled to match when sizes differ.
+The viewer uses a **dual-panel layout** (atlas left, sample right) with one 3D volume per side. The sample is always shown at native resolution; the atlas is resampled to match for display when sizes differ.
 
 **Output:** `brain_orientation.txt` — used by init-registration and downstream stages.
 

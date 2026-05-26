@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from lightsuite.gui.orientation_views import build_dual_panel_projections, mean_projections, projection_pair
+from lightsuite.gui.orientation_brain import _atlas_for_display
 from lightsuite.registration.orientation import (
     DEFAULT_PERMVEC,
     permute_for_atlas,
@@ -35,32 +35,11 @@ def test_permute_for_atlas_flip() -> None:
     assert np.allclose(out[1, :, :], vol[0, :, :])
 
 
-def test_mean_projections_shapes() -> None:
-    vol = np.ones((5, 6, 7), dtype=np.float32)
-    projs = mean_projections(vol)
-    assert len(projs) == 3
-    assert projs[0].shape == (6, 7)
-    assert projs[1].shape == (5, 7)
-    assert projs[2].shape == (5, 6)
-
-
-def test_projection_pair_keeps_sample_resolution() -> None:
-    atlas = [np.ones((4, 8)), np.ones((6, 5)), np.ones((3, 9))]
-    sample = [np.ones((8, 16)), np.ones((10, 12)), np.ones((6, 6))]
-    atlas_img, sample_img = projection_pair(atlas, sample, axis=0)
-    assert sample_img.shape == (8, 16)
-    assert atlas_img.shape == (8, 16)
-
-
-def test_build_dual_panel_projections() -> None:
-    atlas = [np.ones((4, 8)), np.ones((6, 5)), np.ones((3, 9))]
-    sample = [np.ones((8, 16)), np.ones((10, 12)), np.ones((6, 6))]
-    atlas_panel, sample_panel, sample_x = build_dual_panel_projections(atlas, sample, gap_x=10, gap_y=5)
-    assert atlas_panel.shape[1] == 16
-    assert sample_panel.shape[1] == 16
-    assert sample_x == 26
-    assert atlas_panel.shape[0] > 0
-    assert sample_panel.shape[0] > atlas_panel.shape[0] // 3
+def test_atlas_for_display_matches_sample_shape() -> None:
+    atlas = np.ones((4, 8, 6), dtype=np.float32)
+    sample_shape = (8, 16, 10)
+    out = _atlas_for_display(atlas, sample_shape)
+    assert out.shape == sample_shape
 
 
 def test_save_orientation(tmp_path: Path) -> None:

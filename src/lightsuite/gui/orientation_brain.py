@@ -8,10 +8,11 @@ from pathlib import Path
 import nibabel as nib
 import numpy as np
 from rich.console import Console
+from skimage.transform import resize
 
 from lightsuite.atlas.registry import resolve_brain_atlas
 from lightsuite.config.models import BrainPipelineConfig
-from lightsuite.gui.orientation_views import build_dual_panel_projections, mean_projections
+from lightsuite.gui.brain_data import _normalize_display
 from lightsuite.preprocess.checkpoint import RegOptsCheckpoint
 from lightsuite.registration.orientation import (
     DEFAULT_PERMVEC,
@@ -37,6 +38,18 @@ class OrientationCheckData:
     atlas_volume: np.ndarray
     permvec: list[int]
     orientation_file: Path
+
+
+def _atlas_for_display(atlas: np.ndarray, sample_shape: tuple[int, ...]) -> np.ndarray:
+    if atlas.shape == sample_shape:
+        return atlas.astype(np.float32)
+    return resize(
+        atlas,
+        sample_shape,
+        order=1,
+        preserve_range=True,
+        anti_aliasing=True,
+    ).astype(np.float32)
 
 
 def load_orientation_check_data(config: BrainPipelineConfig) -> OrientationCheckData:
@@ -97,36 +110,33 @@ def run_brain_orientation_check(config: BrainPipelineConfig, *, headless: bool =
     viewer = napari.Viewer(title=f"LightSuite orientation — {config.sample.name}")
 
     atlas_layer = viewer.add_image(
-        np.zeros((10, 10), dtype=np.float32),
+        np.zeros((10, 10, 10), dtype=np.float32),
         name="atlas (reference)",
         colormap="gray",
         blending="opaque",
     )
     sample_layer = viewer.add_image(
-        np.zeros((10, 10), dtype=np.float32),
+        np.zeros((10, 10, 10), dtype=np.float32),
         name="sample (input)",
         colormap="gray",
         blending="opaque",
     )
 
-    def _show_projections(permvec: list[int]) -> None:
+    def _update_preview(permvec: list[int]) -> None:
         sample_oriented = permute_for_atlas(data.sample_volume, permvec)
-        atlas_proj = mean_projections(data.atlas_volume)
-        sample_proj = mean_projections(sample_oriented)
-        atlas_panel, sample_panel, sample_x = build_dual_panel_projections(
-            atlas_proj,
-            sample_proj,
-            gap_x=PANEL_GAP_X,
+        atlas_display = _normalize_display(
+            _atlas_for_display(data.atlas_volume, sample_oriented.shape)
         )
+        sample_display = _normalize_display(sample_oriented)
 
-        atlas_layer.data = atlas_panel
-        sample_layer.data = sample_panel
-        sample_layer.translate = (sample_x, 0.0)
-        sample_layer.scale = (1.0, 1.0)
+        atlas_layer.data = atlas_display
+        sample_layer.data = sample_display
+        sample_layer.translate = (0.0, float(atlas_display.shape[1] + PANEL_GAP_X), 0.0)
+        sample_layer.scale = (1.0, 1.0, 1.0)
 
         viewer.status = (
-            f"permvec={permvec} | atlas {atlas_panel.shape} px, "
-            f"sample {sample_panel.shape} px (native, 3 projections stacked)"
+            f"permvec={permvec} | atlas {atlas_display.shape}, sample {sample_display.shape} "
+            "(use Napari dimension slider and Ctrl+E to inspect axes)"
         )
 
     @magicgui(
@@ -151,7 +161,7 @@ def run_brain_orientation_check(config: BrainPipelineConfig, *, headless: bool =
             show_info(str(exc))
             return
         data.permvec = permvec
-        _show_projections(permvec)
+        _update_preview(permvec)
 
     @magicgui(call_button="Save orientation && close")
     def save_controls() -> None:
@@ -169,11 +179,12 @@ def run_brain_orientation_check(config: BrainPipelineConfig, *, headless: bool =
     controls.atlas_dim_1.value = option_labels[idx0]
     controls.atlas_dim_2.value = option_labels[idx1]
     controls.atlas_dim_3.value = option_labels[idx2]
-    _show_projections(data.permvec)
+    _update_preview(data.permvec)
 
     console.print(
         "[bold]Orientation checker[/bold] — atlas on the left, permuted sample on the right. "
-        "Three axis projections are stacked in each panel. Adjust dropdowns and Update preview."
+        "Scroll through slices and use Napari's axis-order control (Ctrl+E) to inspect projections. "
+        "Adjust dropdowns and click Update preview."
     )
     napari.run()
     return data.orientation_file
