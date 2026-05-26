@@ -44,6 +44,24 @@ def validate_config(
     typer.echo(f"Config valid for sample '{cfg.sample.name}' ({cfg.sample.source.format.value}).")
 
 
+@brain_app.command("check-orientation")
+def brain_check_orientation(
+    config: str = typer.Option(..., "--config", "-c", help="Pipeline YAML config."),
+    headless: bool = typer.Option(
+        False,
+        "--headless",
+        help="Write orientation file without opening Napari (for tests).",
+    ),
+) -> None:
+    """Interactive brain axis/orientation checker (getBrainOrientation.m)."""
+    from lightsuite.config.loader import load_config
+    from lightsuite.gui.orientation_brain import run_brain_orientation_check
+
+    cfg = load_config(config)
+    path = run_brain_orientation_check(cfg, headless=headless)
+    typer.echo(f"Brain orientation: {path}")
+
+
 @brain_app.command("export")
 def brain_export(
     config: str = typer.Option(..., "--config", "-c", help="Pipeline YAML config."),

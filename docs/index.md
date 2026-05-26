@@ -8,7 +8,7 @@ This documentation covers the **Python pipeline** on branch `feature/python-migr
 
 | Workflow | Status |
 |----------|--------|
-| **Brain lightsheet** (3D whole-brain volumes) | Preprocess → init registration → match points → register → export |
+| **Brain lightsheet** (3D whole-brain volumes) | Preprocess → check orientation → init registration → match points → register → export |
 | **Spinal cord lightsheet** | MATLAB only ([usage guide](usage_spinal_cord.md)) |
 | **Widefield coronal slices** | MATLAB only ([usage guide](usage_slice.md)) |
 
@@ -16,6 +16,7 @@ This documentation covers the **Python pipeline** on branch `feature/python-migr
 
 - TIFF discovery (channel-per-file and plane-per-file layouts)
 - Downsampling to registration resolution (default 20 µm)
+- Interactive orientation checker (Napari mean-projection GUI)
 - Coarse similarity alignment (Open3D ICP)
 - Interactive control-point matching (Napari dual-pane GUI)
 - Deformable B-spline registration (Elastix 5.1)
@@ -40,6 +41,7 @@ uv run lightsuite doctor -c examples/brain_lightsheet.yaml
 
 # Run the brain pipeline (one stage at a time)
 uv run lightsuite brain preprocess           -c my_sample.yaml
+uv run lightsuite brain check-orientation    -c my_sample.yaml
 uv run lightsuite brain init-registration    -c my_sample.yaml
 uv run lightsuite brain match-points         -c my_sample.yaml
 uv run lightsuite brain register             -c my_sample.yaml

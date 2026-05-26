@@ -24,10 +24,11 @@ You will need:
 |:----:|-------------|------|-------------------|
 | 0 | `lightsuite doctor` | Check | `check_lightsuite_installation.m` |
 | 1 | `lightsuite brain preprocess` | Automated | `preprocessLightSheetVolume.m` |
-| 2 | `lightsuite brain init-registration` | Automated | `initializeRegistration.m` |
-| 3 | `lightsuite brain match-points` | **Manual (GUI)** | `matchControlPoints_unified.m` |
-| 4 | `lightsuite brain register` | Automated | `multiobjRegistration.m` |
-| 5 | `lightsuite brain export` | Automated | `generateRegisteredBrainVolumes.m` |
+| 2 | `lightsuite brain check-orientation` | **Manual (GUI)** | `getBrainOrientation.m` |
+| 3 | `lightsuite brain init-registration` | Automated | `initializeRegistration.m` |
+| 4 | `lightsuite brain match-points` | **Manual (GUI)** | `matchControlPoints_unified.m` |
+| 5 | `lightsuite brain register` | Automated | `multiobjRegistration.m` |
+| 6 | `lightsuite brain export` | Automated | `generateRegisteredBrainVolumes.m` |
 
 Cell detection and mapping cells to atlas coordinates are **not yet ported**; set `detection.enabled: false` for now.
 
@@ -151,7 +152,27 @@ uv run lightsuite brain preprocess -c my_mouse.yaml
 - `chan_{N}_sample_register_{20}um.tif` — one multi-page TIFF per channel
 - `regopts.json` — volume metadata and paths (replaces `regopts.mat`)
 
-### 2. Initial registration
+### 2. Check orientation (manual)
+
+Compare mean projections of your sample against the atlas before coarse registration. Opens a Napari viewer with atlas projections (top) and permuted sample projections (bottom).
+
+```bash
+uv run lightsuite brain check-orientation -c my_mouse.yaml
+```
+
+Requires `uv sync --extra gui`.
+
+**Workflow:**
+
+1. Use the three dropdowns to map sample dimensions to atlas dimensions (with optional flips).
+2. Click **Update preview** after each change.
+3. When anatomical axes align (AP, DV, LR), click **Save orientation && close**.
+
+**Output:** `brain_orientation.txt` — used by init-registration and downstream stages.
+
+If you already know the permutation, set `registration.orientation` in YAML instead.
+
+### 3. Initial registration
 
 Coarse similarity alignment of sample to atlas using Open3D ICP on edge point clouds.
 
@@ -167,7 +188,7 @@ uv run lightsuite brain init-registration -c my_mouse.yaml
 
 If orientation is wrong, set `registration.orientation` in YAML or edit `brain_orientation.txt`, then re-run init-registration.
 
-### 3. Match control points (manual)
+### 4. Match control points (manual)
 
 Opens a Napari dual-pane GUI: sample on the left, atlas on the right.
 
@@ -201,7 +222,7 @@ For automated tests only:
 uv run lightsuite brain match-points -c my_mouse.yaml --headless
 ```
 
-### 4. Register (Elastix B-spline)
+### 5. Register (Elastix B-spline)
 
 Runs affine + deformable registration using your control points and Elastix.
 
@@ -224,7 +245,7 @@ uv run lightsuite brain register -c my_mouse.yaml --single-step
 - `{name}_dim{1,2,3}_bspline_registration.png`
 - `elastix_temp/` — Elastix working directory (keep until register finishes)
 
-### 5. Export
+### 6. Export
 
 Warps all channels to atlas space and optionally writes parcellation statistics.
 
@@ -255,6 +276,7 @@ export CONFIG=my_mouse.yaml
 uv run lightsuite doctor -c $CONFIG
 uv run lightsuite brain validate-config -c $CONFIG
 uv run lightsuite brain preprocess -c $CONFIG
+uv run lightsuite brain check-orientation -c $CONFIG
 uv run lightsuite brain init-registration -c $CONFIG
 uv run lightsuite brain match-points -c $CONFIG
 uv run lightsuite brain register -c $CONFIG
@@ -323,7 +345,7 @@ Both channels are preprocessed in step 1; register uses dual fixed-image mutual 
 ## Known limitations
 
 - **Cell detection** — not implemented; preprocessing warns if `detection.enabled: true`
-- **Orientation GUI** — set `registration.orientation` in YAML or `brain_orientation.txt`; no interactive orientation picker yet
+- **Orientation GUI** — `lightsuite brain check-orientation` (Napari); or set `registration.orientation` in YAML
 - **OME-Zarr / Imaris** — planned; TIFF only today
 - **Parcellation names** — CSV includes numeric region IDs; Allen name/structure/division columns from MATLAB are not yet joined in Python export
 

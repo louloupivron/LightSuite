@@ -24,6 +24,7 @@ uv run lightsuite doctor -c examples/brain_lightsheet.yaml
 
 # Brain pipeline
 uv run lightsuite brain preprocess           -c my_sample.yaml
+uv run lightsuite brain check-orientation    -c my_sample.yaml
 uv run lightsuite brain init-registration    -c my_sample.yaml
 uv run lightsuite brain match-points         -c my_sample.yaml
 uv run lightsuite brain register             -c my_sample.yaml

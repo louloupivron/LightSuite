@@ -14,6 +14,7 @@ from lightsuite.atlas.registry import resolve_brain_atlas
 from lightsuite.config.models import BrainPipelineConfig
 from lightsuite.preprocess.checkpoint import RegOptsCheckpoint
 from lightsuite.registration.align import estimate_similarity_transform, triage_and_match_clouds
+from lightsuite.registration.orientation import orientation_path, resolve_orientation, save_orientation
 from lightsuite.registration.points import extract_atlas_points_gradient, extract_sample_points
 from lightsuite.registration.volume import (
     load_registration_volume,
@@ -23,34 +24,6 @@ from lightsuite.registration.volume import (
 )
 
 console = Console()
-
-
-def _orientation_path(save_path: Path) -> Path:
-    return save_path / "brain_orientation.txt"
-
-
-def _load_orientation(
-    config: BrainPipelineConfig,
-    save_path: Path,
-) -> list[int]:
-    if config.registration.orientation is not None:
-        permvec = list(config.registration.orientation)
-    else:
-        orient_file = _orientation_path(save_path)
-        if orient_file.is_file():
-            values = np.loadtxt(orient_file, dtype=np.int64)
-            permvec = values.flatten().astype(int).tolist()
-            console.print(f"Loaded brain orientation {permvec} from {orient_file}")
-        else:
-            permvec = [1, 2, 3]
-            console.print(
-                "[yellow]No brain_orientation.txt found;[/yellow] using default [1, 2, 3]. "
-                "Set registration.orientation in config or add brain_orientation.txt."
-            )
-    if len(set(abs(v) for v in permvec)) != 3:
-        msg = f"Invalid orientation permutation: {permvec}"
-        raise ValueError(msg)
-    return permvec
 
 
 def _save_orientation_preview(
@@ -94,9 +67,17 @@ def initialize_brain_registration(config: BrainPipelineConfig) -> RegOptsCheckpo
     tvreg = resize_atlas_volume(tv.astype(np.float32), downfac, nearest=False)
     avreg = resize_atlas_volume(av.astype(np.float32), downfac, nearest=True)
 
-    permvec = _load_orientation(config, save_path)
+    permvec = resolve_orientation(config, save_path)
+    orient_file = orientation_path(save_path)
     if config.registration.orientation is not None:
-        np.savetxt(_orientation_path(save_path), np.array(permvec, dtype=int), fmt="%d")
+        save_orientation(save_path, permvec)
+    elif orient_file.is_file():
+        console.print(f"Loaded brain orientation {permvec} from {orient_file}")
+    else:
+        console.print(
+            "[yellow]No brain_orientation.txt found;[/yellow] using default [1, 2, 3]. "
+            "Run 'lightsuite brain check-orientation' to verify axes interactively."
+        )
 
     newvol = normalize_registration_volume(backvol)
     console.print("Creating cloud for sample volume...", end=" ")
