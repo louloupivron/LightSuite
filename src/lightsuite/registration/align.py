@@ -32,6 +32,45 @@ def _matlab_cloud_subset(points: np.ndarray, count_divisor: int) -> np.ndarray:
     return points
 
 
+def _triage_sample_subset(sample_points: np.ndarray, *, max_points: int = 20_000) -> np.ndarray:
+    """Downsample the sample cloud for pair matching without keeping every point."""
+    subset = _matlab_cloud_subset(sample_points, 10_000)
+    if subset.shape[0] > max_points:
+        return _voxel_grid_downsample(subset, max_points)
+    return subset
+
+
+def _triage_atlas_subset(
+    atlas_points: np.ndarray,
+    sample_fwd: np.ndarray,
+    *,
+    margin: float = 60.0,
+    min_points: int = 8_000,
+    max_points: int = 50_000,
+) -> np.ndarray:
+    """Select atlas points near the transformed sample.
+
+    MATLAB ``nonuniformGrid`` on the full Allen cloud keeps ~140 global points,
+    which is too sparse for Python voxel downsampling once the sample occupies a
+    small atlas subregion. Crop to the overlap first, then downsample.
+    """
+    if atlas_points.shape[0] <= max_points:
+        return atlas_points
+    if sample_fwd.shape[0] == 0:
+        return _matlab_cloud_subset(atlas_points, 50_000)
+
+    lo = sample_fwd.min(axis=0) - margin
+    hi = sample_fwd.max(axis=0) + margin
+    in_box = np.all((atlas_points >= lo) & (atlas_points <= hi), axis=1)
+    cropped = atlas_points[in_box] if np.any(in_box) else atlas_points
+    target = min(max_points, max(min_points, cropped.shape[0]))
+    if cropped.shape[0] > target:
+        return _voxel_grid_downsample(cropped, target)
+    if cropped.shape[0] < min_points:
+        return _voxel_grid_downsample(atlas_points, target)
+    return cropped
+
+
 def _icp_cloud_subset(
     points: np.ndarray,
     count_divisor: int,
@@ -254,9 +293,9 @@ def _triage_bcpd(
     bcpd_path: Path,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Port of triageAndMatchClouds.m."""
-    atlas_use = _matlab_cloud_subset(atlas_points, 50_000)
-    sample_use = _matlab_cloud_subset(sample_points, 10_000)
+    sample_use = _triage_sample_subset(sample_points)
     sample_fwd = _transform_points(sample_use, transform_icp)
+    atlas_use = _triage_atlas_subset(atlas_points, sample_fwd)
 
     tree_a = cKDTree(atlas_use)
     tree_s = cKDTree(sample_fwd)
@@ -301,9 +340,9 @@ def _triage_icp(
     transform_icp: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Nearest-neighbour fallback when BCPD is unavailable."""
-    atlas_use = _matlab_cloud_subset(atlas_points, 50_000)
-    sample_use = _matlab_cloud_subset(sample_points, 10_000)
+    sample_use = _triage_sample_subset(sample_points)
     sample_fwd = _transform_points(sample_use, transform_icp)
+    atlas_use = _triage_atlas_subset(atlas_points, sample_fwd)
 
     tree_a = cKDTree(atlas_use)
     tree_s = cKDTree(sample_fwd)

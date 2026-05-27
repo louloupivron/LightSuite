@@ -44,6 +44,20 @@ def test_triage_uses_icp_transform_frame() -> None:
     assert icp_err < matlab_err
 
 
+def test_triage_finds_pairs_with_huge_atlas_cloud() -> None:
+    rng = np.random.default_rng(2)
+    sample = rng.random((4_000, 3)) * 35.0
+    transform = np.eye(4)
+    transform[:3, :3] *= 1.05
+    transform[:3, 3] = [120.0, 80.0, 200.0]
+    aligned = _transform_points(sample, transform)
+    atlas_far = rng.random((600_000, 3)) * np.array([660.0, 400.0, 570.0])
+    atlas_near = aligned + rng.normal(0.0, 2.5, aligned.shape)
+    atlas = np.vstack([atlas_far, atlas_near])
+    pairs = triage_and_match_clouds(sample, atlas, transform)
+    assert pairs[0].shape[0] > 100
+
+
 def test_estimate_similarity_transform_returns_both_frames() -> None:
     rng = np.random.default_rng(1)
     sample = rng.random((500, 3)) * 30.0
