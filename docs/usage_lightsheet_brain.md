@@ -187,7 +187,7 @@ uv run lightsuite brain init-registration -c my_mouse.yaml
 
 - Updated `regopts.json` (`original_trans`, auto control point pairs)
 - `brain_orientation.txt` (if orientation was set in config)
-- `dim{1,2,3}_initial_registration.png` — sanity-check images
+- `dim{1,2,3}_initial_registration.png` — eight slices per axis with warped atlas region boundaries overlaid on the sample
 
 If orientation is wrong, set `registration.orientation` in YAML or edit `brain_orientation.txt`, then re-run init-registration.
 

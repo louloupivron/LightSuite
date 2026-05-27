@@ -76,3 +76,4 @@ def test_initialize_brain_registration(tmp_path: Path) -> None:
     assert result.downfac_reg == 0.5
     assert result.autocpsample is not None
     assert (save / "dim1_initial_registration.png").is_file()
+    assert (save / "dim1_initial_registration.png").stat().st_size > 10_000

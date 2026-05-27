@@ -5,7 +5,6 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-import matplotlib.pyplot as plt
 import nibabel as nib
 import numpy as np
 from rich.console import Console
@@ -15,6 +14,7 @@ from lightsuite.config.models import BrainPipelineConfig
 from lightsuite.preprocess.checkpoint import RegOptsCheckpoint
 from lightsuite.registration.align import estimate_similarity_transform, triage_and_match_clouds
 from lightsuite.registration.orientation import orientation_path, resolve_orientation, save_orientation
+from lightsuite.registration.plots import save_initial_registration_previews
 from lightsuite.registration.points import extract_atlas_points_gradient, extract_sample_points
 from lightsuite.registration.volume import (
     load_registration_volume,
@@ -24,29 +24,6 @@ from lightsuite.registration.volume import (
 )
 
 console = Console()
-
-
-def _save_orientation_preview(
-    save_path: Path,
-    sample: np.ndarray,
-    permvec: list[int],
-) -> None:
-    """Save midslice comparison PNGs (dim{1,2,3}_initial_registration.png)."""
-    for idim in range(3):
-        fig, ax = plt.subplots(figsize=(6, 6))
-        mid = int(sample.shape[idim] / 2)
-        if idim == 0:
-            sl_sample = sample[mid, :, :]
-        elif idim == 1:
-            sl_sample = sample[:, mid, :]
-        else:
-            sl_sample = sample[:, :, mid]
-        ax.imshow(sl_sample, cmap="gray", aspect="auto")
-        ax.set_title(f"Sample dim {idim + 1} (perm={permvec})")
-        ax.axis("off")
-        out = save_path / f"dim{idim + 1}_initial_registration.png"
-        fig.savefig(out, dpi=120, bbox_inches="tight")
-        plt.close(fig)
 
 
 def initialize_brain_registration(config: BrainPipelineConfig) -> RegOptsCheckpoint:
@@ -107,7 +84,10 @@ def initialize_brain_registration(config: BrainPipelineConfig) -> RegOptsCheckpo
     cpsample, cpatlas = triage_and_match_clouds(ls_cloud, tv_cloud, transform)
     console.print(f"Done in {time.perf_counter() - t0:.1f}s. Pairs: {cpsample.shape[0]}")
 
-    _save_orientation_preview(save_path, volumereg, permvec)
+    console.print("Saving initial registration previews...", end=" ")
+    t0 = time.perf_counter()
+    save_initial_registration_previews(save_path, volumereg, avreg, transform)
+    console.print(f"Done in {time.perf_counter() - t0:.1f}s.")
 
     checkpoint.permute_sample_to_atlas = permvec
     checkpoint.original_trans = transform.tolist()
