@@ -16,6 +16,7 @@ from rich.table import Table
 from lightsuite.config.loader import load_config
 from lightsuite.config.models import BrainPipelineConfig
 from lightsuite.atlas.registry import resolve_brain_atlas
+from lightsuite.registration.bcpd import find_bcpd_executable
 
 console = Console()
 
@@ -234,6 +235,19 @@ def _atlas_search_dirs(explicit: Path | None) -> list[Path]:
     return dirs
 
 
+def _check_bcpd(config: BrainPipelineConfig | None) -> CheckResult:
+    explicit = config.registration.bcpd_path if config else None
+    found = find_bcpd_executable(explicit)
+    if found is not None:
+        return CheckResult("BCPD (coarse registration)", True, str(found), required=False)
+    return CheckResult(
+        "BCPD (coarse registration)",
+        True,
+        "Not found — init-registration falls back to Open3D ICP (lower quality).",
+        required=False,
+    )
+
+
 def run_doctor(
     config: BrainPipelineConfig | None = None,
     strict: bool = False,
@@ -243,6 +257,7 @@ def run_doctor(
     report.add(_check_package_install())
     report.add(_check_elastix_binary("elastix"))
     report.add(_check_elastix_binary("transformix"))
+    report.add(_check_bcpd(config))
     report.results.extend(_check_brain_atlas(config, strict))
     report.add(_check_spinal_cord_atlas())
 

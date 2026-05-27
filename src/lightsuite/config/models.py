@@ -82,6 +82,10 @@ class RegistrationConfig(BaseModel):
     )
     cloud_threshold: float = Field(default=5.0, gt=0)
     outlier_ratio: float = Field(default=0.01, ge=0, le=1)
+    bcpd_path: str | None = Field(
+        default=None,
+        description="Optional path to bcpd / bcpd.exe. Searched on PATH when unset.",
+    )
 
 
 class DetectionBackend(str, Enum):

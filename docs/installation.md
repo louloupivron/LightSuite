@@ -103,7 +103,35 @@ transformix --help
 
 ---
 
-## 4. Download atlas data
+## 4. Install BCPD (recommended for init-registration)
+
+The MATLAB brain pipeline uses [BCPD](https://github.com/ohirose/bcpd) for coarse point-cloud alignment. The Python `init-registration` step calls the same `bcpd` binary when it is on your `PATH`.
+
+If BCPD is missing, LightSuite falls back to Open3D ICP, which is often too weak for sparse lightsheet clouds and produces scattered boundary overlays.
+
+### Build or locate the binary
+
+Use the same `bcpd` / `bcpd.exe` you already use with the MATLAB LightSuite install, or build from the [BCPD repository](https://github.com/ohirose/bcpd) and add the binary to `PATH`.
+
+Optional YAML override:
+
+```yaml
+registration:
+  bcpd_path: /path/to/bcpd
+```
+
+### Verify
+
+```bash
+which bcpd    # or: bcpd.exe on Windows
+uv run lightsuite doctor -c examples/brain_lightsheet.yaml
+```
+
+Doctor should list **BCPD (coarse registration)** with the resolved path.
+
+---
+
+## 5. Download atlas data
 
 ### Allen brain atlas (default)
 
@@ -147,7 +175,7 @@ Set `atlas.provider: perens` and `resolution_um: 20`. Place `gubra_template_olf.
 
 ---
 
-## 5. Verify installation
+## 6. Verify installation
 
 ```bash
 uv run lightsuite doctor

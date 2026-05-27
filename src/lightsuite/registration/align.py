@@ -2,19 +2,14 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import open3d as o3d
 from scipy.spatial import cKDTree
 
+from lightsuite.registration.bcpd import find_bcpd_executable, register_bcpd
 from lightsuite.registration.warp import matlab_voxel_affine_from_icp
-
-
-def _downsample_points(points: np.ndarray, target_count: int, seed: int = 1) -> np.ndarray:
-    if points.shape[0] <= target_count:
-        return points
-    rng = np.random.default_rng(seed)
-    idx = rng.choice(points.shape[0], size=target_count, replace=False)
-    return points[idx]
 
 
 def _voxel_grid_downsample(points: np.ndarray, max_points: int) -> np.ndarray:
@@ -27,7 +22,7 @@ def _voxel_grid_downsample(points: np.ndarray, max_points: int) -> np.ndarray:
 
 
 def _matlab_cloud_subset(points: np.ndarray, count_divisor: int) -> np.ndarray:
-    """Match MATLAB triage/BCPD downsampling (use all points when target count < 6)."""
+    """Match MATLAB nonuniformGridSample downsampling (keep all when target < 6)."""
     target = int(np.ceil(points.shape[0] / count_divisor))
     if target >= 6:
         return _voxel_grid_downsample(points, target)
@@ -40,7 +35,7 @@ def _icp_cloud_subset(
     *,
     cap: int,
 ) -> np.ndarray:
-    """Choose an ICP subset; unlike MATLAB BCPD, Open3D needs thousands of points."""
+    """Choose an ICP subset when BCPD is unavailable."""
     n = points.shape[0]
     target = int(np.ceil(n / count_divisor))
     if target < 6:
@@ -63,7 +58,7 @@ def _clamp_similarity_scale(
     lo: float = 0.75,
     hi: float = 1.35,
 ) -> np.ndarray:
-    """Limit similarity scale to a plausible brain registration range."""
+    """Limit similarity scale for the Open3D fallback path."""
     out = np.asarray(transform, dtype=float).copy()
     scale = similarity_scale(out)
     if lo <= scale <= hi:
@@ -96,12 +91,21 @@ def downsample_point_cloud(points: np.ndarray, max_points: int) -> np.ndarray:
     return _voxel_grid_downsample(points, max_points)
 
 
+def _transform_points(points: np.ndarray, matrix: np.ndarray) -> np.ndarray:
+    if points.shape[0] == 0:
+        return points
+    hom = np.column_stack([points, np.ones(points.shape[0])])
+    out = hom @ matrix.T
+    return out[:, :3]
+
+
 def _run_icp(
     sample_points: np.ndarray,
     atlas_points: np.ndarray,
     *,
     init: np.ndarray,
     max_distance: float,
+    with_scaling: bool = True,
 ) -> np.ndarray:
     source = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(sample_points))
     target = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(atlas_points))
@@ -111,24 +115,67 @@ def _run_icp(
         max_correspondence_distance=max_distance,
         init=init,
         estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPoint(
-            with_scaling=True
+            with_scaling=with_scaling
         ),
         criteria=o3d.pipelines.registration.ICPConvergenceCriteria(max_iteration=100),
     )
     return result.transformation.copy()
 
 
-def estimate_similarity_transform(
+def _estimate_similarity_bcpd(
+    atlas_points: np.ndarray,
+    sample_points: np.ndarray,
+    bcpd_path: Path,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Port of originalSimilarityTform.m."""
+    atlas_use = _matlab_cloud_subset(atlas_points, 50_000)
+    sample_use = _matlab_cloud_subset(sample_points, 10_000)
+
+    registered, _ = register_bcpd(
+        atlas_use,
+        sample_use,
+        "similarity",
+        bcpd_path=bcpd_path,
+        outlier_ratio=0.01,
+        gamma=1.0,
+        beta=2.0,
+        lambda_=50.0,
+        convergence_tolerance=1e-8,
+        normalize_common=False,
+    )
+
+    tree_sample = cKDTree(sample_use)
+    tree_registered = cKDTree(registered)
+    dist_to_sample, _ = tree_sample.query(registered, k=1)
+    dist_to_registered, _ = tree_registered.query(sample_use, k=1)
+    keep_atlas = dist_to_sample <= 25.0
+    keep_sample = dist_to_registered <= 25.0
+
+    _, atlas_to_sample = register_bcpd(
+        atlas_use[keep_atlas],
+        sample_use[keep_sample],
+        "similarity",
+        bcpd_path=bcpd_path,
+        outlier_ratio=0.01,
+        gamma=1.0,
+        beta=2.0,
+        lambda_=50.0,
+        convergence_tolerance=1e-8,
+        normalize_common=False,
+    )
+
+    sample_to_atlas = np.linalg.inv(atlas_to_sample)
+    matlab_transform = matlab_voxel_affine_from_icp(sample_to_atlas)
+    return sample_to_atlas, matlab_transform
+
+
+def _estimate_similarity_icp(
     atlas_points: np.ndarray,
     sample_points: np.ndarray,
     *,
     max_distance: float = 25.0,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Estimate sample->atlas similarity transform.
-
-    Returns ``(icp_transform, matlab_transform)`` where ``icp_transform`` operates
-    on 0-based XYZ point indices and ``matlab_transform`` is stored in regopts.json.
-    """
+    """Open3D fallback when BCPD is unavailable."""
     sample_cap = min(sample_points.shape[0], 12_000)
     sample_use = _icp_cloud_subset(sample_points, 10_000, cap=sample_cap)
     atlas_cap = min(30_000, max(2_000, sample_use.shape[0] * 4))
@@ -166,12 +213,43 @@ def estimate_similarity_transform(
     return transform, matlab_transform
 
 
-def triage_and_match_clouds(
+def estimate_similarity_transform(
+    atlas_points: np.ndarray,
+    sample_points: np.ndarray,
+    *,
+    max_distance: float = 25.0,
+    bcpd_path: str | Path | None = None,
+) -> tuple[np.ndarray, np.ndarray, str]:
+    """Estimate sample->atlas similarity transform.
+
+    Returns ``(icp_transform, matlab_transform, backend)`` where transforms
+    operate on 0-based XYZ point indices and ``matlab_transform`` is stored
+    in regopts.json.
+    """
+    executable = find_bcpd_executable(bcpd_path)
+    if executable is not None:
+        transform, matlab_transform = _estimate_similarity_bcpd(
+            atlas_points,
+            sample_points,
+            executable,
+        )
+        return transform, matlab_transform, "bcpd"
+
+    transform, matlab_transform = _estimate_similarity_icp(
+        atlas_points,
+        sample_points,
+        max_distance=max_distance,
+    )
+    return transform, matlab_transform, "icp"
+
+
+def _triage_bcpd(
     sample_points: np.ndarray,
     atlas_points: np.ndarray,
     transform_icp: np.ndarray,
+    bcpd_path: Path,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Select candidate corresponding points after coarse alignment."""
+    """Port of triageAndMatchClouds.m."""
     atlas_use = _matlab_cloud_subset(atlas_points, 50_000)
     sample_use = _matlab_cloud_subset(sample_points, 10_000)
     sample_fwd = _transform_points(sample_use, transform_icp)
@@ -180,15 +258,61 @@ def triage_and_match_clouds(
     tree_s = cKDTree(sample_fwd)
     dist_sf, _ = tree_a.query(sample_fwd, k=1)
     dist_fs, _ = tree_s.query(atlas_use, k=1)
-    sample_fwd = sample_fwd[dist_sf <= 50]
-    atlas_use = atlas_use[dist_fs <= 50]
+    sample_fwd = sample_fwd[dist_sf <= 50.0]
+    atlas_use = atlas_use[dist_fs <= 50.0]
 
     if sample_fwd.shape[0] < 6 or atlas_use.shape[0] < 6:
         return np.zeros((0, 3)), np.zeros((0, 3))
 
+    registered_atlas, _ = register_bcpd(
+        atlas_use,
+        sample_fwd,
+        "affine_nonrigid",
+        bcpd_path=bcpd_path,
+        outlier_ratio=0.01,
+        gamma=0.1,
+        beta=15.0,
+        lambda_=3.0,
+        convergence_tolerance=1e-6,
+        normalize_common=True,
+    )
+
+    dists, nn_idx = cKDTree(registered_atlas).query(sample_fwd, k=40)
+    if dists.ndim == 1:
+        dists = dists[:, None]
+        nn_idx = nn_idx[:, None]
+    keep = (dists[:, 0] < 20.0) & (np.median(dists, axis=1) < 50.0)
+    if not np.any(keep):
+        return np.zeros((0, 3)), np.zeros((0, 3))
+
+    sample_kept = sample_fwd[keep]
+    atlas_kept = atlas_use[nn_idx[keep, 0]]
+    sample_orig = _transform_points(sample_kept, np.linalg.inv(transform_icp))
+    return sample_orig, atlas_kept
+
+
+def _triage_icp(
+    sample_points: np.ndarray,
+    atlas_points: np.ndarray,
+    transform_icp: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Nearest-neighbour fallback when BCPD is unavailable."""
+    atlas_use = _matlab_cloud_subset(atlas_points, 50_000)
+    sample_use = _matlab_cloud_subset(sample_points, 10_000)
+    sample_fwd = _transform_points(sample_use, transform_icp)
+
     tree_a = cKDTree(atlas_use)
-    dists, nn_idx = tree_a.query(sample_fwd, k=1)
-    keep = dists < 20
+    tree_s = cKDTree(sample_fwd)
+    dist_sf, _ = tree_a.query(sample_fwd, k=1)
+    dist_fs, _ = tree_s.query(atlas_use, k=1)
+    sample_fwd = sample_fwd[dist_sf <= 50.0]
+    atlas_use = atlas_use[dist_fs <= 50.0]
+
+    if sample_fwd.shape[0] < 6 or atlas_use.shape[0] < 6:
+        return np.zeros((0, 3)), np.zeros((0, 3))
+
+    dists, nn_idx = cKDTree(atlas_use).query(sample_fwd, k=1)
+    keep = dists < 20.0
     if not np.any(keep):
         return np.zeros((0, 3)), np.zeros((0, 3))
 
@@ -198,9 +322,15 @@ def triage_and_match_clouds(
     return sample_orig, atlas_kept
 
 
-def _transform_points(points: np.ndarray, matrix: np.ndarray) -> np.ndarray:
-    if points.shape[0] == 0:
-        return points
-    hom = np.column_stack([points, np.ones(points.shape[0])])
-    out = hom @ matrix.T
-    return out[:, :3]
+def triage_and_match_clouds(
+    sample_points: np.ndarray,
+    atlas_points: np.ndarray,
+    transform_icp: np.ndarray,
+    *,
+    bcpd_path: str | Path | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Select candidate corresponding points after coarse alignment."""
+    executable = find_bcpd_executable(bcpd_path)
+    if executable is not None:
+        return _triage_bcpd(sample_points, atlas_points, transform_icp, executable)
+    return _triage_icp(sample_points, atlas_points, transform_icp)

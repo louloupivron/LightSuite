@@ -18,6 +18,7 @@ from lightsuite.registration.align import (
     similarity_scale,
     triage_and_match_clouds,
 )
+from lightsuite.registration.bcpd import find_bcpd_executable
 from lightsuite.registration.orientation import orientation_path, resolve_orientation, save_orientation
 from lightsuite.registration.plots import save_initial_registration_previews
 from lightsuite.registration.points import extract_atlas_points_gradient, extract_sample_points
@@ -93,24 +94,41 @@ def initialize_brain_registration(config: BrainPipelineConfig) -> RegOptsCheckpo
         msg = "Too few points extracted for coarse registration."
         raise RuntimeError(msg)
 
-    if tv_cloud.shape[0] > 100_000:
-        before = tv_cloud.shape[0]
-        tv_cloud = downsample_point_cloud(tv_cloud, 100_000)
+    bcpd_path = find_bcpd_executable(config.registration.bcpd_path)
+    if bcpd_path is None:
         console.print(
-            f"Downsampled atlas cloud from {before:,} to {tv_cloud.shape[0]:,} points for alignment."
+            "[yellow]bcpd not found on PATH;[/yellow] using Open3D ICP fallback for coarse alignment. "
+            "Install bcpd (same binary as the MATLAB pipeline) for best results."
         )
+        if tv_cloud.shape[0] > 100_000:
+            before = tv_cloud.shape[0]
+            tv_cloud = downsample_point_cloud(tv_cloud, 100_000)
+            console.print(
+                f"Downsampled atlas cloud from {before:,} to {tv_cloud.shape[0]:,} points for ICP."
+            )
+    else:
+        console.print(f"Using BCPD coarse alignment ([bold]{bcpd_path}[/bold])")
 
     console.print("Estimating initial similarity transform...", end=" ")
     t0 = time.perf_counter()
-    transform_icp, transform_matlab = estimate_similarity_transform(tv_cloud, ls_cloud)
+    transform_icp, transform_matlab, backend = estimate_similarity_transform(
+        tv_cloud,
+        ls_cloud,
+        bcpd_path=bcpd_path,
+    )
     console.print(
         f"Done in {time.perf_counter() - t0:.1f}s "
-        f"(scale={similarity_scale(transform_icp):.3f})."
+        f"({backend}, scale={similarity_scale(transform_icp):.3f})."
     )
 
     console.print("Identifying candidate corresponding points...", end=" ")
     t0 = time.perf_counter()
-    cpsample, cpatlas = triage_and_match_clouds(ls_cloud, tv_cloud, transform_icp)
+    cpsample, cpatlas = triage_and_match_clouds(
+        ls_cloud,
+        tv_cloud,
+        transform_icp,
+        bcpd_path=bcpd_path,
+    )
     console.print(f"Done in {time.perf_counter() - t0:.1f}s. Pairs: {cpsample.shape[0]}")
 
     console.print("Saving initial registration previews...", end=" ")

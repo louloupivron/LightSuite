@@ -48,7 +48,8 @@ def test_estimate_similarity_transform_returns_both_frames() -> None:
     rng = np.random.default_rng(1)
     sample = rng.random((500, 3)) * 30.0
     atlas = sample * 1.05 + np.array([4.0, 2.0, 1.0])
-    transform_icp, transform_matlab = estimate_similarity_transform(atlas, sample)
+    transform_icp, transform_matlab, backend = estimate_similarity_transform(atlas, sample)
+    assert backend == "icp"
     assert transform_icp.shape == (4, 4)
     assert transform_matlab.shape == (4, 4)
     assert not np.allclose(transform_icp, transform_matlab)
