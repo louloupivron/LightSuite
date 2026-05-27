@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import platform
 import shutil
 import subprocess
 import tempfile
@@ -38,20 +39,63 @@ _SAVE_FLAGS: dict[TransformType, str] = {
 }
 
 
+def _native_bcpd_candidates(configured: Path) -> list[Path]:
+    """Suggest native BCPD binaries when a Windows ``.exe`` was configured."""
+    candidates: list[Path] = []
+    if configured.name.lower() == "bcpd.exe":
+        candidates.append(configured.with_name("bcpd"))
+        if configured.parent.name.lower() == "win":
+            candidates.append(configured.parent.parent / "bcpd")
+    return candidates
+
+
 def find_bcpd_executable(path: str | Path | None = None) -> Path | None:
     """Locate the BCPD binary on PATH or at an explicit location."""
+    is_windows = platform.system().lower().startswith("win")
+
     if path is not None:
-        candidate = Path(path).expanduser()
-        if candidate.is_file():
-            return candidate.resolve()
-    for name in ("bcpd", "bcpd.exe"):
+        configured = Path(path).expanduser()
+        if configured.is_file():
+            if not is_windows and configured.suffix.lower() == ".exe":
+                for candidate in _native_bcpd_candidates(configured):
+                    if candidate.is_file():
+                        return candidate.resolve()
+                found = shutil.which("bcpd")
+                if found:
+                    return Path(found).resolve()
+            return configured.resolve()
+
+    for name in ("bcpd.exe", "bcpd") if is_windows else ("bcpd", "bcpd.exe"):
         found = shutil.which(name)
         if found:
-            return Path(found).resolve()
+            resolved = Path(found).resolve()
+            if not is_windows and resolved.suffix.lower() == ".exe":
+                continue
+            return resolved
+
     local = Path("./bcpd")
     if local.is_file():
         return local.resolve()
     return None
+
+
+def _exec_format_hint(executable: Path) -> str:
+    if platform.system().lower().startswith("win"):
+        return ""
+    if executable.suffix.lower() != ".exe":
+        return ""
+    native = _native_bcpd_candidates(executable)
+    hints = [
+        "On Linux/macOS, win/bcpd.exe is a Windows binary and cannot be executed.",
+        "Build a native binary in the BCPD source tree: make OPT=-DUSE_OPENMP ENV=LINUX",
+        "Then set registration.bcpd_path to that bcpd file, or remove bcpd_path and rely on PATH.",
+    ]
+    if native:
+        hints.insert(1, f"Expected native binary alongside the source tree, e.g. {native[0]}.")
+    found = shutil.which("bcpd")
+    if found:
+        hints.append(f"A native bcpd was found on PATH: {found}")
+    return "\n".join(hints)
 
 
 def _write_points(path: Path, points: np.ndarray) -> None:
@@ -168,7 +212,16 @@ def register_bcpd(
         if not verbose:
             command.append("-q")
 
-        result = subprocess.run(command, capture_output=True, text=True, check=False)
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, check=False)
+        except OSError as exc:
+            if exc.errno == 8:
+                hint = _exec_format_hint(executable)
+                msg = f"BCPD is not executable on this platform: {executable}"
+                if hint:
+                    msg = f"{msg}\n{hint}"
+                raise RuntimeError(msg) from exc
+            raise
         if result.returncode != 0:
             msg = (
                 "BCPD execution failed "

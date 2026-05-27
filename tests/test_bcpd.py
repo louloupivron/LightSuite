@@ -2,10 +2,37 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
-from lightsuite.registration.bcpd import find_bcpd_executable, register_bcpd
+from lightsuite.registration.bcpd import (
+    _native_bcpd_candidates,
+    find_bcpd_executable,
+    register_bcpd,
+)
+
+
+def test_native_bcpd_candidates_from_win_exe() -> None:
+    configured = Path("/opt/bcpd-master/win/bcpd.exe")
+    candidates = _native_bcpd_candidates(configured)
+    assert candidates[0] == Path("/opt/bcpd-master/win/bcpd")
+    assert candidates[1] == Path("/opt/bcpd-master/bcpd")
+
+
+def test_find_bcpd_prefers_native_binary_over_win_exe(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    source_root = tmp_path / "bcpd-master"
+    win_dir = source_root / "win"
+    win_dir.mkdir(parents=True)
+    (win_dir / "bcpd.exe").write_bytes(b"MZ")
+    native = source_root / "bcpd"
+    native.write_text("#!/bin/sh\necho bcpd\n", encoding="utf-8")
+    native.chmod(0o755)
+
+    monkeypatch.delenv("PATH", raising=False)
+    found = find_bcpd_executable(win_dir / "bcpd.exe")
+    assert found == native.resolve()
 
 
 @pytest.fixture(scope="module")

@@ -113,6 +113,16 @@ If BCPD is missing, LightSuite falls back to Open3D ICP, which is often too weak
 
 Use the same `bcpd` / `bcpd.exe` you already use with the MATLAB LightSuite install, or build from the [BCPD repository](https://github.com/ohirose/bcpd) and add the binary to `PATH`.
 
+On **Linux/macOS**, do **not** point `bcpd_path` at `win/bcpd.exe` — that file is the Windows build. Compile a native binary in the BCPD source tree instead:
+
+```bash
+cd /path/to/bcpd-master
+make OPT=-DUSE_OPENMP ENV=LINUX   # produces ./bcpd
+./bcpd -v
+```
+
+If `bcpd -v` already works in your shell, you can omit `bcpd_path` from the YAML and LightSuite will use the binary on `PATH`.
+
 Optional YAML override:
 
 ```yaml
