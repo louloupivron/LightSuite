@@ -81,8 +81,16 @@ def initialize_brain_registration(config: BrainPipelineConfig) -> RegOptsCheckpo
     console.print("Creating cloud for sample volume...", end=" ")
     t0 = time.perf_counter()
     volumereg = permute_brain_volume(newvol, permvec)
-    ls_cloud = extract_sample_points(volumereg, config.registration.cloud_threshold)
-    console.print(f"Done in {time.perf_counter() - t0:.1f}s. Found {ls_cloud.shape[0]} points.")
+    ls_cloud = extract_sample_points(
+        volumereg,
+        config.registration.cloud_threshold,
+        subsample_fraction=config.registration.sample_cloud_subsample,
+    )
+    console.print(
+        f"Done in {time.perf_counter() - t0:.1f}s. Found {ls_cloud.shape[0]:,} points "
+        f"(subsample={config.registration.sample_cloud_subsample:g}, "
+        f"threshold={config.registration.cloud_threshold:g})."
+    )
 
     console.print("Loading atlas and generating atlas cloud...", end=" ")
     t0 = time.perf_counter()
@@ -144,14 +152,12 @@ def initialize_brain_registration(config: BrainPipelineConfig) -> RegOptsCheckpo
 
     console.print("Saving initial registration previews...", end=" ")
     t0 = time.perf_counter()
-    reg_um = float(checkpoint.registres_um)
-    voxel_pxsize = (reg_um, reg_um, reg_um)
     warped_boundary = save_initial_registration_previews(
         save_path,
         volumereg,
-        boundary_reg,
+        avreg,
         transform_matlab,
-        voxel_pxsize=voxel_pxsize,
+        boundary_atlas=boundary_reg,
     )
     console.print(
         f"Done in {time.perf_counter() - t0:.1f}s "

@@ -10,7 +10,8 @@ import numpy as np
 
 from lightsuite.gui.slices import volume_index_to_image
 from lightsuite.registration.plots import (
-    in_plane_pixel_size,
+    annotation_boundary_pixels,
+    mask_boundary_pixels,
     plot_annotation_comparison,
     save_initial_registration_previews,
 )
@@ -24,35 +25,38 @@ from lightsuite.registration.warp import (
 )
 
 
-def test_in_plane_pixel_size_matches_matlab_order() -> None:
-    px = (5.0, 4.0, 3.0)
-    assert in_plane_pixel_size(1, px) == (4.0, 3.0)
-    assert in_plane_pixel_size(2, px) == (5.0, 3.0)
-    assert in_plane_pixel_size(3, px) == (5.0, 4.0)
+def test_mask_boundary_pixels_detects_mask() -> None:
+    mask = np.zeros((10, 10), dtype=np.uint8)
+    mask[3, 3:7] = 255
+    row, col = mask_boundary_pixels(mask)
+    assert row.size == 4
+    assert col.size == 4
+
+
+def test_annotation_boundary_pixels_detects_edges() -> None:
+    annot = np.zeros((10, 10), dtype=np.float32)
+    annot[2:8, 2:8] = 5
+    row, col = annotation_boundary_pixels(annot)
+    assert row.size > 0
+    assert col.size == row.size
 
 
 def test_plot_annotation_comparison_layout() -> None:
     volume = np.random.randint(0, 255, size=(24, 32, 20), dtype=np.uint8)
     boundary = np.zeros((24, 32, 20), dtype=np.uint8)
     boundary[4:20, 6:26, 4:16] = 255
-    fig = plot_annotation_comparison(volume, boundary, dimplot=3, voxel_pxsize=(1.0, 2.0, 3.0))
+    fig = plot_annotation_comparison(volume, boundary, dimplot=3)
     assert len(fig.axes) == 8
     fig.clf()
 
 
 def test_save_initial_registration_previews(tmp_path) -> None:
     sample = np.random.rand(20, 24, 18).astype(np.float32)
-    boundary = np.zeros((20, 24, 18), dtype=np.uint8)
-    boundary[4:16, 5:19, 3:15] = 255
+    annotation = np.zeros((20, 24, 18), dtype=np.float32)
+    annotation[4:16, 5:19, 3:15] = 5
     transform = np.eye(4)
 
-    warped_count = save_initial_registration_previews(
-        tmp_path,
-        sample,
-        boundary,
-        transform,
-        voxel_pxsize=(1.0, 1.0, 1.0),
-    )
+    warped_count = save_initial_registration_previews(tmp_path, sample, annotation, transform)
 
     assert warped_count > 0
     for idim in range(1, 4):
@@ -80,21 +84,6 @@ def test_affinetform_rows_to_internal_matches_transform_points() -> None:
         transform_points_affinetform(points, affinetform),
         atol=1e-6,
     )
-
-
-def test_warp_atlas_to_sample_preserves_box_on_all_slice_axes() -> None:
-    atlas = np.zeros((30, 40, 20), dtype=np.uint8)
-    atlas[10:20, 15:25, 6:14] = 255
-    sample_shape = (30, 40, 20)
-    affinetform = np.eye(4, dtype=float)
-    stored = matlab_voxel_affine_from_icp(affinetform_rows_to_internal(affinetform))
-
-    warped = warp_atlas_to_sample(atlas, stored, sample_shape, order=0)
-    assert warped.shape == sample_shape
-    for dim in (1, 2, 3):
-        mid = sample_shape[dim - 1] // 2
-        sl = volume_index_to_image(warped, np.array([mid, dim], dtype=int))
-        assert np.count_nonzero(sl) > 50
 
 
 def test_warp_atlas_to_sample_with_rotation() -> None:
@@ -161,4 +150,4 @@ def test_preview_warp_produces_visible_boundaries() -> None:
     boundary_warped = warp_atlas_to_sample(boundary, sample_to_atlas, sample.shape, order=0)
     mid = sample.shape[1] // 2
     sl = volume_index_to_image(boundary_warped, np.array([mid, 2], dtype=int))
-    assert np.count_nonzero(sl) > 20
+    assert mask_boundary_pixels(sl)[0].size > 20

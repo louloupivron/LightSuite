@@ -81,6 +81,12 @@ class RegistrationConfig(BaseModel):
         description="Axis permutation e.g. [1, 2, 3]. Loaded from brain_orientation.txt if unset.",
     )
     cloud_threshold: float = Field(default=5.0, gt=0)
+    sample_cloud_subsample: float = Field(
+        default=0.1,
+        gt=0,
+        le=1.0,
+        description="Random fraction of gradient sample points kept (MATLAB pcdownsample=0.1).",
+    )
     outlier_ratio: float = Field(default=0.01, ge=0, le=1)
     bcpd_path: str | None = Field(
         default=None,

@@ -9,6 +9,8 @@ from scipy import ndimage
 def _random_subsample(points: np.ndarray, fraction: float, seed: int = 1) -> np.ndarray:
     if points.shape[0] == 0:
         return points
+    if fraction >= 1.0:
+        return points
     rng = np.random.default_rng(seed)
     keep = max(1, int(points.shape[0] * fraction))
     if keep >= points.shape[0]:
@@ -17,15 +19,12 @@ def _random_subsample(points: np.ndarray, fraction: float, seed: int = 1) -> np.
     return points[idx]
 
 
-def _voxel_downsample(points: np.ndarray, voxel_size: float) -> np.ndarray:
-    if points.shape[0] == 0:
-        return points
-    bins = np.floor(points / voxel_size).astype(np.int64)
-    _, unique_idx = np.unique(bins, axis=0, return_index=True)
-    return points[np.sort(unique_idx)]
-
-
-def extract_sample_points(volume: np.ndarray, threshold: float) -> np.ndarray:
+def extract_sample_points(
+    volume: np.ndarray,
+    threshold: float,
+    *,
+    subsample_fraction: float = 0.1,
+) -> np.ndarray:
     """Extract gradient-based sample cloud (extractSamplePoints.m)."""
     rng = np.random.default_rng(1)
     grad = np.sqrt(
@@ -47,11 +46,12 @@ def extract_sample_points(volume: np.ndarray, threshold: float) -> np.ndarray:
             for ibz in range(nb[2]):
                 zs = slice(ibz * batch, min((ibz + 1) * batch, sizevol[2]))
                 vol_curr = ndimage.median_filter(volume[ys, xs, zs], size=1)
-                grad_curr = grad[ys, xs, zs]
+                grad_curr = grad[ys, xs, zs].copy()
                 flat = vol_curr.ravel()
                 sample_n = min(10_000, flat.size)
                 idx = rng.choice(flat.size, size=sample_n, replace=False) if flat.size > sample_n else np.arange(flat.size)
                 thres_init = max(float(np.quantile(flat[idx], 0.05)) * 2.0, overall_mode)
+                grad_curr[vol_curr < thres_init] = 0
                 mask = (grad_curr / np.maximum(vol_curr, 1e-6) > threshold) & (vol_curr > thres_init)
                 if not np.any(mask):
                     continue
@@ -75,10 +75,8 @@ def extract_sample_points(volume: np.ndarray, threshold: float) -> np.ndarray:
             & (pts[:, 2] <= sizevol[2] - n_trim)
         )
         pts = pts[keep]
-        pts = _random_subsample(pts, 0.1, seed=1)
-        pts = _voxel_downsample(pts, voxel_size=2.0)
+        pts = _random_subsample(pts, subsample_fraction, seed=1)
     if pts.shape[0] == 0:
-        # Fallback for small or low-contrast volumes: top gradient voxels
         flat_grad = grad.ravel()
         flat_vol = volume.ravel()
         n_keep = min(500, flat_grad.size)

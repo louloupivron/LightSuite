@@ -116,7 +116,8 @@ uv run lightsuite doctor -c my_mouse.yaml
 | `registration.control_point_weight` | Landmark weight in Elastix (0–1) | `0.2` |
 | `registration.augment_points` | Add thinned auto-landmarks to user control points | `false` |
 | `registration.orientation` | Axis permutation, e.g. `[1, 2, 3]`; flips use negative indices | auto |
-| `registration.cloud_threshold` | Edge threshold for coarse ICP point extraction | `5.0` |
+| `registration.cloud_threshold` | Edge threshold for coarse point extraction | `5.0` |
+| `registration.sample_cloud_subsample` | Fraction of gradient points kept (MATLAB `0.1`) | `0.1` |
 
 #### Export
 
@@ -177,17 +178,25 @@ If you already know the permutation, set `registration.orientation` in YAML inst
 
 ### 3. Initial registration
 
-Coarse similarity alignment of sample to atlas using Open3D ICP on edge point clouds.
+Coarse similarity alignment of sample to atlas using BCPD (or Open3D ICP fallback) on gradient point clouds.
 
 ```bash
 uv run lightsuite brain init-registration -c my_mouse.yaml
+```
+
+For sparse lightsheet samples, increase point density in the YAML:
+
+```yaml
+registration:
+  cloud_threshold: 3.0          # lower = more edge points (default 5.0)
+  sample_cloud_subsample: 0.25  # higher = keep more points (MATLAB default 0.1)
 ```
 
 **Outputs:**
 
 - Updated `regopts.json` (`original_trans`, auto control point pairs)
 - `brain_orientation.txt` (if orientation was set in config)
-- `dim{1,2,3}_initial_registration.png` — eight sample slices per axis with warped Allen boundary mask overlaid (requires `annotation_boundary_10.nii.gz` in `atlas_dir` for best results)
+- `dim{1,2,3}_initial_registration.png` — eight sample slices per axis with warped atlas annotation edges overlaid (MATLAB `plotAnnotationComparison` style)
 
 If orientation is wrong, set `registration.orientation` in YAML or edit `brain_orientation.txt`, then re-run init-registration.
 
