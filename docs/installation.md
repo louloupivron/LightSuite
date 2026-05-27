@@ -111,6 +111,7 @@ Registration expects these files in one directory:
 
 - `average_template_10.nii.gz`
 - `annotation_10.nii.gz`
+- `annotation_boundary_10.nii.gz` (recommended — precomputed atlas region outlines for registration preview PNGs)
 
 Download from the [Allen Brain Cell Atlas](https://alleninstitute.github.io/abc_atlas_access/descriptions/Allen-CCF-2020.html) ([volume files](https://allen-brain-cell-atlas.s3.us-west-2.amazonaws.com/index.html#image_volumes/Allen-CCF-2020/20230630/)).
 

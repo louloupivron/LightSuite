@@ -16,6 +16,15 @@ _SWAP_XY = np.array(
 )
 
 
+def matlab_voxel_affine_from_icp(matrix: np.ndarray) -> np.ndarray:
+    """Convert Open3D ICP transform (0-based XYZ) to MATLAB 1-based affinetform3d."""
+    shift_minus = np.eye(4)
+    shift_minus[:3, 3] = -1.0
+    shift_plus = np.eye(4)
+    shift_plus[:3, 3] = 1.0
+    return shift_minus @ np.asarray(matrix, dtype=float) @ shift_plus
+
+
 def pixel_affine_for_volume(matrix_4x4: np.ndarray) -> np.ndarray:
     """Convert 1-based voxel affine to 0-based scipy indexing."""
     shift_minus = np.eye(4)

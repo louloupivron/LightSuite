@@ -10,6 +10,7 @@ ATLAS_FILES: dict[str, dict[str, str]] = {
     "allen": {
         "template": "average_template_10.nii.gz",
         "annotation": "annotation_10.nii.gz",
+        "boundary": "annotation_boundary_10.nii.gz",
     },
     "perens": {
         "template": "gubra_template_olf.nii.gz",
@@ -24,6 +25,7 @@ class AtlasPaths:
     atlas_dir: Path
     template_path: Path
     annotation_path: Path
+    boundary_path: Path | None
     structures_csv_path: Path | None
     supports_parcellation: bool
 
@@ -57,6 +59,7 @@ def resolve_brain_atlas(
     files = ATLAS_FILES[atlas_id]
     template_name = files["template"]
     annotation_name = files["annotation"]
+    boundary_name = files.get("boundary")
 
     if atlas_dir is not None:
         base = atlas_dir.expanduser().resolve()
@@ -90,6 +93,12 @@ def resolve_brain_atlas(
             )
             raise FileNotFoundError(msg)
 
+    boundary_path: Path | None = None
+    if boundary_name is not None:
+        candidate = resolved_dir / boundary_name
+        if candidate.is_file():
+            boundary_path = candidate
+
     structures_csv: Path | None = None
     if atlas_id == "perens":
         csv_candidate = resolved_dir / "ARA2_annotation_info_avail_regions.csv"
@@ -103,6 +112,7 @@ def resolve_brain_atlas(
         atlas_dir=resolved_dir,
         template_path=template_path,
         annotation_path=annotation_path,
+        boundary_path=boundary_path,
         structures_csv_path=structures_csv,
         supports_parcellation=supports_parcellation,
     )

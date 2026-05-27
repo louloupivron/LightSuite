@@ -177,6 +177,25 @@ def _check_brain_atlas(cfg: BrainPipelineConfig | None, strict: bool) -> list[Ch
                 f"{resolved.template_path}",
             )
         )
+        if resolved.boundary_path is not None:
+            results.append(
+                CheckResult(
+                    "Atlas boundary volume (optional)",
+                    True,
+                    str(resolved.boundary_path),
+                    required=False,
+                )
+            )
+        else:
+            results.append(
+                CheckResult(
+                    "Atlas boundary volume (optional)",
+                    False,
+                    "annotation_boundary_10.nii.gz not found; init-registration previews "
+                    "derive boundaries from annotation labels.",
+                    required=False,
+                )
+            )
     except FileNotFoundError as exc:
         results.append(
             CheckResult(

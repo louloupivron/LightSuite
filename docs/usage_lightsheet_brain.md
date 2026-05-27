@@ -103,7 +103,7 @@ uv run lightsuite doctor -c my_mouse.yaml
 |-------|-------------|
 | `atlas.provider` | `allen` (10 µm) or `perens` (20 µm) |
 | `atlas.resolution_um` | Atlas resolution in µm |
-| `atlas.atlas_dir` | Directory with template + annotation NIfTIs (or use `LIGHTSUITE_ATLAS_PATH`) |
+| `atlas.atlas_dir` | Directory with template + annotation NIfTIs; add `annotation_boundary_10.nii.gz` for Allen atlas boundary overlays (or use `LIGHTSUITE_ATLAS_PATH`) |
 
 #### Registration
 
@@ -187,7 +187,7 @@ uv run lightsuite brain init-registration -c my_mouse.yaml
 
 - Updated `regopts.json` (`original_trans`, auto control point pairs)
 - `brain_orientation.txt` (if orientation was set in config)
-- `dim{1,2,3}_initial_registration.png` — eight slices per axis with warped atlas region boundaries overlaid on the sample
+- `dim{1,2,3}_initial_registration.png` — eight sample slices per axis with warped Allen boundary mask overlaid (requires `annotation_boundary_10.nii.gz` in `atlas_dir` for best results)
 
 If orientation is wrong, set `registration.orientation` in YAML or edit `brain_orientation.txt`, then re-run init-registration.
 

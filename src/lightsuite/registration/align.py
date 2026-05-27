@@ -6,6 +6,8 @@ import numpy as np
 import open3d as o3d
 from scipy.spatial import cKDTree
 
+from lightsuite.registration.warp import matlab_voxel_affine_from_icp
+
 
 def _downsample_points(points: np.ndarray, target_count: int, seed: int = 1) -> np.ndarray:
     if points.shape[0] <= target_count:
@@ -71,8 +73,8 @@ def estimate_similarity_transform(
         )
         transform = result2.transformation
 
-    # MATLAB stores the BCPD/ICP sample->atlas fit as original_trans (transinit).
-    return transform
+    # MATLAB stores sample->atlas as original_trans (transinit) in 1-based voxel coords.
+    return matlab_voxel_affine_from_icp(transform)
 
 
 def triage_and_match_clouds(

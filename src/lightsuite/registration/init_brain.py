@@ -44,6 +44,20 @@ def initialize_brain_registration(config: BrainPipelineConfig) -> RegOptsCheckpo
     tvreg = resize_atlas_volume(tv.astype(np.float32), downfac, nearest=False)
     avreg = resize_atlas_volume(av.astype(np.float32), downfac, nearest=True)
 
+    if atlas.boundary_path is not None:
+        boundary_full = np.asanyarray(nib.load(atlas.boundary_path).dataobj)
+        console.print(f"Using atlas boundary volume [bold]{atlas.boundary_path.name}[/bold]")
+    else:
+        console.print(
+            "[yellow]annotation_boundary_10.nii.gz not found in atlas_dir;[/yellow] "
+            "deriving boundaries from annotation labels."
+        )
+        from lightsuite.registration.plots import boundary_volume_from_annotation
+
+        boundary_full = boundary_volume_from_annotation(av)
+    boundary_reg = resize_atlas_volume(boundary_full.astype(np.float32), downfac, nearest=True)
+    boundary_reg = ((boundary_reg > 0).astype(np.uint8)) * 255
+
     permvec = resolve_orientation(config, save_path)
     orient_file = orientation_path(save_path)
     if config.registration.orientation is not None:
@@ -86,8 +100,18 @@ def initialize_brain_registration(config: BrainPipelineConfig) -> RegOptsCheckpo
 
     console.print("Saving initial registration previews...", end=" ")
     t0 = time.perf_counter()
-    save_initial_registration_previews(save_path, volumereg, avreg, transform)
-    console.print(f"Done in {time.perf_counter() - t0:.1f}s.")
+    warped_boundary = save_initial_registration_previews(
+        save_path, volumereg, boundary_reg, transform
+    )
+    console.print(
+        f"Done in {time.perf_counter() - t0:.1f}s "
+        f"({warped_boundary:,} warped boundary voxels)."
+    )
+    if warped_boundary == 0:
+        console.print(
+            "[yellow]Warning:[/yellow] no atlas boundaries overlapped the sample after warping. "
+            "Check coarse alignment and ensure annotation_boundary_10.nii.gz is in atlas_dir."
+        )
 
     checkpoint.permute_sample_to_atlas = permvec
     checkpoint.original_trans = transform.tolist()
