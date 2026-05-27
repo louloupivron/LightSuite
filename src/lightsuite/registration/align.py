@@ -8,12 +8,11 @@ import numpy as np
 import open3d as o3d
 from scipy.spatial import cKDTree
 
-from lightsuite.registration.bcpd import (
-    find_bcpd_executable,
-    register_bcpd,
-    to_matlab_voxel_points,
+from lightsuite.registration.bcpd import find_bcpd_executable, register_bcpd
+from lightsuite.registration.warp import (
+    affinetform_rows_to_internal,
+    matlab_voxel_affine_from_icp,
 )
-from lightsuite.registration.warp import matlab_voxel_affine_from_icp, matlab_voxel_affine_to_icp
 
 
 def _voxel_grid_downsample(points: np.ndarray, max_points: int) -> np.ndarray:
@@ -134,12 +133,10 @@ def _estimate_similarity_bcpd(
     """Port of originalSimilarityTform.m."""
     atlas_use = _matlab_cloud_subset(atlas_points, 50_000)
     sample_use = _matlab_cloud_subset(sample_points, 10_000)
-    atlas_ml = to_matlab_voxel_points(atlas_use)
-    sample_ml = to_matlab_voxel_points(sample_use)
 
     registered, _ = register_bcpd(
-        atlas_ml,
-        sample_ml,
+        atlas_use,
+        sample_use,
         "similarity",
         bcpd_path=bcpd_path,
         outlier_ratio=0.01,
@@ -150,16 +147,16 @@ def _estimate_similarity_bcpd(
         normalize_common=False,
     )
 
-    tree_sample = cKDTree(sample_ml)
+    tree_sample = cKDTree(sample_use)
     tree_registered = cKDTree(registered)
     dist_to_sample, _ = tree_sample.query(registered, k=1)
-    dist_to_registered, _ = tree_registered.query(sample_ml, k=1)
+    dist_to_registered, _ = tree_registered.query(sample_use, k=1)
     keep_atlas = dist_to_sample <= 25.0
     keep_sample = dist_to_registered <= 25.0
 
     _, atlas_to_sample = register_bcpd(
-        atlas_ml[keep_atlas],
-        sample_ml[keep_sample],
+        atlas_use[keep_atlas],
+        sample_use[keep_sample],
         "similarity",
         bcpd_path=bcpd_path,
         outlier_ratio=0.01,
@@ -171,8 +168,9 @@ def _estimate_similarity_bcpd(
     )
 
     sample_to_atlas_affine = np.linalg.inv(atlas_to_sample)
-    transform_icp = matlab_voxel_affine_to_icp(sample_to_atlas_affine)
-    return transform_icp, sample_to_atlas_affine
+    transform_icp = affinetform_rows_to_internal(sample_to_atlas_affine)
+    matlab_transform = matlab_voxel_affine_from_icp(transform_icp)
+    return transform_icp, matlab_transform
 
 
 def _estimate_similarity_icp(
@@ -271,8 +269,8 @@ def _triage_bcpd(
         return np.zeros((0, 3)), np.zeros((0, 3))
 
     registered_atlas, _ = register_bcpd(
-        to_matlab_voxel_points(atlas_use),
-        to_matlab_voxel_points(sample_fwd),
+        atlas_use,
+        sample_fwd,
         "affine_nonrigid",
         bcpd_path=bcpd_path,
         outlier_ratio=0.01,
@@ -283,7 +281,7 @@ def _triage_bcpd(
         normalize_common=True,
     )
 
-    dists, nn_idx = cKDTree(registered_atlas).query(to_matlab_voxel_points(sample_fwd), k=40)
+    dists, nn_idx = cKDTree(registered_atlas).query(sample_fwd, k=40)
     if dists.ndim == 1:
         dists = dists[:, None]
         nn_idx = nn_idx[:, None]

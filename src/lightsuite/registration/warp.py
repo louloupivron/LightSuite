@@ -16,6 +16,21 @@ _SWAP_XY = np.array(
 )
 
 
+def affinetform_rows_to_internal(matrix_4x4: np.ndarray) -> np.ndarray:
+    """Convert ``points @ A + t`` affinetform to internal ``_transform_points`` layout."""
+    matrix = np.asarray(matrix_4x4, dtype=float)
+    internal = np.eye(4, dtype=float)
+    internal[:3, :3] = matrix[:3, :3].T
+    internal[:3, 3] = matrix[:3, 3]
+    return internal
+
+
+def transform_points_affinetform(points: np.ndarray, affinetform: np.ndarray) -> np.ndarray:
+    """Apply affinetform3d-style ``points @ A + t`` on 0-based XYZ points."""
+    matrix = np.asarray(affinetform, dtype=float)
+    return np.asarray(points, dtype=float) @ matrix[:3, :3] + matrix[:3, 3]
+
+
 def matlab_voxel_affine_from_icp(matrix: np.ndarray) -> np.ndarray:
     """Convert Open3D ICP transform (0-based XYZ) to MATLAB 1-based affinetform3d."""
     shift_minus = np.eye(4)
