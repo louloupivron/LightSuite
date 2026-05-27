@@ -13,6 +13,7 @@ from lightsuite.atlas.registry import resolve_brain_atlas
 from lightsuite.config.models import BrainPipelineConfig
 from lightsuite.preprocess.checkpoint import RegOptsCheckpoint
 from lightsuite.registration.align import (
+    coarse_alignment_median_error,
     downsample_point_cloud,
     estimate_similarity_transform,
     similarity_scale,
@@ -109,6 +110,10 @@ def initialize_brain_registration(config: BrainPipelineConfig) -> RegOptsCheckpo
     else:
         console.print(f"Using BCPD coarse alignment ([bold]{bcpd_path}[/bold])")
 
+    console.print(
+        f"Sample shape {volumereg.shape}, atlas shape {tvreg.shape}, orientation {permvec}"
+    )
+
     console.print("Estimating initial similarity transform...", end=" ")
     t0 = time.perf_counter()
     transform_icp, transform_matlab, backend = estimate_similarity_transform(
@@ -120,6 +125,12 @@ def initialize_brain_registration(config: BrainPipelineConfig) -> RegOptsCheckpo
         f"Done in {time.perf_counter() - t0:.1f}s "
         f"({backend}, scale={similarity_scale(transform_icp):.3f})."
     )
+    if ls_cloud.shape[0] > 0:
+        median_err = coarse_alignment_median_error(ls_cloud, tv_cloud, transform_icp)
+        console.print(
+            f"Coarse alignment median atlas distance: {median_err:.1f} voxels "
+            f"(orientation {permvec} applied to sample volume and preview slices)."
+        )
 
     console.print("Identifying candidate corresponding points...", end=" ")
     t0 = time.perf_counter()

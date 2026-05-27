@@ -79,6 +79,16 @@ def find_bcpd_executable(path: str | Path | None = None) -> Path | None:
     return None
 
 
+def to_matlab_voxel_points(points: np.ndarray) -> np.ndarray:
+    """Convert 0-based array indices to MATLAB 1-based voxel coordinates."""
+    return np.asarray(points, dtype=float) + 1.0
+
+
+def from_matlab_voxel_points(points: np.ndarray) -> np.ndarray:
+    """Convert MATLAB 1-based voxel coordinates to 0-based array indices."""
+    return np.asarray(points, dtype=float) - 1.0
+
+
 def _exec_format_hint(executable: Path) -> str:
     if platform.system().lower().startswith("win"):
         return ""
@@ -118,6 +128,56 @@ def _clean_rotation(rotation: np.ndarray) -> np.ndarray:
     return rotation_clean
 
 
+def _transform_rows(points: np.ndarray, linear: np.ndarray, translation: np.ndarray) -> np.ndarray:
+    """Apply ``points @ linear + translation`` (MATLAB affinetform3d / simtform3d rows)."""
+    return points @ linear + translation.reshape(1, 3)
+
+
+def _similarity_forward(
+    points: np.ndarray,
+    scale: float,
+    rotation: np.ndarray,
+    translation: np.ndarray,
+) -> np.ndarray:
+    """Match MATLAB ``simtform3d`` forward: ``points * R * s + t``."""
+    rotation_clean = _clean_rotation(rotation)
+    return _transform_rows(points, rotation_clean * scale, translation)
+
+
+def _similarity_inverse_matrix(
+    scale: float,
+    rotation: np.ndarray,
+    translation: np.ndarray,
+) -> np.ndarray:
+    """Invert a BCPD/MATLAB similarity (moving->fixed) to fixed->moving."""
+    rotation_clean = _clean_rotation(rotation)
+    inv_scale = 1.0 / scale
+    inv_rotation = rotation_clean.T
+    inv_translation = -inv_scale * (translation @ inv_rotation)
+    matrix = np.eye(4, dtype=float)
+    matrix[:3, :3] = inv_rotation * inv_scale
+    matrix[:3, 3] = inv_translation
+    return matrix
+
+
+def _internal_from_affinetform(matrix: np.ndarray) -> np.ndarray:
+    """Convert affinetform3d ``points @ A + t`` storage to ``points @ M.T + t`` form."""
+    aff = np.asarray(matrix, dtype=float)
+    out = np.eye(4, dtype=float)
+    out[:3, :3] = aff[:3, :3].T
+    out[:3, 3] = aff[:3, 3]
+    return out
+
+
+def _affinetform_from_internal(matrix: np.ndarray) -> np.ndarray:
+    """Convert internal transform storage to affinetform3d row convention."""
+    internal = np.asarray(matrix, dtype=float)
+    out = np.eye(4, dtype=float)
+    out[:3, :3] = internal[:3, :3].T
+    out[:3, 3] = internal[:3, 3]
+    return out
+
+
 def _build_global_matrix(
     transform_type: TransformType,
     *,
@@ -126,16 +186,18 @@ def _build_global_matrix(
     translation: np.ndarray | None = None,
     affine: np.ndarray | None = None,
 ) -> np.ndarray:
+    """Build moving->fixed affinetform3d matrix (MATLAB row convention)."""
     matrix = np.eye(4, dtype=float)
+    translation_vec = np.asarray(translation, dtype=float).ravel()[:3]
     if transform_type in {"similarity", "similarity_nonrigid"}:
         rotation_clean = _clean_rotation(rotation)
         uniform_scale = float(np.asarray(scale, dtype=float).ravel()[0])
-        matrix[:3, :3] = uniform_scale * rotation_clean
-        matrix[:3, 3] = np.asarray(translation, dtype=float).ravel()[:3]
+        matrix[:3, :3] = rotation_clean * uniform_scale
+        matrix[:3, 3] = translation_vec
     elif transform_type == "rigid":
         rotation_clean = _clean_rotation(rotation)
         matrix[:3, :3] = rotation_clean
-        matrix[:3, 3] = np.asarray(translation, dtype=float).ravel()[:3]
+        matrix[:3, 3] = translation_vec
     elif transform_type in {"affine", "affine_nonrigid"}:
         affine_matrix = np.asarray(affine, dtype=float)
         if affine_matrix.shape == (4, 4):
@@ -143,8 +205,37 @@ def _build_global_matrix(
             matrix[:3, 3] = affine_matrix[:3, 3]
         else:
             matrix[:3, :3] = affine_matrix
-            matrix[:3, 3] = np.asarray(translation, dtype=float).ravel()[:3]
+            matrix[:3, 3] = translation_vec
     return matrix
+
+
+def _fit_similarity_from_registered(
+    moving: np.ndarray,
+    registered: np.ndarray,
+    *,
+    scale: float,
+    rotation: np.ndarray,
+    translation: np.ndarray,
+) -> np.ndarray:
+    """Pick the BCPD similarity convention that best reproduces ``registered``."""
+    candidates: list[tuple[float, np.ndarray]] = []
+    rotation_clean = _clean_rotation(rotation)
+    translation_vec = np.asarray(translation, dtype=float).ravel()[:3]
+    variants = (
+        ("matlab", rotation_clean * scale, translation_vec),
+        ("transpose", rotation_clean.T * scale, translation_vec),
+        ("scale_left", scale * rotation_clean, translation_vec),
+        ("scale_left_transpose", scale * rotation_clean.T, translation_vec),
+    )
+    for _name, linear, trans in variants:
+        predicted = _transform_rows(moving, linear, trans)
+        err = float(np.linalg.norm(predicted - registered, axis=1).mean())
+        aff = np.eye(4, dtype=float)
+        aff[:3, :3] = linear
+        aff[:3, 3] = trans
+        candidates.append((err, aff))
+    candidates.sort(key=lambda item: item[0])
+    return candidates[0][1]
 
 
 def register_bcpd(
@@ -239,9 +330,11 @@ def register_bcpd(
             scale = _read_matrix(Path(f"{output_prefix}s.txt"))
             rotation = _read_matrix(Path(f"{output_prefix}R.txt"))
             translation = _read_matrix(Path(f"{output_prefix}t.txt"))
-            moving_to_fixed = _build_global_matrix(
-                transform_type,
-                scale=scale,
+            uniform_scale = float(np.asarray(scale, dtype=float).ravel()[0])
+            moving_to_fixed = _fit_similarity_from_registered(
+                moving,
+                registered,
+                scale=uniform_scale,
                 rotation=rotation,
                 translation=translation,
             )
@@ -253,6 +346,24 @@ def register_bcpd(
                 rotation=rotation,
                 translation=translation,
             )
+            predicted = _transform_rows(
+                moving,
+                moving_to_fixed[:3, :3],
+                moving_to_fixed[:3, 3],
+            )
+            err = float(np.linalg.norm(predicted - registered, axis=1).mean())
+            if err > 1.0:
+                alt = np.eye(4, dtype=float)
+                alt[:3, :3] = _clean_rotation(rotation).T
+                alt[:3, 3] = np.asarray(translation, dtype=float).ravel()[:3]
+                alt_err = float(
+                    np.linalg.norm(
+                        _transform_rows(moving, alt[:3, :3], alt[:3, 3]) - registered,
+                        axis=1,
+                    ).mean()
+                )
+                if alt_err < err:
+                    moving_to_fixed = alt
         elif transform_type == "affine":
             affine = _read_matrix(Path(f"{output_prefix}A.txt"))
             translation = _read_matrix(Path(f"{output_prefix}t.txt"))

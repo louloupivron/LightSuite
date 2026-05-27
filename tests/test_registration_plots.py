@@ -58,6 +58,45 @@ def test_save_initial_registration_previews(tmp_path) -> None:
         assert png.stat().st_size > 10_000
 
 
+def test_warp_atlas_to_sample_with_rotation() -> None:
+    boundary = np.zeros((20, 24, 18), dtype=np.uint8)
+    boundary[4:16, 6:18, 4:14] = 255
+    sample_shape = (40, 48, 32)
+
+    rotation = np.array(
+        [
+            [0.98, -0.17, 0.0],
+            [0.17, 0.98, 0.0],
+            [0.0, 0.0, 1.0],
+        ],
+        dtype=float,
+    )
+    affinetform = np.eye(4, dtype=float)
+    affinetform[:3, :3] = rotation * 0.9
+    affinetform[:3, 3] = [4.0, -2.0, 3.0]
+
+    warped = warp_atlas_to_sample(boundary, affinetform, sample_shape, order=0)
+    assert np.count_nonzero(warped) > 100
+
+
+def test_matlab_voxel_affine_roundtrip_with_rotation() -> None:
+    from lightsuite.registration.warp import matlab_voxel_affine_to_icp
+
+    affinetform = np.eye(4, dtype=float)
+    affinetform[:3, :3] = np.array(
+        [
+            [0.95, -0.12, 0.03],
+            [0.11, 0.97, 0.04],
+            [-0.02, -0.03, 1.01],
+        ]
+    )
+    affinetform[:3, 3] = [6.0, -4.0, 2.0]
+    internal = matlab_voxel_affine_to_icp(affinetform)
+    recovered = matlab_voxel_affine_from_icp(internal)
+    assert np.allclose(recovered[:3, :3], affinetform[:3, :3], atol=1e-6)
+    assert np.allclose(recovered[:3, 3], affinetform[:3, 3], atol=1e-6)
+
+
 def test_warp_atlas_to_sample_matches_matlab_imwarp() -> None:
     boundary = np.zeros((20, 24, 18), dtype=np.uint8)
     boundary[4:16, 6:18, 4:14] = 255
