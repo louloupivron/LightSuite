@@ -8,11 +8,13 @@ matplotlib.use("Agg")
 
 import numpy as np
 
+from lightsuite.gui.slices import volume_index_to_image
 from lightsuite.registration.plots import (
     annotation_boundary_pixels,
     plot_annotation_comparison,
     save_initial_registration_previews,
 )
+from lightsuite.registration.warp import warp_atlas_to_sample, warp_volume_affine
 
 
 def test_annotation_boundary_pixels_detects_edges() -> None:
@@ -34,10 +36,9 @@ def test_plot_annotation_comparison_layout() -> None:
 
 def test_save_initial_registration_previews(tmp_path) -> None:
     sample = np.random.rand(20, 24, 18).astype(np.float32)
-    annotation = np.zeros((10, 12, 9), dtype=np.float32)
-    annotation[2:8, 2:10, 2:7] = 5
+    annotation = np.zeros((20, 24, 18), dtype=np.float32)
+    annotation[4:16, 5:19, 3:15] = 55
     transform = np.eye(4)
-    transform[:3, 3] = 1.0
 
     save_initial_registration_previews(tmp_path, sample, annotation, transform)
 
@@ -45,3 +46,17 @@ def test_save_initial_registration_previews(tmp_path) -> None:
         png = tmp_path / f"dim{idim}_initial_registration.png"
         assert png.is_file()
         assert png.stat().st_size > 10_000
+
+
+def test_warp_atlas_to_sample_uses_inverse_transform() -> None:
+    atlas = np.zeros((20, 24, 18), dtype=np.float32)
+    atlas[4:16, 6:18, 4:14] = 88
+    sample_shape = (40, 48, 32)
+    sample_to_atlas = np.eye(4) * 0.5
+    sample_to_atlas[3, 3] = 1.0
+
+    av_correct = warp_atlas_to_sample(atlas, sample_to_atlas, sample_shape, order=0)
+    av_wrong = warp_volume_affine(atlas, sample_to_atlas, sample_shape, order=0)
+
+    assert np.count_nonzero(av_correct > 1) > 500
+    assert np.count_nonzero(av_wrong > 1) < np.count_nonzero(av_correct > 1) / 10

@@ -35,3 +35,19 @@ def warp_volume_affine(
         mode="constant",
         cval=cval,
     )
+
+
+def warp_atlas_to_sample(
+    atlas_volume: np.ndarray,
+    sample_to_atlas: np.ndarray,
+    sample_shape: tuple[int, int, int],
+    *,
+    order: int = 0,
+) -> np.ndarray:
+    """Warp atlas data into the sample grid (initializeRegistration.m / imwarp invert)."""
+    return warp_volume_affine(
+        atlas_volume,
+        np.linalg.inv(np.asarray(sample_to_atlas, dtype=float)),
+        sample_shape,
+        order=order,
+    )

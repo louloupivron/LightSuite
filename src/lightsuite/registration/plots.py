@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from lightsuite.gui.slices import volume_index_to_image
-from lightsuite.registration.warp import warp_volume_affine
+from lightsuite.registration.warp import warp_atlas_to_sample
 
 
 def annotation_boundary_pixels(annotation_slice: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -51,10 +51,11 @@ def plot_annotation_comparison(
             ax.scatter(
                 col * pxsize[1],
                 row * pxsize[0],
-                s=1,
-                c=[(1.0, 0.8, 0.5)],
+                s=4,
+                c="#ffcc80",
                 marker=".",
                 linewidths=0,
+                alpha=0.95,
             )
         ax.set_title(str(islice))
         ax.axis("off")
@@ -73,9 +74,9 @@ def save_initial_registration_previews(
     save_path = Path(save_path)
     volmax = float(np.quantile(sample, 0.999)) or 1.0
     sample_u8 = np.clip(255.0 * sample / volmax, 0, 255).astype(np.uint8)
-    av_warped = warp_volume_affine(
+    av_warped = warp_atlas_to_sample(
         annotation.astype(np.float32),
-        np.asarray(transform, dtype=float),
+        transform,
         sample.shape,
         order=0,
     )

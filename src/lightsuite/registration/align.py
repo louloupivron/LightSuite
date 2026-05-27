@@ -71,7 +71,7 @@ def estimate_similarity_transform(
         )
         transform = result2.transformation
 
-    # MATLAB stores inverted BCPD fit as original_trans (atlas -> sample for forward on sample)
+    # MATLAB stores sample->atlas as original_trans; imwarp uses the inverse for atlas previews.
     return np.linalg.inv(transform)
 
 
