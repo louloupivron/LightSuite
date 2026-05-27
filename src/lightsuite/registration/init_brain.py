@@ -144,8 +144,14 @@ def initialize_brain_registration(config: BrainPipelineConfig) -> RegOptsCheckpo
 
     console.print("Saving initial registration previews...", end=" ")
     t0 = time.perf_counter()
+    reg_um = float(checkpoint.registres_um)
+    voxel_pxsize = (reg_um, reg_um, reg_um)
     warped_boundary = save_initial_registration_previews(
-        save_path, volumereg, boundary_reg, transform_matlab
+        save_path,
+        volumereg,
+        boundary_reg,
+        transform_matlab,
+        voxel_pxsize=voxel_pxsize,
     )
     console.print(
         f"Done in {time.perf_counter() - t0:.1f}s "
