@@ -53,21 +53,10 @@ def _warp_sample_to_atlas_grid(
     original_trans: np.ndarray,
     target_shape: tuple[int, int, int],
 ) -> np.ndarray:
-    """Approximate MATLAB imwarp with original_trans into atlas grid (nearest for v1)."""
-    from scipy.ndimage import affine_transform
+    """MATLAB imwarp(volload, Rvolume, original_trans, OutputView=Rmoving)."""
+    from lightsuite.registration.warp import warp_sample_to_atlas
 
-    matrix = np.linalg.inv(original_trans)
-    linear = matrix[:3, :3]
-    offset = matrix[:3, 3]
-    return affine_transform(
-        volume,
-        linear,
-        offset=offset,
-        output_shape=target_shape,
-        order=1,
-        mode="constant",
-        cval=0.0,
-    )
+    return warp_sample_to_atlas(volume, original_trans, target_shape, order=1)
 
 
 def load_brain_match_points_data(config: BrainPipelineConfig) -> BrainMatchPointsData:

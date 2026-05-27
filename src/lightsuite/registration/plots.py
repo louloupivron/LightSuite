@@ -46,15 +46,16 @@ def plot_annotation_comparison(
         atlasim = volume_index_to_image(annotation, np.array([islice, dimplot], dtype=int))
         row, col = annotation_boundary_pixels(atlasim)
 
-        ax.imshow(histim, cmap="gray", aspect="equal", origin="upper")
+        extent = (0, histim.shape[1], histim.shape[0], 0)
+        ax.imshow(histim, cmap="gray", aspect="equal", origin="upper", extent=extent)
         if row.size:
-            ax.scatter(
+            ax.plot(
                 col * pxsize[1],
                 row * pxsize[0],
-                s=4,
-                c="#ffcc80",
+                linestyle="none",
                 marker=".",
-                linewidths=0,
+                markersize=1.5,
+                color=(1.0, 0.8, 0.5),
                 alpha=0.95,
             )
         ax.set_title(str(islice))

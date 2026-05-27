@@ -71,8 +71,8 @@ def estimate_similarity_transform(
         )
         transform = result2.transformation
 
-    # MATLAB stores sample->atlas as original_trans; imwarp uses the inverse for atlas previews.
-    return np.linalg.inv(transform)
+    # MATLAB stores the BCPD/ICP sample->atlas fit as original_trans (transinit).
+    return transform
 
 
 def triage_and_match_clouds(

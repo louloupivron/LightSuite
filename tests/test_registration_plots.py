@@ -14,7 +14,7 @@ from lightsuite.registration.plots import (
     plot_annotation_comparison,
     save_initial_registration_previews,
 )
-from lightsuite.registration.warp import warp_atlas_to_sample, warp_volume_affine
+from lightsuite.registration.warp import imwarp_volume, warp_atlas_to_sample
 
 
 def test_annotation_boundary_pixels_detects_edges() -> None:
@@ -48,7 +48,7 @@ def test_save_initial_registration_previews(tmp_path) -> None:
         assert png.stat().st_size > 10_000
 
 
-def test_warp_atlas_to_sample_uses_inverse_transform() -> None:
+def test_warp_atlas_to_sample_matches_matlab_imwarp() -> None:
     atlas = np.zeros((20, 24, 18), dtype=np.float32)
     atlas[4:16, 6:18, 4:14] = 88
     sample_shape = (40, 48, 32)
@@ -56,7 +56,26 @@ def test_warp_atlas_to_sample_uses_inverse_transform() -> None:
     sample_to_atlas[3, 3] = 1.0
 
     av_correct = warp_atlas_to_sample(atlas, sample_to_atlas, sample_shape, order=0)
-    av_wrong = warp_volume_affine(atlas, sample_to_atlas, sample_shape, order=0)
+    av_wrong = imwarp_volume(
+        atlas,
+        sample_to_atlas,
+        sample_shape,
+        order=0,
+        point_coords="xyz",
+    )
 
     assert np.count_nonzero(av_correct > 1) > 500
     assert np.count_nonzero(av_wrong > 1) < np.count_nonzero(av_correct > 1) / 10
+
+
+def test_preview_warp_produces_visible_boundaries() -> None:
+    sample = np.full((40, 48, 32), 120, dtype=np.uint8)
+    atlas = np.zeros((20, 24, 18), dtype=np.float32)
+    atlas[4:16, 6:18, 4:14] = 88
+    sample_to_atlas = np.eye(4) * 0.5
+    sample_to_atlas[3, 3] = 1.0
+
+    av_warped = warp_atlas_to_sample(atlas, sample_to_atlas, sample.shape, order=0)
+    mid = sample.shape[1] // 2
+    sl = volume_index_to_image(av_warped, np.array([mid, 2], dtype=int))
+    assert annotation_boundary_pixels(sl)[0].size > 20
