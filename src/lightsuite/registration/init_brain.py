@@ -12,7 +12,11 @@ from rich.console import Console
 from lightsuite.atlas.registry import resolve_brain_atlas
 from lightsuite.config.models import BrainPipelineConfig
 from lightsuite.preprocess.checkpoint import RegOptsCheckpoint
-from lightsuite.registration.align import estimate_similarity_transform, triage_and_match_clouds
+from lightsuite.registration.align import (
+    downsample_point_cloud,
+    estimate_similarity_transform,
+    triage_and_match_clouds,
+)
 from lightsuite.registration.orientation import orientation_path, resolve_orientation, save_orientation
 from lightsuite.registration.plots import save_initial_registration_previews
 from lightsuite.registration.points import extract_atlas_points_gradient, extract_sample_points
@@ -88,20 +92,27 @@ def initialize_brain_registration(config: BrainPipelineConfig) -> RegOptsCheckpo
         msg = "Too few points extracted for coarse registration."
         raise RuntimeError(msg)
 
+    if tv_cloud.shape[0] > 200_000:
+        before = tv_cloud.shape[0]
+        tv_cloud = downsample_point_cloud(tv_cloud, 200_000)
+        console.print(
+            f"Downsampled atlas cloud from {before:,} to {tv_cloud.shape[0]:,} points for alignment."
+        )
+
     console.print("Estimating initial similarity transform...", end=" ")
     t0 = time.perf_counter()
-    transform = estimate_similarity_transform(tv_cloud, ls_cloud)
+    transform_icp, transform_matlab = estimate_similarity_transform(tv_cloud, ls_cloud)
     console.print(f"Done in {time.perf_counter() - t0:.1f}s.")
 
     console.print("Identifying candidate corresponding points...", end=" ")
     t0 = time.perf_counter()
-    cpsample, cpatlas = triage_and_match_clouds(ls_cloud, tv_cloud, transform)
+    cpsample, cpatlas = triage_and_match_clouds(ls_cloud, tv_cloud, transform_icp)
     console.print(f"Done in {time.perf_counter() - t0:.1f}s. Pairs: {cpsample.shape[0]}")
 
     console.print("Saving initial registration previews...", end=" ")
     t0 = time.perf_counter()
     warped_boundary = save_initial_registration_previews(
-        save_path, volumereg, boundary_reg, transform
+        save_path, volumereg, boundary_reg, transform_matlab
     )
     console.print(
         f"Done in {time.perf_counter() - t0:.1f}s "
@@ -114,7 +125,7 @@ def initialize_brain_registration(config: BrainPipelineConfig) -> RegOptsCheckpo
         )
 
     checkpoint.permute_sample_to_atlas = permvec
-    checkpoint.original_trans = transform.tolist()
+    checkpoint.original_trans = transform_matlab.tolist()
     checkpoint.downfac_reg = downfac
     checkpoint.autocpsample = cpsample.tolist()
     checkpoint.autocpatlas = cpatlas.tolist()

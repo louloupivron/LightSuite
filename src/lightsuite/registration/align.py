@@ -26,17 +26,52 @@ def _voxel_grid_downsample(points: np.ndarray, max_points: int) -> np.ndarray:
     return np.asarray(down.points)
 
 
+def _matlab_cloud_subset(points: np.ndarray, count_divisor: int) -> np.ndarray:
+    """Match MATLAB triage/BCPD downsampling (use all points when target count < 6)."""
+    target = int(np.ceil(points.shape[0] / count_divisor))
+    if target >= 6:
+        return _voxel_grid_downsample(points, target)
+    return points
+
+
+def _similarity_init_from_centroids(
+    sample_points: np.ndarray,
+    atlas_points: np.ndarray,
+) -> np.ndarray:
+    """Rough similarity init mapping sample centroid/scale to atlas."""
+    sample_centroid = sample_points.mean(axis=0)
+    atlas_centroid = atlas_points.mean(axis=0)
+    sample_scale = float(np.sqrt(np.mean(np.sum((sample_points - sample_centroid) ** 2, axis=1))))
+    atlas_scale = float(np.sqrt(np.mean(np.sum((atlas_points - atlas_centroid) ** 2, axis=1))))
+    scale = atlas_scale / max(sample_scale, 1e-6)
+
+    transform = np.eye(4, dtype=float)
+    transform[:3, :3] *= scale
+    transform[:3, 3] = atlas_centroid - scale * sample_centroid
+    return transform
+
+
+def downsample_point_cloud(points: np.ndarray, max_points: int) -> np.ndarray:
+    """Reduce a point cloud to at most ``max_points`` via voxel downsampling."""
+    return _voxel_grid_downsample(points, max_points)
+
+
 def estimate_similarity_transform(
     atlas_points: np.ndarray,
     sample_points: np.ndarray,
     *,
     max_distance: float = 25.0,
-) -> np.ndarray:
-    """Estimate 4x4 transform mapping sample points toward atlas space."""
+) -> tuple[np.ndarray, np.ndarray]:
+    """Estimate sample->atlas similarity transform.
+
+    Returns ``(icp_transform, matlab_transform)`` where ``icp_transform`` operates
+    on 0-based XYZ point indices and ``matlab_transform`` is stored in regopts.json.
+    """
     n_down_ls = max(6, int(round(sample_points.shape[0] / 10_000)))
     n_down_tv = max(6, int(round(atlas_points.shape[0] / 50_000)))
     atlas_use = _voxel_grid_downsample(atlas_points, n_down_tv)
     sample_use = _voxel_grid_downsample(sample_points, n_down_ls)
+    init_transform = _similarity_init_from_centroids(sample_use, atlas_use)
 
     source = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(sample_use))
     target = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(atlas_use))
@@ -45,6 +80,7 @@ def estimate_similarity_transform(
         source,
         target,
         max_correspondence_distance=max_distance,
+        init=init_transform,
         estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPoint(
             with_scaling=True
         ),
@@ -52,7 +88,6 @@ def estimate_similarity_transform(
     )
     transform = result.transformation.copy()
 
-    # Outlier rejection pass (MATLAB originalSimilarityTform)
     sample_aligned = _transform_points(sample_use, transform)
     tree_a = cKDTree(atlas_use)
     tree_s = cKDTree(sample_aligned)
@@ -67,27 +102,26 @@ def estimate_similarity_transform(
             source2,
             target2,
             max_correspondence_distance=max_distance,
+            init=transform,
             estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPoint(
                 with_scaling=True
             ),
         )
         transform = result2.transformation
 
-    # MATLAB stores sample->atlas as original_trans (transinit) in 1-based voxel coords.
-    return matlab_voxel_affine_from_icp(transform)
+    matlab_transform = matlab_voxel_affine_from_icp(transform)
+    return transform, matlab_transform
 
 
 def triage_and_match_clouds(
     sample_points: np.ndarray,
     atlas_points: np.ndarray,
-    transform: np.ndarray,
+    transform_icp: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Select candidate corresponding points after coarse alignment."""
-    n_neigh_atlas = max(6, int(np.ceil(atlas_points.shape[0] / 50_000)))
-    n_neigh_samp = max(6, int(np.ceil(sample_points.shape[0] / 10_000)))
-    atlas_use = _voxel_grid_downsample(atlas_points, n_neigh_atlas)
-    sample_use = _voxel_grid_downsample(sample_points, n_neigh_samp)
-    sample_fwd = _transform_points(sample_use, transform)
+    atlas_use = _matlab_cloud_subset(atlas_points, 50_000)
+    sample_use = _matlab_cloud_subset(sample_points, 10_000)
+    sample_fwd = _transform_points(sample_use, transform_icp)
 
     tree_a = cKDTree(atlas_use)
     tree_s = cKDTree(sample_fwd)
@@ -107,7 +141,7 @@ def triage_and_match_clouds(
 
     sample_kept = sample_fwd[keep]
     atlas_kept = atlas_use[nn_idx[keep]]
-    sample_orig = _transform_points(sample_kept, np.linalg.inv(transform))
+    sample_orig = _transform_points(sample_kept, np.linalg.inv(transform_icp))
     return sample_orig, atlas_kept
 
 

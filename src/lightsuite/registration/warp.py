@@ -25,6 +25,15 @@ def matlab_voxel_affine_from_icp(matrix: np.ndarray) -> np.ndarray:
     return shift_minus @ np.asarray(matrix, dtype=float) @ shift_plus
 
 
+def matlab_voxel_affine_to_icp(matrix: np.ndarray) -> np.ndarray:
+    """Inverse of :func:`matlab_voxel_affine_from_icp` for 0-based point clouds."""
+    shift_minus = np.eye(4)
+    shift_minus[:3, 3] = -1.0
+    shift_plus = np.eye(4)
+    shift_plus[:3, 3] = 1.0
+    return shift_plus @ np.asarray(matrix, dtype=float) @ shift_minus
+
+
 def pixel_affine_for_volume(matrix_4x4: np.ndarray) -> np.ndarray:
     """Convert 1-based voxel affine to 0-based scipy indexing."""
     shift_minus = np.eye(4)
