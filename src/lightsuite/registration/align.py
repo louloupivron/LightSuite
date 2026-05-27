@@ -34,6 +34,46 @@ def _matlab_cloud_subset(points: np.ndarray, count_divisor: int) -> np.ndarray:
     return points
 
 
+def _icp_cloud_subset(
+    points: np.ndarray,
+    count_divisor: int,
+    *,
+    cap: int,
+) -> np.ndarray:
+    """Choose an ICP subset; unlike MATLAB BCPD, Open3D needs thousands of points."""
+    n = points.shape[0]
+    target = int(np.ceil(n / count_divisor))
+    if target < 6:
+        count = min(n, cap)
+    else:
+        count = min(max(target, 500), cap)
+    if n <= count:
+        return points
+    return _voxel_grid_downsample(points, count)
+
+
+def similarity_scale(matrix: np.ndarray) -> float:
+    """Uniform scale component of a 3D similarity transform."""
+    return float(np.cbrt(np.linalg.det(np.asarray(matrix, dtype=float)[:3, :3])))
+
+
+def _clamp_similarity_scale(
+    transform: np.ndarray,
+    *,
+    lo: float = 0.75,
+    hi: float = 1.35,
+) -> np.ndarray:
+    """Limit similarity scale to a plausible brain registration range."""
+    out = np.asarray(transform, dtype=float).copy()
+    scale = similarity_scale(out)
+    if lo <= scale <= hi:
+        return out
+    clamped = float(np.clip(scale, lo, hi))
+    linear = out[:3, :3] / scale * clamped
+    out[:3, :3] = linear
+    return out
+
+
 def _similarity_init_from_centroids(
     sample_points: np.ndarray,
     atlas_points: np.ndarray,
@@ -43,7 +83,7 @@ def _similarity_init_from_centroids(
     atlas_centroid = atlas_points.mean(axis=0)
     sample_scale = float(np.sqrt(np.mean(np.sum((sample_points - sample_centroid) ** 2, axis=1))))
     atlas_scale = float(np.sqrt(np.mean(np.sum((atlas_points - atlas_centroid) ** 2, axis=1))))
-    scale = atlas_scale / max(sample_scale, 1e-6)
+    scale = float(np.clip(atlas_scale / max(sample_scale, 1e-6), 0.75, 1.35))
 
     transform = np.eye(4, dtype=float)
     transform[:3, :3] *= scale
@@ -54,6 +94,28 @@ def _similarity_init_from_centroids(
 def downsample_point_cloud(points: np.ndarray, max_points: int) -> np.ndarray:
     """Reduce a point cloud to at most ``max_points`` via voxel downsampling."""
     return _voxel_grid_downsample(points, max_points)
+
+
+def _run_icp(
+    sample_points: np.ndarray,
+    atlas_points: np.ndarray,
+    *,
+    init: np.ndarray,
+    max_distance: float,
+) -> np.ndarray:
+    source = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(sample_points))
+    target = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(atlas_points))
+    result = o3d.pipelines.registration.registration_icp(
+        source,
+        target,
+        max_correspondence_distance=max_distance,
+        init=init,
+        estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPoint(
+            with_scaling=True
+        ),
+        criteria=o3d.pipelines.registration.ICPConvergenceCriteria(max_iteration=100),
+    )
+    return result.transformation.copy()
 
 
 def estimate_similarity_transform(
@@ -67,26 +129,22 @@ def estimate_similarity_transform(
     Returns ``(icp_transform, matlab_transform)`` where ``icp_transform`` operates
     on 0-based XYZ point indices and ``matlab_transform`` is stored in regopts.json.
     """
-    n_down_ls = max(6, int(round(sample_points.shape[0] / 10_000)))
-    n_down_tv = max(6, int(round(atlas_points.shape[0] / 50_000)))
-    atlas_use = _voxel_grid_downsample(atlas_points, n_down_tv)
-    sample_use = _voxel_grid_downsample(sample_points, n_down_ls)
+    sample_cap = min(sample_points.shape[0], 12_000)
+    sample_use = _icp_cloud_subset(sample_points, 10_000, cap=sample_cap)
+    atlas_cap = min(30_000, max(2_000, sample_use.shape[0] * 4))
+    atlas_use = _icp_cloud_subset(atlas_points, 50_000, cap=atlas_cap)
+    if atlas_use.shape[0] > atlas_cap:
+        atlas_use = _voxel_grid_downsample(atlas_use, atlas_cap)
+
     init_transform = _similarity_init_from_centroids(sample_use, atlas_use)
-
-    source = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(sample_use))
-    target = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(atlas_use))
-
-    result = o3d.pipelines.registration.registration_icp(
-        source,
-        target,
-        max_correspondence_distance=max_distance,
-        init=init_transform,
-        estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPoint(
-            with_scaling=True
-        ),
-        criteria=o3d.pipelines.registration.ICPConvergenceCriteria(max_iteration=100),
-    )
-    transform = result.transformation.copy()
+    transform = init_transform
+    for distance in (max(50.0, max_distance * 2.0), max_distance, max_distance * 0.6):
+        transform = _run_icp(
+            sample_use,
+            atlas_use,
+            init=transform,
+            max_distance=distance,
+        )
 
     sample_aligned = _transform_points(sample_use, transform)
     tree_a = cKDTree(atlas_use)
@@ -96,19 +154,14 @@ def estimate_similarity_transform(
     keep_s = dist_s <= max_distance
     keep_a = dist_a <= max_distance
     if keep_s.sum() >= 6 and keep_a.sum() >= 6:
-        source2 = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(sample_use[keep_s]))
-        target2 = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(atlas_use[keep_a]))
-        result2 = o3d.pipelines.registration.registration_icp(
-            source2,
-            target2,
-            max_correspondence_distance=max_distance,
+        transform = _run_icp(
+            sample_use[keep_s],
+            atlas_use[keep_a],
             init=transform,
-            estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPoint(
-                with_scaling=True
-            ),
+            max_distance=max_distance,
         )
-        transform = result2.transformation
 
+    transform = _clamp_similarity_scale(transform)
     matlab_transform = matlab_voxel_affine_from_icp(transform)
     return transform, matlab_transform
 

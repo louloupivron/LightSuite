@@ -15,6 +15,7 @@ from lightsuite.preprocess.checkpoint import RegOptsCheckpoint
 from lightsuite.registration.align import (
     downsample_point_cloud,
     estimate_similarity_transform,
+    similarity_scale,
     triage_and_match_clouds,
 )
 from lightsuite.registration.orientation import orientation_path, resolve_orientation, save_orientation
@@ -92,9 +93,9 @@ def initialize_brain_registration(config: BrainPipelineConfig) -> RegOptsCheckpo
         msg = "Too few points extracted for coarse registration."
         raise RuntimeError(msg)
 
-    if tv_cloud.shape[0] > 200_000:
+    if tv_cloud.shape[0] > 100_000:
         before = tv_cloud.shape[0]
-        tv_cloud = downsample_point_cloud(tv_cloud, 200_000)
+        tv_cloud = downsample_point_cloud(tv_cloud, 100_000)
         console.print(
             f"Downsampled atlas cloud from {before:,} to {tv_cloud.shape[0]:,} points for alignment."
         )
@@ -102,7 +103,10 @@ def initialize_brain_registration(config: BrainPipelineConfig) -> RegOptsCheckpo
     console.print("Estimating initial similarity transform...", end=" ")
     t0 = time.perf_counter()
     transform_icp, transform_matlab = estimate_similarity_transform(tv_cloud, ls_cloud)
-    console.print(f"Done in {time.perf_counter() - t0:.1f}s.")
+    console.print(
+        f"Done in {time.perf_counter() - t0:.1f}s "
+        f"(scale={similarity_scale(transform_icp):.3f})."
+    )
 
     console.print("Identifying candidate corresponding points...", end=" ")
     t0 = time.perf_counter()
