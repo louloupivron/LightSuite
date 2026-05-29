@@ -93,7 +93,8 @@ uv run lightsuite doctor -c my_mouse.yaml
 | `sample.name` | Short sample identifier (used in output filenames) |
 | `sample.source.path` | Folder containing TIFF files |
 | `sample.source.tiff_type` | `channelperfile` (BigStitcher-style) or `planeperfile` (Terastitcher-style) |
-| `sample.scratch` | Fast temp directory (large binary intermediates when detection is enabled) |
+| `sample.scratch` | Fast temp directory; **required disk space** for `planeperfile` XY-downsampled memmap (~`2 × ny × nx × nz × (vx/registres)²` bytes) plus detection scratch |
+| `compute.workers` | Parallel slice workers during preprocess (default `4`; set `1` to disable multiprocessing) |
 | `sample.save_path` | All pipeline outputs and checkpoints |
 | `sample.voxel_um` | Native voxel size `[x, y, z]` in µm — **required** for preprocess |
 

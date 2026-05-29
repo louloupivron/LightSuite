@@ -52,6 +52,13 @@ class TiffStackReader:
     def discovery(self) -> TiffStackDiscovery:
         return self._discovery
 
+    def _open_tiff(self, path: Path) -> tifffile.TiffFile:
+        handle = self._page_infos.get(path)
+        if handle is None:
+            handle = tifffile.TiffFile(path)
+            self._page_infos[path] = handle
+        return handle
+
     def _read_planeperfile(self, z: int, channel: int) -> np.ndarray:
         if channel != 0:
             msg = "planeperfile layout has a single channel."
@@ -59,7 +66,9 @@ class TiffStackReader:
         index = z - 1
         if index < 0 or index >= len(self._discovery.tfiles):
             raise IndexError(f"Slice index {z} out of range 1..{self._discovery.nz}")
-        return tifffile.imread(self._discovery.tfiles[index])
+        path = self._discovery.tfiles[index]
+        with tifffile.TiffFile(path) as tif:
+            return tif.pages[0].asarray()
 
     def _read_channelperfile(self, z: int, channel: int) -> np.ndarray:
         d = self._discovery
@@ -73,11 +82,13 @@ class TiffStackReader:
         if d.multitiffs:
             path = d.tfiles[chan_index]
             if d.use_native_tiff_pages:
-                return tifffile.imread(path, key=z_index - 1)
+                tif = self._open_tiff(path)
+                return tif.pages[z_index - 1].asarray()
             return tifffile.imread(path)
         path = d.tfiles[0]
-        if d.use_native_tiff_pages and d.planes_in_time:
-            return tifffile.imread(path, key=z_index - 1)
+        if d.use_native_tiff_pages:
+            tif = self._open_tiff(path)
+            return tif.pages[z_index - 1].asarray()
         return tifffile.imread(path, key=z_index - 1)
 
     def get_slice(self, z: int, channel: int = 0) -> np.ndarray:

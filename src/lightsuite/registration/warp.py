@@ -3,24 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
-from scipy.ndimage import affine_transform, map_coordinates
-
-
-def _transform_points_internal(points: np.ndarray, matrix: np.ndarray) -> np.ndarray:
-    if points.shape[0] == 0:
-        return points
-    hom = np.column_stack([points, np.ones(points.shape[0])])
-    return (hom @ np.asarray(matrix, dtype=float).T)[:, :3]
-
-
-def _array_indices_to_xyz(indices: np.ndarray) -> np.ndarray:
-    """Convert array indices (Y, X, Z) to point cloud XYZ = (col, row, depth)."""
-    return np.stack([indices[..., 1], indices[..., 0], indices[..., 2]], axis=-1)
-
-
-def _xyz_to_array_coordinates(xyz: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Convert XYZ points back to ``map_coordinates`` input (axis0=Y, axis1=X, axis2=Z)."""
-    return xyz[..., 1], xyz[..., 0], xyz[..., 2]
+from scipy.ndimage import affine_transform
 
 _SWAP_XY = np.array(
     [
@@ -125,23 +108,13 @@ def warp_atlas_to_sample(
     order: int = 0,
 ) -> np.ndarray:
     """Warp atlas annotation/template onto the sample grid (initializeRegistration.m)."""
-    internal = matlab_voxel_affine_to_icp(np.asarray(sample_to_atlas, dtype=float))
-    grid_y, grid_x, grid_z = np.indices(sample_shape, dtype=float)
-    sample_xyz = _array_indices_to_xyz(np.stack([grid_y, grid_x, grid_z], axis=-1))
-    atlas_xyz = _transform_points_internal(
-        sample_xyz.reshape(-1, 3),
-        internal,
-    ).reshape(sample_shape + (3,))
-    coords = _xyz_to_array_coordinates(atlas_xyz)
-    warped = map_coordinates(
-        np.asarray(atlas_volume, dtype=float),
-        coords,
+    return imwarp_volume(
+        atlas_volume,
+        np.linalg.inv(sample_to_atlas),
+        sample_shape,
         order=order,
-        mode="constant",
-        cval=0.0,
-        prefilter=order > 1,
+        point_coords="xyz",
     )
-    return warped.astype(atlas_volume.dtype, copy=False)
 
 
 def warp_sample_to_atlas(
