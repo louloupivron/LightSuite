@@ -36,10 +36,16 @@ def output_xy_shape(ny: int, nx: int, scale_xy: float) -> tuple[int, int]:
 def background_fill_fast(slice_2d: np.ndarray) -> np.ndarray:
     """Replace zero pixels with mode of positive samples (MATLAB preprocess step)."""
     data = np.asarray(slice_2d, dtype=np.uint16)
+    flat = data.ravel()
+    probe = 50_000 if flat.size > 50_000 else flat.size
+    if probe > 0:
+        rng = np.random.default_rng(0)
+        idx = rng.choice(flat.size, size=probe, replace=False) if flat.size > probe else np.arange(flat.size)
+        if not np.any(flat[idx] == 0):
+            return data
     zeros = data == 0
     if not np.any(zeros):
         return data
-    flat = data.ravel()
     sample_size = min(flat.size, 20_000)
     rng = np.random.default_rng(0)
     if flat.size > sample_size:
@@ -58,26 +64,28 @@ def background_fill_fast(slice_2d: np.ndarray) -> np.ndarray:
 
 
 def resize_xy_fast(slice_2d: np.ndarray, scale_xy: float) -> np.ndarray:
-    """Downsample one XY plane; integer stride prefilter when shrinking."""
+    """Downsample one XY plane using striding (crop) with a small zoom fallback."""
     if np.isclose(scale_xy, 1.0):
         return np.asarray(slice_2d, dtype=np.uint16)
 
-    new_h = max(1, int(np.ceil(slice_2d.shape[0] * scale_xy)))
-    new_w = max(1, int(np.ceil(slice_2d.shape[1] * scale_xy)))
-
-    stride = 1
-    if scale_xy < 1.0:
-        stride = max(1, int(1.0 / scale_xy))
+    h, w = slice_2d.shape
+    new_h = max(1, int(np.ceil(h * scale_xy)))
+    new_w = max(1, int(np.ceil(w * scale_xy)))
 
     source = np.asarray(slice_2d, dtype=np.uint16)
+    stride = max(1, min(int(h // new_h), int(w // new_w)))
     if stride > 1:
         source = source[::stride, ::stride]
 
-    if source.shape[0] == new_h and source.shape[1] == new_w:
+    sh, sw = source.shape
+    if sh >= new_h and sw >= new_w:
+        return source[:new_h, :new_w].copy()
+
+    if sh == new_h and sw == new_w:
         return source
 
-    zy = new_h / source.shape[0]
-    zx = new_w / source.shape[1]
+    zy = new_h / sh
+    zx = new_w / sw
     out = zoom(source, (zy, zx), order=1, prefilter=False)
     return np.clip(out, 0, np.iinfo(np.uint16).max).astype(np.uint16)
 

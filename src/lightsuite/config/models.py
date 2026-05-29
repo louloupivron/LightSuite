@@ -122,6 +122,14 @@ class DetectionConfig(BaseModel):
 class ComputeConfig(BaseModel):
     use_gpu: bool = True
     workers: int = Field(default=4, ge=1)
+    max_in_memory_scratch_gb: float = Field(
+        default=24.0,
+        gt=0,
+        description=(
+            "Keep the XY-downsampled scratch volume in RAM when it fits below this size; "
+            "larger stacks use a disk memmap on sample.scratch."
+        ),
+    )
 
 
 class ExportConfig(BaseModel):

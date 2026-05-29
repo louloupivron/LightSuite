@@ -95,6 +95,7 @@ uv run lightsuite doctor -c my_mouse.yaml
 | `sample.source.tiff_type` | `channelperfile` (BigStitcher-style) or `planeperfile` (Terastitcher-style) |
 | `sample.scratch` | Fast temp directory; **required disk space** for `planeperfile` XY-downsampled memmap (~`2 × ny × nx × nz × (vx/registres)²` bytes) plus detection scratch |
 | `compute.workers` | Parallel slice workers for `channelperfile` stacks (default `4`). **`planeperfile` always uses 1 worker** — many TIFFs are faster read sequentially |
+| `compute.max_in_memory_scratch_gb` | XY-downsampled scratch kept in RAM up to this size (default `24`); larger stacks use `sample.scratch` memmap |
 | `sample.save_path` | All pipeline outputs and checkpoints |
 | `sample.voxel_um` | Native voxel size `[x, y, z]` in µm — **required** for preprocess |
 

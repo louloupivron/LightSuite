@@ -125,6 +125,30 @@ def _iter_processed_slices(
         yield from pool.map(process_slice_job, jobs, chunksize=1)
 
 
+def _allocate_xy_stack(
+    *,
+    scratch_dir: Path,
+    sample_name: str,
+    channel: int,
+    shape: tuple[int, int, int],
+    max_in_memory_bytes: int,
+) -> tuple[np.ndarray | np.memmap, Path | None, bool]:
+    """Return (volume, optional memmap path, uses_disk)."""
+    nbytes = int(np.prod(shape)) * np.dtype(np.uint16).itemsize
+    if nbytes <= max_in_memory_bytes:
+        return np.zeros(shape, dtype=np.uint16), None, False
+
+    mmap_path = scratch_dir / f"chan_{channel}_xy_{sample_name}.dat"
+    mmap_path.parent.mkdir(parents=True, exist_ok=True)
+    if mmap_path.exists():
+        mmap_path.unlink()
+    return (
+        np.memmap(mmap_path, dtype=np.uint16, mode="w+", shape=shape),
+        mmap_path,
+        True,
+    )
+
+
 def _process_channel_to_registration_tiff(
     *,
     jobs: list[SliceLoadJob],
@@ -138,17 +162,14 @@ def _process_channel_to_registration_tiff(
     workers: int,
     output_path: Path,
     binary_path: Path | None,
+    max_in_memory_bytes: int,
 ) -> None:
-    mmap_path = scratch_dir / f"chan_{channel}_xy_{sample_name}.dat"
-    mmap_path.parent.mkdir(parents=True, exist_ok=True)
-    if mmap_path.exists():
-        mmap_path.unlink()
-
-    xy_stack = np.memmap(
-        mmap_path,
-        dtype=np.uint16,
-        mode="w+",
+    xy_stack, mmap_path, on_disk = _allocate_xy_stack(
+        scratch_dir=scratch_dir,
+        sample_name=sample_name,
+        channel=channel,
         shape=(out_h, out_w, nz),
+        max_in_memory_bytes=max_in_memory_bytes,
     )
 
     binary_handle = None
@@ -170,7 +191,8 @@ def _process_channel_to_registration_tiff(
                     f"Time per slice {elapsed / islice:.2f} s. Elapsed {elapsed:.2f} s..."
                 )
     finally:
-        del xy_stack
+        if on_disk:
+            del xy_stack
         if binary_handle is not None:
             binary_handle.close()
 
@@ -184,11 +206,14 @@ def _process_channel_to_registration_tiff(
 
     console.print(f"Saving volume for registration (channel {channel})...", end=" ")
     try:
-        xy_stack = np.memmap(mmap_path, dtype=np.uint16, mode="r", shape=(out_h, out_w, nz))
-        write_z_downsampled_volume(xy_stack, output_path, scale_z)
+        if on_disk and mmap_path is not None:
+            xy_read = np.memmap(mmap_path, dtype=np.uint16, mode="r", shape=(out_h, out_w, nz))
+            write_z_downsampled_volume(xy_read, output_path, scale_z)
+            del xy_read
+        else:
+            write_z_downsampled_volume(xy_stack, output_path, scale_z)
     finally:
-        del xy_stack
-        if mmap_path.exists():
+        if on_disk and mmap_path is not None and mmap_path.exists():
             mmap_path.unlink()
     console.print("Done.")
 
@@ -216,11 +241,15 @@ def preprocess_lightsheet_volume(config: BrainPipelineConfig) -> PreprocessResul
     cell_channel = _channel_for_cells(config)
     out_h, out_w = output_xy_shape(ny, nx, scale_xy)
 
+    scratch_bytes = out_h * out_w * nz * 2
+    max_ram_bytes = int(config.compute.max_in_memory_scratch_gb * (1024**3))
+    scratch_in_ram = scratch_bytes <= max_ram_bytes
     if discovery.tiff_type == TiffLayout.PLANE_PER_FILE and nchans == 1:
-        est_xy_gb = (out_h * out_w * nz * 2) / (1024**3)
+        est_xy_gb = scratch_bytes / (1024**3)
+        where = "RAM" if scratch_in_ram else f"disk memmap on {config.sample.scratch}"
         console.print(
-            f"planeperfile: {nz} planes, XY scratch ~{est_xy_gb:.1f} GB on "
-            f"{config.sample.scratch} (workers={workers})."
+            f"planeperfile: {nz} planes, XY scratch ~{est_xy_gb:.1f} GB in {where} "
+            f"(workers={workers})."
         )
 
     for ichannel in range(1, nchans + 1):
@@ -258,6 +287,7 @@ def preprocess_lightsheet_volume(config: BrainPipelineConfig) -> PreprocessResul
             workers=workers,
             output_path=sample_path,
             binary_path=binary_path,
+            max_in_memory_bytes=max_ram_bytes,
         )
         regvolpaths[ichannel] = sample_path
 
