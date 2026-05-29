@@ -7,8 +7,7 @@ from pathlib import Path
 
 import numpy as np
 import tifffile
-from scipy.ndimage import median_filter
-from skimage.transform import resize
+from scipy.ndimage import median_filter, zoom
 
 
 @dataclass(frozen=True)
@@ -63,9 +62,8 @@ def resize_xy_fast(slice_2d: np.ndarray, scale_xy: float) -> np.ndarray:
     if np.isclose(scale_xy, 1.0):
         return np.asarray(slice_2d, dtype=np.uint16)
 
-    h, w = slice_2d.shape
-    new_h = max(1, int(np.ceil(h * scale_xy)))
-    new_w = max(1, int(np.ceil(w * scale_xy)))
+    new_h = max(1, int(np.ceil(slice_2d.shape[0] * scale_xy)))
+    new_w = max(1, int(np.ceil(slice_2d.shape[1] * scale_xy)))
 
     stride = 1
     if scale_xy < 1.0:
@@ -78,22 +76,16 @@ def resize_xy_fast(slice_2d: np.ndarray, scale_xy: float) -> np.ndarray:
     if source.shape[0] == new_h and source.shape[1] == new_w:
         return source
 
-    out = resize(
-        source,
-        (new_h, new_w),
-        order=1,
-        preserve_range=True,
-        anti_aliasing=False,
-    )
+    zy = new_h / source.shape[0]
+    zx = new_w / source.shape[1]
+    out = zoom(source, (zy, zx), order=1, prefilter=False)
     return np.clip(out, 0, np.iinfo(np.uint16).max).astype(np.uint16)
 
 
 def read_source_plane(job: SliceLoadJob) -> np.ndarray:
     if job.z_page is None:
-        with tifffile.TiffFile(job.source_path) as tif:
-            return tif.pages[0].asarray()
-    with tifffile.TiffFile(job.source_path) as tif:
-        return tif.pages[job.z_page].asarray()
+        return tifffile.imread(job.source_path)
+    return tifffile.imread(job.source_path, key=job.z_page)
 
 
 def process_slice_job(job: SliceLoadJob) -> SliceProcessResult:

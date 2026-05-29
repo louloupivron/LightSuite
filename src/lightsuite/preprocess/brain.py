@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Iterator
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -95,16 +96,33 @@ def _slice_jobs_for_channel(
     return jobs
 
 
+def _effective_preprocess_workers(
+    discovery: TiffStackDiscovery,
+    requested: int,
+) -> int:
+    """Many small TIFFs (planeperfile) are faster sequentially — parallel reads thrash disk."""
+    if discovery.tiff_type != TiffLayout.PLANE_PER_FILE:
+        return max(1, requested)
+    if requested <= 1:
+        return 1
+    console.print(
+        "[yellow]planeperfile: using 1 worker "
+        f"(requested {requested}; parallel reads slow on many TIFF files).[/yellow]"
+    )
+    return 1
+
+
 def _iter_processed_slices(
     jobs: list[SliceLoadJob],
     workers: int,
-) -> list[SliceProcessResult]:
+) -> Iterator[SliceProcessResult]:
     if workers <= 1:
-        return [process_slice_job(job) for job in jobs]
+        for job in jobs:
+            yield process_slice_job(job)
+        return
 
-    chunksize = max(1, len(jobs) // (workers * 4))
     with ProcessPoolExecutor(max_workers=workers) as pool:
-        return list(pool.map(process_slice_job, jobs, chunksize=chunksize))
+        yield from pool.map(process_slice_job, jobs, chunksize=1)
 
 
 def _process_channel_to_registration_tiff(
@@ -181,7 +199,7 @@ def preprocess_lightsheet_volume(config: BrainPipelineConfig) -> PreprocessResul
     registres = config.registration.resolution_um
     scale_xy = vx / registres
     scale_z = vz / registres
-    workers = config.compute.workers
+    requested_workers = config.compute.workers
 
     config.sample.scratch.mkdir(parents=True, exist_ok=True)
     config.sample.save_path.mkdir(parents=True, exist_ok=True)
@@ -191,6 +209,7 @@ def preprocess_lightsheet_volume(config: BrainPipelineConfig) -> PreprocessResul
         tiff_type=config.sample.source.tiff_type,
     )
     reader = TiffStackReader(discovery, voxel_um=(vx, vy, vz))
+    workers = _effective_preprocess_workers(discovery, requested_workers)
 
     ny, nx, nz, nchans = discovery.ny, discovery.nx, discovery.nz, discovery.nchans
     regvolpaths: dict[int, Path] = {}

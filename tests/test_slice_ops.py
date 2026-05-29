@@ -6,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 import tifffile
+from scipy.ndimage import zoom
 from skimage.transform import resize
 
 from lightsuite.preprocess.slice_ops import (
@@ -38,13 +39,8 @@ def test_background_fill_fast_zeros() -> None:
 def test_z_downsample_streaming(tmp_path: Path) -> None:
     vol = np.arange(24, dtype=np.uint16).reshape(2, 3, 4)
     scale_z = 0.5
-    expected = resize(
-        vol,
-        (2, 3, output_z_count(4, scale_z)),
-        order=1,
-        preserve_range=True,
-        anti_aliasing=False,
-    ).astype(np.uint16)
+    new_z = output_z_count(4, scale_z)
+    expected = zoom(vol, (1.0, 1.0, new_z / 4), order=1, prefilter=False).astype(np.uint16)
 
     out_path = tmp_path / "down.tif"
     write_z_downsampled_volume(vol, out_path, scale_z)
