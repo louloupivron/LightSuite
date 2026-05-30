@@ -8,16 +8,43 @@ from pathlib import Path
 from skimage.transform import resize
 
 
+def _stack_tiff_pages(tif: tifffile.TiffFile, path: Path) -> np.ndarray:
+    """Stack TIFF planes to (Z, Y, X), handling modern tifffile series layout."""
+    if len(tif.pages) == 0:
+        msg = f"No TIFF pages in {path}"
+        raise ValueError(msg)
+
+    if len(tif.pages) == 1:
+        return np.asarray(tif.pages[0].asarray(), dtype=np.float32)
+
+    # tifffile >= 2024 often exposes each IFD as its own 2D series; asarray() is then
+    # only the first plane while Fiji/ImageJ still show the full stack.
+    if len(tif.series) == 1 and tif.series[0].ndim == 3:
+        data = np.asarray(tif.series[0].asarray(), dtype=np.float32)
+        axes = tif.series[0].axes
+        if axes in {"ZYX", "IYX"}:
+            return data
+        if axes == "XYZ":
+            return np.moveaxis(data, -1, 0)
+        msg = f"Unsupported TIFF series axes {axes!r} in {path}"
+        raise ValueError(msg)
+
+    planes = [np.asarray(page.asarray(), dtype=np.float32) for page in tif.pages]
+    if any(p.ndim != 2 for p in planes):
+        msg = f"Expected 2D TIFF pages, got shapes {[p.shape for p in planes[:3]]} in {path}"
+        raise ValueError(msg)
+    return np.stack(planes, axis=0)
+
+
 def load_registration_volume(path: Path) -> np.ndarray:
     """Load a multi-page registration TIFF as (Y, X, Z) float32."""
     path = path.expanduser()
     with tifffile.TiffFile(path) as tif:
-        stack = tif.asarray()
+        stack = _stack_tiff_pages(tif, path)
     if stack.ndim == 2:
-        return stack.astype(np.float32)
+        return stack
     if stack.ndim == 3:
-        # Pages are Z; convert to Y, X, Z
-        return np.moveaxis(stack.astype(np.float32), 0, -1)
+        return np.moveaxis(stack, 0, -1)
     msg = f"Unexpected TIFF shape {stack.shape} in {path}"
     raise ValueError(msg)
 
