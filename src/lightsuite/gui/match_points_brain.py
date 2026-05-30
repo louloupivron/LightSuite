@@ -135,8 +135,12 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
         sample_layer.data = sample
         atlas_layer.data = atlas
         _layout_atlas()
-        sample_pts.data = _points_for_slice(data.session, idx, "sample")
-        atlas_pts.data = _points_for_slice(data.session, idx, "atlas")
+        # Block data events: programmatic updates must not re-enter the point
+        # change handlers (_sample_changed / _atlas_changed), which call _try_align
+        # and would otherwise recurse until vispy transform updates overflow.
+        with sample_pts.events.data.blocker(), atlas_pts.events.data.blocker():
+            sample_pts.data = _points_for_slice(data.session, idx, "sample")
+            atlas_pts.data = _points_for_slice(data.session, idx, "atlas")
         matrix = np.asarray(data.session.atlas2histology_tform, dtype=float)
         if state["show_overlay"]:
             overlay_layer.data = _boundary_overlay(
