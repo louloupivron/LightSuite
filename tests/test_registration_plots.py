@@ -14,6 +14,7 @@ from lightsuite.registration.plots import (
     mask_boundary_pixels,
     plot_annotation_comparison,
     save_initial_registration_previews,
+    save_registration_stage_previews,
 )
 from lightsuite.registration.warp import (
     affinetform_rows_to_internal,
@@ -48,6 +49,21 @@ def test_plot_annotation_comparison_layout() -> None:
     fig = plot_annotation_comparison(volume, boundary, dimplot=3)
     assert len(fig.axes) == 8
     fig.clf()
+
+
+def test_save_registration_stage_previews(tmp_path) -> None:
+    sample_u8 = np.random.randint(0, 255, size=(24, 32, 20), dtype=np.uint8)
+    annotation = np.zeros((24, 32, 20), dtype=np.float32)
+    annotation[4:20, 6:26, 4:16] = 5
+
+    save_registration_stage_previews(
+        tmp_path, "mouse1", sample_u8, annotation, "affine_registration"
+    )
+
+    for idim in range(1, 4):
+        png = tmp_path / f"mouse1_dim{idim}_affine_registration.png"
+        assert png.is_file()
+        assert png.stat().st_size > 10_000
 
 
 def test_save_initial_registration_previews(tmp_path) -> None:

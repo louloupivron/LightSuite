@@ -8,7 +8,6 @@ import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-import matplotlib.pyplot as plt
 import nibabel as nib
 import numpy as np
 from rich.console import Console
@@ -29,6 +28,7 @@ from lightsuite.registration.elastix.invert import (
 )
 from lightsuite.registration.elastix.points import voxel_points_to_physical
 from lightsuite.registration.elastix.runner import run_bspline_registration, run_transformix
+from lightsuite.registration.plots import save_registration_stage_previews
 from lightsuite.registration.points_utils import thin_point_list
 from lightsuite.registration.volume import (
     load_registration_volume,
@@ -186,34 +186,6 @@ def _prepare_control_points(
     return tform_aff, cpaffine, cptshistology, cpwt
 
 
-def _save_registration_previews(
-    save_path: Path,
-    sample_name: str,
-    sample_u8: np.ndarray,
-    annotation: np.ndarray,
-    stage: str,
-) -> None:
-    for idim in range(3):
-        fig, axes = plt.subplots(1, 2, figsize=(10, 5))
-        mid = sample_u8.shape[idim] // 2
-        if idim == 0:
-            sl_sample, sl_ann = sample_u8[mid], annotation[mid]
-        elif idim == 1:
-            sl_sample, sl_ann = sample_u8[:, mid], annotation[:, mid]
-        else:
-            sl_sample, sl_ann = sample_u8[:, :, mid], annotation[:, :, mid]
-        axes[0].imshow(sl_sample, cmap="gray", aspect="auto")
-        axes[0].set_title("Sample")
-        axes[1].imshow(sl_ann, cmap="nipy_spectral", aspect="auto")
-        axes[1].set_title("Atlas annotation")
-        for ax in axes:
-            ax.axis("off")
-        fig.suptitle(f"{sample_name} — {stage} (dim {idim + 1})")
-        out = save_path / f"{sample_name}_dim{idim + 1}_{stage}.png"
-        fig.savefig(out, dpi=120, bbox_inches="tight")
-        plt.close(fig)
-
-
 def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool = True) -> Path:
     """Run elastix B-spline registration and write transform_params.json."""
     checkpoint, session = validate_registration_inputs(config)
@@ -262,7 +234,7 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
 
     hi = float(np.quantile(volume, 0.999))
     voltoshow = np.clip(volume / max(hi, 1e-6) * 255.0, 0, 255).astype(np.uint8)
-    _save_registration_previews(
+    save_registration_stage_previews(
         save_path, config.sample.name, voltoshow, avaffine, "affine_registration"
     )
 
@@ -297,7 +269,7 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
         nearest=True,
     )
     console.print(f"Done in {time.perf_counter() - t0:.1f}s.")
-    _save_registration_previews(
+    save_registration_stage_previews(
         save_path, config.sample.name, voltoshow, avreg, "bspline_registration"
     )
 

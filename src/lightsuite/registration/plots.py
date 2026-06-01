@@ -127,3 +127,24 @@ def save_initial_registration_previews(
         plt.close(fig)
 
     return warped_count
+
+
+def save_registration_stage_previews(
+    save_path: Path,
+    sample_name: str,
+    sample_u8: np.ndarray,
+    annotation_in_sample_space: np.ndarray,
+    stage: str,
+) -> None:
+    """Write ``{name}_dim{1,2,3}_{stage}.png`` (MATLAB ``plotAnnotationComparison`` style).
+
+    ``stage`` is e.g. ``affine_registration`` or ``bspline_registration``. The annotation
+    volume must already be in sample voxel space (``avaffine`` / ``avreg``).
+    """
+    save_path = Path(save_path)
+    ann = np.asarray(annotation_in_sample_space, dtype=np.float32)
+    for dimplot in range(1, 4):
+        fig = plot_annotation_comparison(sample_u8, ann, dimplot)
+        out = save_path / f"{sample_name}_dim{dimplot}_{stage}.png"
+        fig.savefig(out, dpi=120, bbox_inches="tight")
+        plt.close(fig)
