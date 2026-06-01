@@ -171,9 +171,6 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
         np.zeros((0, 2)),
         name="sample_points",
         face_color="yellow",
-        border_color="black",
-        text="",
-        text_color="yellow",
         size=10,
         ndim=2,
     )
@@ -181,9 +178,6 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
         np.zeros((0, 2)),
         name="atlas_points",
         face_color="cyan",
-        border_color="black",
-        text="",
-        text_color="cyan",
         size=10,
         ndim=2,
     )
@@ -192,7 +186,11 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
         labels = _pair_labels(int(xy.shape[0]))
         with layer.events.data.blocker():
             layer.data = xy
-            layer.text = labels
+            if hasattr(layer, "text"):
+                try:
+                    layer.text = labels
+                except (TypeError, ValueError, AttributeError):
+                    pass
 
     def _layout_panels() -> None:
         """Place sample + overlay on the left, atlas + atlas points on the right."""
