@@ -180,8 +180,10 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
         n_s = len(data.session.histology_control_points[idx - 1])
         n_a = len(data.session.atlas_control_points[idx - 1])
         caption = _chooselist_slice_label(data.chooselist, idx)
+        overlay_flag = "on" if state["show_overlay"] else "off"
         viewer.status = (
-            f"Slice {idx}/{n_slices} ({caption}) | sample pts={n_s} atlas pts={n_a}"
+            f"Slice {idx}/{n_slices} ({caption}) | sample pts={n_s} atlas pts={n_a} "
+            f"| overlay {overlay_flag} (press O to toggle)"
         )
         viewer.reset_view()
 
@@ -239,7 +241,7 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
             "step": 1,
             "label": "Slice # (chooselist index)",
         },
-        show_overlay={"label": "Show atlas boundary overlay on sample"},
+        show_overlay={"label": "Atlas boundary overlay on sample (shortcut: O)"},
         call_button="Show slice",
     )
     def navigation(slice_index: int = 1, show_overlay: bool = True) -> None:
@@ -278,6 +280,12 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
         data.session.atlas_control_points[idx - 1] = []
         _refresh()
 
+    def _toggle_overlay(_viewer) -> None:
+        _navigate_to(show_overlay=not state["show_overlay"])
+
+    viewer.bind_key("O", _toggle_overlay)
+    viewer.bind_key("o", _toggle_overlay)
+
     viewer.window.add_dock_widget(navigation, area="right", name="Navigation")
     viewer.window.add_dock_widget(previous_slice, area="right", name="Previous slice")
     viewer.window.add_dock_widget(next_slice, area="right", name="Next slice")
@@ -289,6 +297,7 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
     console.print(
         "[bold]Napari control-point GUI[/bold] — sample (left), atlas (right). "
         "Use the Navigation panel (Previous / Next / Show slice); "
+        "press [bold]O[/bold] to toggle the atlas overlay; "
         "the Napari dimension slider does not change slices here."
     )
     napari.run()
