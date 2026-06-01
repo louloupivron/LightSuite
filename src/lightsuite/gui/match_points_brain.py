@@ -9,7 +9,8 @@ import numpy as np
 from rich.console import Console
 
 from lightsuite.config.models import BrainPipelineConfig
-from lightsuite.gui.affine import fit_affine_transform, transform_points
+from lightsuite.gui.affine import fit_affine_transform
+from lightsuite.registration.warp import warp_volume_affine
 from lightsuite.gui.brain_data import (
     BrainMatchPointsData,
     load_brain_match_points_data,
@@ -113,36 +114,15 @@ def _pair_status(n_sample: int, n_atlas: int) -> str:
     return f"pairs={n_pairs} | place sample point #{n_sample + 1}"
 
 
-def _boundary_overlay(
-    annotation: np.ndarray,
-    chooserow: np.ndarray,
-    matrix: np.ndarray,
-    sample_shape: tuple[int, int],
-) -> np.ndarray:
-    """Warp annotation slice boundaries onto sample slice (approximate overlay)."""
+def _boundary_overlay(warped_annotation: np.ndarray, chooserow: np.ndarray) -> np.ndarray:
+    """Extract boundary mask from annotation already warped into sample space."""
     from scipy.ndimage import convolve
 
-    ann_slice = volume_index_to_image(annotation, chooserow)
-    warped_vol = transform_points(
-        np.column_stack(
-            [
-                np.repeat(np.arange(ann_slice.shape[0]), ann_slice.shape[1]),
-                np.tile(np.arange(ann_slice.shape[1]), ann_slice.shape[0]),
-                np.zeros(ann_slice.size),
-            ]
-        ),
-        matrix,
-    )
-    # Fallback: show atlas edge map on sample grid
+    ann_slice = volume_index_to_image(warped_annotation, chooserow)
     edges = ann_slice.astype(float)
     kernel = np.ones((3, 3)) / 9.0
     blurred = convolve(edges, kernel, mode="constant")
-    boundary = (np.round(blurred) != edges).astype(float)
-    if boundary.shape != sample_shape:
-        from skimage.transform import resize
-
-        boundary = resize(boundary, sample_shape, order=0, preserve_range=True, anti_aliasing=False)
-    return boundary
+    return (np.round(blurred) != edges).astype(float)
 
 
 def _chooselist_slice_label(chooselist: np.ndarray, slice_idx: int) -> str:
@@ -169,7 +149,14 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
 
     data = load_brain_match_points_data(config)
     n_slices = int(data.chooselist.shape[0])
-    state = {"slice": 1, "show_overlay": True, "_nav_syncing": False, "_view_shape": None}
+    state = {
+        "slice": 1,
+        "show_overlay": True,
+        "_nav_syncing": False,
+        "_view_shape": None,
+        "_warped_annotation_key": None,
+        "_warped_annotation": None,
+    }
 
     viewer = napari.Viewer(title=f"LightSuite — {config.sample.name}")
     viewer.dims.ndisplay = 2
@@ -211,6 +198,22 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
                     pass
             _configure_point_text(layer)
 
+    def _warped_annotation_volume(matrix: np.ndarray) -> np.ndarray:
+        """Cache full annotation warp; recomputed when atlas2histology_tform changes."""
+        key = np.asarray(matrix, dtype=float).tobytes()
+        if state["_warped_annotation_key"] == key and state["_warped_annotation"] is not None:
+            return state["_warped_annotation"]
+        warped = warp_volume_affine(
+            data.atlas_annotation.astype(np.float32),
+            matrix,
+            data.sample_volume.shape,
+            order=0,
+            point_coords="array",
+        )
+        state["_warped_annotation_key"] = key
+        state["_warped_annotation"] = warped
+        return warped
+
     def _layout_panels() -> None:
         """Place sample + overlay on the left, atlas + atlas points on the right."""
         _h, w = sample_layer.data.shape
@@ -243,10 +246,8 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
         matrix = np.asarray(data.session.atlas2histology_tform, dtype=float)
         if state["show_overlay"]:
             overlay_layer.data = _boundary_overlay(
-                data.atlas_annotation,
-                data.chooselist[idx - 1],
-                matrix,
-                sample.shape,
+                _warped_annotation_volume(matrix),
+                np.asarray(data.chooselist[idx - 1], dtype=int),
             )
             overlay_layer.visible = True
         else:

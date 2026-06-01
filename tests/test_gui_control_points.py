@@ -13,15 +13,35 @@ from lightsuite.config.loader import load_config
 from lightsuite.gui.affine import fit_affine_transform
 from lightsuite.gui.brain_data import prepare_brain_match_points_session
 from lightsuite.gui.match_points_brain import (
+    _boundary_overlay,
     _chooselist_slice_label,
     _layer_xy_to_volume_point,
     _volume_points_to_layer_xy,
 )
+from lightsuite.registration.warp import warp_volume_affine
 from lightsuite.gui.chooselist import generate_control_point_list
 from lightsuite.gui.control_points import ControlPointSession
 from lightsuite.gui.slices import volume_index_to_image
 from lightsuite.preprocess.brain import preprocess_lightsheet_volume
 from lightsuite.registration.init_brain import initialize_brain_registration
+
+
+def test_boundary_overlay_follows_affine_warp() -> None:
+    ann = np.zeros((24, 24, 24), dtype=np.float32)
+    ann[8:16, 8:16, 8:16] = 100.0
+    row = np.array([12, 3, 1, 1], dtype=int)  # axial slice through the cube
+    shape = ann.shape
+    identity = np.eye(4)
+    shifted = identity.copy()
+    shifted[0, 3] = 6.0
+    warped_id = warp_volume_affine(ann, identity, shape, order=0, point_coords="array")
+    warped_shift = warp_volume_affine(ann, shifted, shape, order=0, point_coords="array")
+    overlay_id = _boundary_overlay(warped_id, row)
+    overlay_shift = _boundary_overlay(warped_shift, row)
+    assert overlay_id.shape == overlay_shift.shape
+    assert overlay_id.sum() > 0
+    assert overlay_shift.sum() > 0
+    assert not np.allclose(overlay_id, overlay_shift)
 
 
 def test_control_point_layer_xy_roundtrip() -> None:
