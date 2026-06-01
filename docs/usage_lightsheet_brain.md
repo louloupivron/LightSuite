@@ -215,7 +215,8 @@ Requires `uv sync --extra gui`.
 **Workflow:**
 
 1. Navigate slices with the **Navigation** panel on the right:
-   - **Previous slice** / **Next slice** buttons, or change **Slice #** and click **Show slice**
+   - **←** / **→** arrow keys for previous/next slice (or use the panel buttons)
+   - Change **Slice #** and click **Show slice** to jump to a specific index
    - Toggle the atlas boundary overlay with **O** or the checkbox in Navigation
    - The spinbox also refreshes when you press Enter or change the value
    - Do **not** use Napari’s bottom dimension slider — it does not switch chooselist slices

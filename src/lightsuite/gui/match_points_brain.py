@@ -183,7 +183,7 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
         overlay_flag = "on" if state["show_overlay"] else "off"
         viewer.status = (
             f"Slice {idx}/{n_slices} ({caption}) | sample pts={n_s} atlas pts={n_a} "
-            f"| overlay {overlay_flag} (press O to toggle)"
+            f"| overlay {overlay_flag} (O) | ←/→ prev/next slice"
         )
         viewer.reset_view()
 
@@ -283,8 +283,16 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
     def _toggle_overlay(_viewer) -> None:
         _navigate_to(show_overlay=not state["show_overlay"])
 
+    def _previous_slice_key(_viewer) -> None:
+        _navigate_to(state["slice"] - 1)
+
+    def _next_slice_key(_viewer) -> None:
+        _navigate_to(state["slice"] + 1)
+
     # Napari normalizes key names; O and o are the same binding.
     viewer.bind_key("O", _toggle_overlay)
+    viewer.bind_key("Left", _previous_slice_key, overwrite=True)
+    viewer.bind_key("Right", _next_slice_key, overwrite=True)
 
     viewer.window.add_dock_widget(navigation, area="right", name="Navigation")
     viewer.window.add_dock_widget(previous_slice, area="right", name="Previous slice")
@@ -296,9 +304,8 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
 
     console.print(
         "[bold]Napari control-point GUI[/bold] — sample (left), atlas (right). "
-        "Use the Navigation panel (Previous / Next / Show slice); "
-        "press [bold]O[/bold] to toggle the atlas overlay; "
-        "the Napari dimension slider does not change slices here."
+        "Shortcuts: [bold]←[/bold]/[bold]→[/bold] previous/next slice, [bold]O[/bold] toggle overlay. "
+        "Or use the Navigation panel; the Napari dimension slider does not change slices here."
     )
     napari.run()
     return data.session_path
