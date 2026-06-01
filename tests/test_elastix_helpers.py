@@ -12,7 +12,10 @@ from lightsuite.registration.elastix.runner import (
     _patch_transformix_params,
 )
 from lightsuite.registration.elastix.params import build_bspline_params, write_parameter_file
-from lightsuite.registration.elastix.points import voxel_points_to_physical, write_landmark_file
+from lightsuite.registration.elastix.points import (
+    volume_indices_to_elastix_physical,
+    write_landmark_file,
+)
 from lightsuite.registration.points_utils import thin_point_list
 from lightsuite.registration.warp import warp_volume_affine
 
@@ -57,11 +60,12 @@ def test_write_parameter_file(tmp_path: Path) -> None:
     assert "Metric1Weight" in text
 
 
-def test_voxel_points_to_physical() -> None:
-    pts = np.array([[1.0, 1.0, 1.0], [2.0, 3.0, 4.0]])
-    phys = voxel_points_to_physical(pts, 0.02)
-    assert np.allclose(phys[0], 0.0)
-    assert np.allclose(phys[1], [0.02, 0.04, 0.06])
+def test_volume_indices_to_elastix_physical() -> None:
+    # 0-based volume indices (Y, X, Z)
+    pts = np.array([[10.0, 20.0, 30.0], [11.0, 22.0, 35.0]])
+    phys = volume_indices_to_elastix_physical(pts, 0.02)
+    assert np.allclose(phys[0], [0.40, 0.20, 0.60])
+    assert np.allclose(phys[1], [0.44, 0.22, 0.70])
 
 
 def test_write_landmark_file(tmp_path: Path) -> None:

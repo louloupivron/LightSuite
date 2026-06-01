@@ -34,7 +34,7 @@ from lightsuite.registration.elastix.invert import (
     invert_elastix_transform,
     write_inverted_transform_copy,
 )
-from lightsuite.registration.elastix.points import voxel_points_to_physical
+from lightsuite.registration.elastix.points import volume_indices_to_elastix_physical
 from lightsuite.registration.elastix.runner import run_bspline_registration, run_transformix
 from lightsuite.registration.plots import save_registration_stage_previews
 from lightsuite.registration.points_utils import thin_point_list
@@ -373,8 +373,8 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
     )
 
     elastix_temp = save_path / "elastix_temp"
-    moving_pts_mm = voxel_points_to_physical(cpaffine, spacing_mm)
-    fixed_pts_mm = voxel_points_to_physical(cptshistology, spacing_mm)
+    moving_pts_mm = volume_indices_to_elastix_physical(cpaffine, spacing_mm)
+    fixed_pts_mm = volume_indices_to_elastix_physical(cptshistology, spacing_mm)
 
     bspline_result = run_bspline_registration(
         fixed_volume=volume,

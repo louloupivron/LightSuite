@@ -7,6 +7,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
 from rich.console import Console
 
 from lightsuite.registration.elastix.mhd import read_mhd_volume, write_mhd
@@ -182,6 +183,7 @@ def _patch_transformix_params(params: str, *, nearest: bool) -> str:
     params = _upsert_elastix_param(params, "ResultImagePixelType", "float")
     if nearest:
         params = _upsert_elastix_param(params, "FinalBSplineInterpolationOrder", "0")
+        params = _upsert_elastix_param(params, "ResultImagePixelType", "short")
     return params
 
 
@@ -208,8 +210,6 @@ def _discover_transformix_result(output_dir: Path) -> Path | None:
 
 def _read_transformix_result(result_path: Path):
     """Load transformix output into Y, X, Z numpy order."""
-    import numpy as np
-
     name = result_path.name.lower()
     if name.endswith(".nii.gz") or name.endswith(".nii"):
         import nibabel as nib
@@ -280,4 +280,7 @@ def run_transformix(
     result_path = _discover_transformix_result(output_dir)
     if result_path is None:
         raise RuntimeError(_transformix_failure_message(output_dir, proc))
-    return _read_transformix_result(result_path)
+    volume = _read_transformix_result(result_path)
+    if nearest:
+        volume = np.rint(volume).astype(np.float32)
+    return volume

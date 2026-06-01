@@ -31,11 +31,12 @@ def mask_boundary_pixels(boundary_slice: np.ndarray) -> tuple[np.ndarray, np.nda
 
 
 def annotation_boundary_pixels(annotation_slice: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Return row/column indices from an annotation label slice (legacy fallback)."""
-    atlasim = np.asarray(annotation_slice, dtype=np.float32)
-    gy, gx = np.gradient(atlasim)
-    boundaries = ((gx != 0) | (gy != 0)) & (atlasim > 1)
-    row, col = np.nonzero(boundaries)
+    """Return row/column indices of region edges (integer labels after transformix)."""
+    labels = np.rint(annotation_slice).astype(np.int32)
+    if not np.any(labels > 1):
+        return np.array([], dtype=int), np.array([], dtype=int)
+    edges = find_boundaries(labels, mode="inner")
+    row, col = np.nonzero(edges & (labels > 1))
     return row, col
 
 
@@ -63,7 +64,9 @@ def plot_annotation_comparison(
         ax = axes[ii]
         histim = volume_index_to_image(volume, np.array([islice, dimplot], dtype=int))
         annotim = volume_index_to_image(boundary, np.array([islice, dimplot], dtype=int))
-        if np.issubdtype(np.asarray(annotim).dtype, np.floating):
+        if np.issubdtype(np.asarray(annotim).dtype, np.integer):
+            row, col = annotation_boundary_pixels(annotim.astype(np.float32))
+        elif np.issubdtype(np.asarray(annotim).dtype, np.floating):
             row, col = annotation_boundary_pixels(annotim)
         else:
             row, col = mask_boundary_pixels(annotim)

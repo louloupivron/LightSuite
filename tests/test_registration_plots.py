@@ -46,6 +46,14 @@ def test_annotation_boundary_pixels_detects_edges() -> None:
     assert col.size == row.size
 
 
+def test_annotation_boundary_pixels_ignores_float_interpolation_speckle() -> None:
+    annot = np.zeros((10, 10), dtype=np.float32)
+    annot[2:8, 2:8] = 5.0
+    annot[5, 5] = 5.3  # speckle inside region
+    row, col = annotation_boundary_pixels(annot)
+    assert row.size < 80
+
+
 def test_plot_annotation_comparison_layout() -> None:
     volume = np.random.randint(0, 255, size=(24, 32, 20), dtype=np.uint8)
     boundary = np.zeros((24, 32, 20), dtype=np.uint8)

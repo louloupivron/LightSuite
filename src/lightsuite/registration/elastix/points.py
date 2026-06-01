@@ -24,8 +24,25 @@ def write_landmark_file(path: Path, points_xyz: np.ndarray) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def volume_indices_to_elastix_physical(
+    points_yxz: np.ndarray,
+    spacing_mm: float,
+    *,
+    zero_based: bool = True,
+) -> np.ndarray:
+    """Map volume indices (Y, X, Z) to elastix physical points (x, y, z) in mm.
+
+    Matches ``writePointsToText.m`` (columns x, y, z) and ``write_mhd`` ITK layout.
+    """
+    pts = np.asarray(points_yxz, dtype=float)
+    if pts.size == 0:
+        return pts.reshape(0, 3)
+    if not zero_based:
+        pts = pts - 1.0
+    spacing = float(spacing_mm)
+    return np.column_stack([pts[:, 1], pts[:, 0], pts[:, 2]]) * spacing
+
+
 def voxel_points_to_physical(points_1based: np.ndarray, spacing_mm: float) -> np.ndarray:
-    """Convert 1-based voxel indices (x,y,z) to physical mm (elastix convention)."""
-    if points_1based.size == 0:
-        return points_1based.reshape(0, 3)
-    return (np.asarray(points_1based, dtype=float) - 1.0) * spacing_mm
+    """Backward-compatible alias; input is 0-based (Y, X, Z) unless legacy 1-based xyz."""
+    return volume_indices_to_elastix_physical(points_1based, spacing_mm, zero_based=False)
