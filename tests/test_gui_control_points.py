@@ -12,11 +12,19 @@ import yaml
 from lightsuite.config.loader import load_config
 from lightsuite.gui.affine import fit_affine_transform
 from lightsuite.gui.brain_data import prepare_brain_match_points_session
+from lightsuite.gui.match_points_brain import _chooselist_slice_label
 from lightsuite.gui.chooselist import generate_control_point_list
 from lightsuite.gui.control_points import ControlPointSession
 from lightsuite.gui.slices import volume_index_to_image
 from lightsuite.preprocess.brain import preprocess_lightsheet_volume
 from lightsuite.registration.init_brain import initialize_brain_registration
+
+
+def test_chooselist_slice_label() -> None:
+    chooselist = np.array([[42, 3, 1, 1], [10, 1, 2, 2]], dtype=int)
+    label = _chooselist_slice_label(chooselist, 1)
+    assert "42" in label
+    assert "Z" in label
 
 
 def test_generate_control_point_list() -> None:

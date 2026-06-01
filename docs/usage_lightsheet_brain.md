@@ -214,7 +214,10 @@ Requires `uv sync --extra gui`.
 
 **Workflow:**
 
-1. Navigate slices with the **Navigation** panel.
+1. Navigate slices with the **Navigation** panel on the right:
+   - **Previous slice** / **Next slice** buttons, or change **Slice #** and click **Show slice**
+   - The overlay checkbox updates immediately; the spinbox also refreshes when you press Enter or change the value
+   - Do **not** use Napari’s bottom dimension slider — it does not switch chooselist slices
 2. Click corresponding landmarks on **sample** (left) and **atlas** (right).
 3. When point counts match on a slice, the affine fit updates automatically.
 4. Use **Clear slice points** to reset the current slice.

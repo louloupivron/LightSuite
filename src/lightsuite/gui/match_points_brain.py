@@ -88,6 +88,14 @@ def _boundary_overlay(
     return boundary
 
 
+def _chooselist_slice_label(chooselist: np.ndarray, slice_idx: int) -> str:
+    """Human-readable description of one chooselist row."""
+    row = np.asarray(chooselist[slice_idx - 1], dtype=int)
+    axis_names = {1: "Y", 2: "X", 3: "Z"}
+    axis = axis_names.get(int(row[1]), str(row[1]))
+    return f"volume index {row[0]}, cut along axis {axis}"
+
+
 def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = False) -> Path:
     """Launch napari control-point matcher; returns saved session path."""
     if headless:
@@ -103,7 +111,8 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
         raise RuntimeError(msg) from exc
 
     data = load_brain_match_points_data(config)
-    state = {"slice": 1, "show_overlay": True}
+    n_slices = int(data.chooselist.shape[0])
+    state = {"slice": 1, "show_overlay": True, "_nav_syncing": False}
 
     viewer = napari.Viewer(title=f"LightSuite — {config.sample.name}")
     sample_layer = viewer.add_image(np.zeros((10, 10)), name="sample", colormap="gray")
@@ -154,7 +163,11 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
             overlay_layer.visible = False
         n_s = len(data.session.histology_control_points[idx - 1])
         n_a = len(data.session.atlas_control_points[idx - 1])
-        viewer.status = f"Slice {idx}/{data.chooselist.shape[0]} | sample pts={n_s} atlas pts={n_a}"
+        caption = _chooselist_slice_label(data.chooselist, idx)
+        viewer.status = (
+            f"Slice {idx}/{n_slices} ({caption}) | sample pts={n_s} atlas pts={n_a}"
+        )
+        viewer.reset_view()
 
     def _try_align() -> None:
         mse = data.session.update_manual_alignment(min_pairs=4)
@@ -185,14 +198,55 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
         ):
             _try_align()
 
-    @magicgui(
-        slice_index={"min": 1, "max": int(data.chooselist.shape[0]), "step": 1},
-        call_button=False,
-    )
-    def controls(slice_index: int = 1, show_overlay: bool = True) -> None:
-        state["slice"] = int(slice_index)
-        state["show_overlay"] = bool(show_overlay)
+    def _sync_navigation_widget() -> None:
+        """Keep the spinbox in sync with state without re-firing navigation callbacks."""
+        state["_nav_syncing"] = True
+        try:
+            navigation.slice_index.value = int(state["slice"])
+            navigation.show_overlay.value = bool(state["show_overlay"])
+        finally:
+            state["_nav_syncing"] = False
+
+    def _navigate_to(slice_index: int | None = None, *, show_overlay: bool | None = None) -> None:
+        if show_overlay is not None:
+            state["show_overlay"] = bool(show_overlay)
+        if slice_index is not None:
+            state["slice"] = max(1, min(n_slices, int(slice_index)))
+        _sync_navigation_widget()
         _refresh()
+
+    @magicgui(
+        slice_index={
+            "min": 1,
+            "max": n_slices,
+            "step": 1,
+            "label": "Slice # (chooselist index)",
+        },
+        show_overlay={"label": "Show atlas boundary overlay on sample"},
+        call_button="Show slice",
+    )
+    def navigation(slice_index: int = 1, show_overlay: bool = True) -> None:
+        _navigate_to(slice_index, show_overlay=show_overlay)
+
+    @magicgui(call_button="◀  Previous slice")
+    def previous_slice() -> None:
+        _navigate_to(state["slice"] - 1)
+
+    @magicgui(call_button="Next slice  ▶")
+    def next_slice() -> None:
+        _navigate_to(state["slice"] + 1)
+
+    @navigation.slice_index.changed.connect
+    def _slice_index_widget_changed() -> None:
+        if state["_nav_syncing"]:
+            return
+        _navigate_to(navigation.slice_index.value)
+
+    @navigation.show_overlay.changed.connect
+    def _overlay_widget_changed() -> None:
+        if state["_nav_syncing"]:
+            return
+        _navigate_to(show_overlay=navigation.show_overlay.value)
 
     @magicgui(call_button="Save && Close")
     def save_controls() -> None:
@@ -207,12 +261,18 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
         data.session.atlas_control_points[idx - 1] = []
         _refresh()
 
-    viewer.window.add_dock_widget(controls, area="right", name="Navigation")
+    viewer.window.add_dock_widget(navigation, area="right", name="Navigation")
+    viewer.window.add_dock_widget(previous_slice, area="right", name="Previous slice")
+    viewer.window.add_dock_widget(next_slice, area="right", name="Next slice")
     viewer.window.add_dock_widget(save_controls, area="right", name="Save")
     viewer.window.add_dock_widget(clear_slice, area="right", name="Edit")
-    controls.slice_index.max = int(data.chooselist.shape[0])
+    _sync_navigation_widget()
     _refresh()
 
-    console.print("[bold]Napari control-point GUI[/bold] — add points on sample (left) and atlas (right).")
+    console.print(
+        "[bold]Napari control-point GUI[/bold] — sample (left), atlas (right). "
+        "Use the Navigation panel (Previous / Next / Show slice); "
+        "the Napari dimension slider does not change slices here."
+    )
     napari.run()
     return data.session_path
