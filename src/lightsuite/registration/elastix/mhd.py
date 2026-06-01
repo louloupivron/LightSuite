@@ -51,6 +51,33 @@ def write_mhd(volume: np.ndarray, base_path: Path, spacing_mm: float | list[floa
     return mhd_path
 
 
+def read_mhd_volume(mhd_path: Path) -> np.ndarray:
+    """Load a 3D volume from MHD+RAW (returns Y, X, Z numpy indexing)."""
+    mhd_path = mhd_path.expanduser()
+    text = mhd_path.read_text(encoding="utf-8")
+    dim_match = None
+    for line in text.splitlines():
+        if line.lower().startswith("dimsize"):
+            dim_match = [int(v) for v in line.split("=", 1)[1].split()]
+            break
+    if dim_match is None:
+        msg = f"DimSize missing in {mhd_path}"
+        raise ValueError(msg)
+    nx, ny, nz = dim_match
+    raw_name = None
+    for line in text.splitlines():
+        if line.lower().startswith("elementdatafile"):
+            raw_name = line.split("=", 1)[1].strip()
+            break
+    if raw_name is None:
+        msg = f"ElementDataFile missing in {mhd_path}"
+        raise ValueError(msg)
+    raw_path = mhd_path.parent / raw_name
+    flat = np.fromfile(raw_path, dtype=np.float32)
+    vol = flat.reshape((nx, ny, nz), order="C")
+    return np.transpose(vol, (1, 0, 2))
+
+
 def read_mhd_spacing(mhd_path: Path) -> np.ndarray:
     """Read ElementSpacing from an MHD header (mm)."""
     text = mhd_path.expanduser().read_text(encoding="utf-8")

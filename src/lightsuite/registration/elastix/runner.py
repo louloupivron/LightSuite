@@ -9,7 +9,7 @@ from pathlib import Path
 
 from rich.console import Console
 
-from lightsuite.registration.elastix.mhd import write_mhd
+from lightsuite.registration.elastix.mhd import read_mhd_volume, write_mhd
 from lightsuite.registration.elastix.params import build_bspline_params, write_parameter_file
 from lightsuite.registration.elastix.points import write_landmark_file
 
@@ -160,6 +160,73 @@ def run_bspline_registration(
     )
 
 
+def _patch_transformix_params(params: str, *, nearest: bool) -> str:
+    """Match transformAnnotationVolume.m: label resampling + always write a result image."""
+    if nearest:
+        for old, new in (
+            ("FinalBSplineInterpolationOrder = 3", "FinalBSplineInterpolationOrder = 0"),
+            ("(FinalBSplineInterpolationOrder 3)", "(FinalBSplineInterpolationOrder 0)"),
+        ):
+            params = params.replace(old, new)
+    overrides = [
+        '(WriteResultImage "true")',
+        '(ResultImageFormat "mhd")',
+        '(ResultImagePixelType "float")',
+    ]
+    if nearest:
+        overrides.append('(FinalBSplineInterpolationOrder 0)')
+    return params.rstrip() + "\n" + "\n".join(overrides) + "\n"
+
+
+def _discover_transformix_result(output_dir: Path) -> Path | None:
+    """Find transformix output volume (Elastix 4.x writes MHD; 5.x may use NIfTI)."""
+    patterns = (
+        "result*.mhd",
+        "Result*.mhd",
+        "result.nii.gz",
+        "result*.nii.gz",
+        "result.nii",
+        "result*.nii",
+    )
+    for pattern in patterns:
+        hits = sorted(output_dir.glob(pattern))
+        if hits:
+            return hits[0]
+    for pattern in patterns:
+        hits = sorted(output_dir.rglob(pattern))
+        if hits:
+            return hits[0]
+    return None
+
+
+def _read_transformix_result(result_path: Path):
+    """Load transformix output into Y, X, Z numpy order."""
+    import numpy as np
+
+    name = result_path.name.lower()
+    if name.endswith(".nii.gz") or name.endswith(".nii"):
+        import nibabel as nib
+
+        data = np.asanyarray(nib.load(str(result_path)).dataobj).astype(np.float32)
+        if data.ndim != 3:
+            msg = f"Expected 3D transformix result, got {data.shape} from {result_path}"
+            raise ValueError(msg)
+        return np.transpose(data, (1, 0, 2))
+    return read_mhd_volume(result_path)
+
+
+def _transformix_failure_message(output_dir: Path, proc: subprocess.CompletedProcess) -> str:
+    listing = ", ".join(sorted(p.name for p in output_dir.iterdir())) or "(empty)"
+    stderr_tail = (proc.stderr or "").strip()[-4000:]
+    stdout_tail = (proc.stdout or "").strip()[-2000:]
+    return (
+        f"No transformix result image in {output_dir} (expected result.mhd or result.nii.gz). "
+        f"Directory listing: {listing}. "
+        f"transformix stderr (tail): {stderr_tail or '(empty)'} "
+        f"stdout (tail): {stdout_tail or '(empty)'}"
+    )
+
+
 def run_transformix(
     *,
     moving_volume,
@@ -175,23 +242,12 @@ def run_transformix(
 
     output_dir = output_dir.expanduser()
     output_dir.mkdir(parents=True, exist_ok=True)
-    for pattern in ("result.*", "TransformParameters.*.txt"):
+    for pattern in ("result*", "Result*", "TransformParameters.*.txt", "transformix_params.txt"):
         for path in output_dir.glob(pattern):
             if path.is_file():
                 path.unlink()
 
-    params = transform_path.read_text(encoding="utf-8")
-    if nearest:
-        params = params.replace(
-            "FinalBSplineInterpolationOrder = 3",
-            "FinalBSplineInterpolationOrder = 0",
-        )
-        params = params.replace(
-            "(FinalBSplineInterpolationOrder 3)",
-            "(FinalBSplineInterpolationOrder 0)",
-        )
-        if "ResultImagePixelType" not in params:
-            params += '\n(ResultImagePixelType "float")\n'
+    params = _patch_transformix_params(transform_path.read_text(encoding="utf-8"), nearest=nearest)
     temp_param = output_dir / "transformix_params.txt"
     temp_param.write_text(params, encoding="utf-8")
 
@@ -206,40 +262,15 @@ def run_transformix(
         "-tp",
         str(temp_param),
     ]
+    (output_dir / "transformix_cmd.txt").write_text(" ".join(cmd), encoding="utf-8")
     proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    (output_dir / "transformix.stdout.txt").write_text(proc.stdout or "", encoding="utf-8")
+    (output_dir / "transformix.stderr.txt").write_text(proc.stderr or "", encoding="utf-8")
     if proc.returncode != 0:
         msg = f"transformix failed (exit {proc.returncode}):\n{proc.stdout}\n{proc.stderr}"
         raise RuntimeError(msg)
 
-    result_mhd = next(output_dir.glob("result.*.mhd"), None)
-    if result_mhd is None:
-        msg = f"No transformix result MHD in {output_dir}"
-        raise RuntimeError(msg)
-    return _read_mhd_volume(result_mhd)
-
-
-def _read_mhd_volume(mhd_path: Path):
-    import numpy as np
-
-    text = mhd_path.read_text(encoding="utf-8")
-    dim_match = None
-    for line in text.splitlines():
-        if line.lower().startswith("dimsize"):
-            dim_match = [int(v) for v in line.split("=", 1)[1].split()]
-            break
-    if dim_match is None:
-        msg = f"DimSize missing in {mhd_path}"
-        raise ValueError(msg)
-    nx, ny, nz = dim_match
-    raw_name = None
-    for line in text.splitlines():
-        if line.lower().startswith("elementdatafile"):
-            raw_name = line.split("=", 1)[1].strip()
-            break
-    if raw_name is None:
-        msg = f"ElementDataFile missing in {mhd_path}"
-        raise ValueError(msg)
-    raw_path = mhd_path.parent / raw_name
-    flat = np.fromfile(raw_path, dtype=np.float32)
-    vol = flat.reshape((nx, ny, nz), order="C")
-    return np.transpose(vol, (1, 0, 2))
+    result_path = _discover_transformix_result(output_dir)
+    if result_path is None:
+        raise RuntimeError(_transformix_failure_message(output_dir, proc))
+    return _read_transformix_result(result_path)

@@ -7,6 +7,10 @@ from pathlib import Path
 import numpy as np
 
 from lightsuite.registration.elastix.mhd import read_mhd_spacing, write_mhd
+from lightsuite.registration.elastix.runner import (
+    _discover_transformix_result,
+    _patch_transformix_params,
+)
 from lightsuite.registration.elastix.params import build_bspline_params, write_parameter_file
 from lightsuite.registration.elastix.points import voxel_points_to_physical, write_landmark_file
 from lightsuite.registration.points_utils import thin_point_list
@@ -73,6 +77,23 @@ def test_thin_point_list() -> None:
     pts = np.array([[0.0, 0.0, 0.0], [0.1, 0.0, 0.0], [5.0, 5.0, 5.0]])
     kept = thin_point_list(pts, min_distance=1.0)
     assert kept.tolist() == [True, False, True]
+
+
+def test_patch_transformix_params_forces_mhd_output() -> None:
+    params = "(FinalBSplineInterpolationOrder 3)\n"
+    patched = _patch_transformix_params(params, nearest=True)
+    assert '(WriteResultImage "true")' in patched
+    assert '(ResultImageFormat "mhd")' in patched
+    assert "(FinalBSplineInterpolationOrder 0)" in patched
+
+
+def test_discover_transformix_result_nii_and_mhd(tmp_path: Path) -> None:
+    (tmp_path / "result.nii.gz").write_bytes(b"")
+    assert _discover_transformix_result(tmp_path).name == "result.nii.gz"
+    (tmp_path / "result.nii.gz").unlink()
+    mhd = tmp_path / "result.0.mhd"
+    mhd.write_text("x", encoding="utf-8")
+    assert _discover_transformix_result(tmp_path) == mhd
 
 
 def test_warp_volume_affine_identity() -> None:
