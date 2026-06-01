@@ -30,11 +30,7 @@ from lightsuite.registration.elastix.points import voxel_points_to_physical
 from lightsuite.registration.elastix.runner import run_bspline_registration, run_transformix
 from lightsuite.registration.plots import save_registration_stage_previews
 from lightsuite.registration.points_utils import thin_point_list
-from lightsuite.registration.volume import (
-    load_registration_volume,
-    permute_brain_volume,
-    resize_atlas_volume,
-)
+from lightsuite.registration.volume import load_registration_volume, permute_brain_volume
 from lightsuite.registration.warp import warp_volume_affine
 
 console = Console()
@@ -220,16 +216,13 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
     atlas = resolve_brain_atlas(config.atlas.provider.value, config.atlas.atlas_dir)
     tv = np.asanyarray(nib.load(atlas.template_path).dataobj).astype(np.float32)
     av = np.asanyarray(nib.load(atlas.annotation_path).dataobj).astype(np.float32)
-    downfac = float(
-        checkpoint.downfac_reg or (config.atlas.resolution_um / checkpoint.registres_um)
-    )
-    tvreg = resize_atlas_volume(tv, downfac, nearest=False)
-    avreg = resize_atlas_volume(av, downfac, nearest=True)
 
+    # Match multiobjRegistration.m: affine is fit in full-atlas index space (points / downfac_reg)
+    # and imwarp uses full-resolution moving volumes, not the downsampled tvreg grid.
     console.print("Applying affine pre-alignment to atlas...", end=" ")
     t0 = time.perf_counter()
-    tvaffine = warp_volume_affine(tvreg, tform_aff, volume.shape, order=1)
-    avaffine = warp_volume_affine(avreg, tform_aff, volume.shape, order=0)
+    tvaffine = warp_volume_affine(tv, tform_aff, volume.shape, order=1)
+    avaffine = warp_volume_affine(av, tform_aff, volume.shape, order=0)
     console.print(f"Done in {time.perf_counter() - t0:.1f}s.")
 
     hi = float(np.quantile(volume, 0.999))

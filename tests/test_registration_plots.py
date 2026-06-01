@@ -16,6 +16,8 @@ from lightsuite.registration.plots import (
     save_initial_registration_previews,
     save_registration_stage_previews,
 )
+from lightsuite.gui.affine import fit_affine_transform, transform_points
+from lightsuite.registration.volume import resize_atlas_volume
 from lightsuite.registration.warp import (
     affinetform_rows_to_internal,
     imwarp_volume,
@@ -23,6 +25,7 @@ from lightsuite.registration.warp import (
     matlab_voxel_affine_to_icp,
     transform_points_affinetform,
     warp_atlas_to_sample,
+    warp_volume_affine,
 )
 
 
@@ -155,6 +158,50 @@ def test_warp_atlas_to_sample_matches_matlab_imwarp() -> None:
 
     assert np.count_nonzero(av_correct) > 500
     assert np.count_nonzero(av_wrong) < np.count_nonzero(av_correct) / 10
+
+
+def test_affine_volume_warp_must_use_full_atlas_not_downsampled() -> None:
+    """Regression: tform_aff is fit in full-atlas coords (see multiobjRegistration.m)."""
+    downfac = 0.5
+    sample_shape = (80, 96, 64)
+    ann_full = np.zeros((40, 48, 36), dtype=np.float32)
+    ann_full[8:32, 12:36, 6:30] = 5
+    ann_reg = resize_atlas_volume(ann_full, downfac, nearest=True)
+
+    atlas_pts = np.array(
+        [
+            [20.0, 24.0, 18.0],
+            [30.0, 30.0, 20.0],
+            [15.0, 20.0, 12.0],
+            [25.0, 28.0, 22.0],
+        ],
+        dtype=float,
+    )
+    sample_pts = np.array(
+        [
+            [40.0, 50.0, 30.0],
+            [55.0, 60.0, 35.0],
+            [35.0, 45.0, 25.0],
+            [48.0, 58.0, 32.0],
+        ],
+        dtype=float,
+    )
+    af_atlas = atlas_pts / downfac
+    tform_aff, _ = fit_affine_transform(af_atlas, sample_pts)
+
+    warped_full = warp_volume_affine(ann_full, tform_aff, sample_shape, order=0)
+    warped_reg = warp_volume_affine(ann_reg, tform_aff, sample_shape, order=0)
+
+    mid = sample_shape[1] // 2
+    sl_full = volume_index_to_image(warped_full, np.array([mid, 2], dtype=int))
+    sl_reg = volume_index_to_image(warped_reg, np.array([mid, 2], dtype=int))
+    n_full = mask_boundary_pixels(sl_full)[0].size
+    n_reg = mask_boundary_pixels(sl_reg)[0].size
+    assert n_full > 30
+    assert n_reg < n_full / 5
+
+    pred = transform_points(af_atlas, tform_aff)
+    assert np.median(np.linalg.norm(pred - sample_pts, axis=1)) < 2.0
 
 
 def test_preview_warp_produces_visible_boundaries() -> None:
