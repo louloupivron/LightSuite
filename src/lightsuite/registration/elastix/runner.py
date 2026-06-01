@@ -180,11 +180,24 @@ def _patch_transformix_params(params: str, *, nearest: bool) -> str:
     """Match transformAnnotationVolume.m: label resampling + always write a result image."""
     params = _upsert_elastix_param(params, "WriteResultImage", "true")
     params = _upsert_elastix_param(params, "ResultImageFormat", "mhd")
+    params = _upsert_elastix_param(params, "UseDirectionCosines", "false")
+    params = _upsert_elastix_param(params, "DefaultPixelValue", "0")
     params = _upsert_elastix_param(params, "ResultImagePixelType", "float")
     if nearest:
         params = _upsert_elastix_param(params, "FinalBSplineInterpolationOrder", "0")
         params = _upsert_elastix_param(params, "ResultImagePixelType", "short")
     return params
+
+
+def volume_shape_from_transform_params(params_text: str) -> tuple[int, int, int] | None:
+    """Parse elastix (Size x y z) into numpy volume shape (Y, X, Z)."""
+    import re
+
+    match = re.search(r"(?im)^\(Size\s+(\d+)\s+(\d+)\s+(\d+)", params_text)
+    if not match:
+        return None
+    nx, ny, nz = (int(v) for v in match.groups())
+    return ny, nx, nz
 
 
 def _discover_transformix_result(output_dir: Path) -> Path | None:
@@ -254,7 +267,17 @@ def run_transformix(
             if path.is_file():
                 path.unlink()
 
-    params = _patch_transformix_params(transform_path.read_text(encoding="utf-8"), nearest=nearest)
+    raw_params = transform_path.read_text(encoding="utf-8")
+    expected_shape = volume_shape_from_transform_params(raw_params)
+    if expected_shape is not None and tuple(moving_volume.shape) != expected_shape:
+        msg = (
+            f"Moving volume shape {moving_volume.shape} does not match elastix transform "
+            f"Size {expected_shape[1]} {expected_shape[0]} {expected_shape[2]} (ITK x,y,z). "
+            "Re-run register on the same sample; do not mix TransformParameters from another run."
+        )
+        raise ValueError(msg)
+
+    params = _patch_transformix_params(raw_params, nearest=nearest)
     temp_param = output_dir / "transformix_params.txt"
     temp_param.write_text(params, encoding="utf-8")
 

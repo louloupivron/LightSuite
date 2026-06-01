@@ -47,6 +47,8 @@ def build_bspline_params(
         "NumberOfSpatialSamples": 5000,
         "ImagePyramidSchedule": [8] * 3 + [4] * 3 + [2] * 3 + [1] * 3,
         "FinalGridSpacingInPhysicalUnits": [bspline_spatial_scale_mm] * 3,
+        # Elastix 5.1 defaults to true; our MHD headers use identity axes only (see elastix.log warning).
+        "UseDirectionCosines": "false",
     }
 
     if dual_channel:

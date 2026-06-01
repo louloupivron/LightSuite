@@ -402,7 +402,11 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
         spacing_mm=spacing_mm,
         nearest=True,
     )
-    console.print(f"Done in {time.perf_counter() - t0:.1f}s.")
+    n_labels = int(np.sum(np.rint(avreg) > 1))
+    console.print(
+        f"Done in {time.perf_counter() - t0:.1f}s "
+        f"({n_labels:,} label voxels after B-spline)."
+    )
     save_registration_stage_previews(
         save_path, config.sample.name, voltoshow, avreg, "bspline_registration"
     )

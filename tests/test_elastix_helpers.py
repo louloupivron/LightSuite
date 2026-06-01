@@ -10,6 +10,7 @@ from lightsuite.registration.elastix.mhd import read_mhd_spacing, read_mhd_volum
 from lightsuite.registration.elastix.runner import (
     _discover_transformix_result,
     _patch_transformix_params,
+    volume_shape_from_transform_params,
 )
 from lightsuite.registration.elastix.params import build_bspline_params, write_parameter_file
 from lightsuite.registration.elastix.points import (
@@ -83,6 +84,7 @@ def test_write_parameter_file(tmp_path: Path) -> None:
     text = path.read_text(encoding="utf-8")
     assert "MultiMetricMultiResolutionRegistration" in text
     assert "Metric1Weight" in text
+    assert "UseDirectionCosines" in text
 
 
 def test_volume_indices_to_elastix_physical() -> None:
@@ -106,6 +108,17 @@ def test_thin_point_list() -> None:
     pts = np.array([[0.0, 0.0, 0.0], [0.1, 0.0, 0.0], [5.0, 5.0, 5.0]])
     kept = thin_point_list(pts, min_distance=1.0)
     assert kept.tolist() == [True, False, True]
+
+
+def test_patch_transformix_params_disables_direction_cosines() -> None:
+    patched = _patch_transformix_params("(UseDirectionCosines true)\n", nearest=True)
+    assert '(UseDirectionCosines "false")' in patched
+    assert '(DefaultPixelValue "0")' in patched
+
+
+def test_volume_shape_from_transform_params() -> None:
+    text = "(Size 341 671 671)\n"
+    assert volume_shape_from_transform_params(text) == (671, 341, 671)
 
 
 def test_patch_transformix_params_forces_mhd_output() -> None:
