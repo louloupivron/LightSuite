@@ -22,7 +22,8 @@ from lightsuite.gui.affine import (
     transform_points,
     transform_points_inverse,
 )
-from lightsuite.registration.warp import transform_points_affinetform
+from lightsuite.registration.points import cloud_xyz_to_volume_indices
+from lightsuite.registration.warp import swap_xy_transform
 from lightsuite.gui.control_points import (
     ControlPointSession,
     default_session_path,
@@ -221,7 +222,10 @@ def _build_affine_fit_diagnostics(
         auto_err = errors[n_manual:]
         diag.median_error_auto_vox = float(np.median(auto_err))
         if autocpsample_kept.shape[0] == n_auto:
-            coarse_atlas = transform_points_affinetform(autocpsample_kept, original_trans)
+            coarse_atlas = transform_points_inverse(
+                autocpsample_kept,
+                swap_xy_transform(original_trans),
+            )
             diag.median_coarse_auto_vox = float(
                 np.median(np.linalg.norm(coarse_atlas - af_atlas[n_manual:], axis=1))
             )
@@ -245,16 +249,22 @@ def _prepare_control_points(
     if not config.registration.augment_points:
         distancethin *= 3.0
 
-    original_trans = np.asarray(
-        session.ori_trans if session.ori_trans is not None else checkpoint.original_trans,
-        dtype=float,
+    original_trans_vol = swap_xy_transform(
+        np.asarray(
+            session.ori_trans if session.ori_trans is not None else checkpoint.original_trans,
+            dtype=float,
+        )
     )
 
-    autocpsample = np.asarray(checkpoint.autocpsample or [], dtype=float)
-    autocpatlas = np.asarray(checkpoint.autocpatlas or [], dtype=float) / downfac
+    autocpsample = cloud_xyz_to_volume_indices(
+        np.asarray(checkpoint.autocpsample or [], dtype=float)
+    )
+    autocpatlas = cloud_xyz_to_volume_indices(
+        np.asarray(checkpoint.autocpatlas or [], dtype=float)
+    ) / downfac
 
     cptsatlas, cptshistology = session.paired_points_xyz()
-    cptshistology = transform_points_inverse(cptshistology, original_trans)
+    cptshistology = transform_points_inverse(cptshistology, original_trans_vol)
     cptsatlas = cptsatlas / downfac
 
     if cptsatlas.shape[0] > 0 and autocpatlas.shape[0] > 0:
@@ -300,7 +310,7 @@ def _prepare_control_points(
         n_manual=n_manual,
         n_auto=n_auto,
         autocpsample_kept=autocpsample_kept,
-        original_trans=original_trans,
+        original_trans=original_trans_vol,
         cpaffine=cpaffine,
         cptshistology=cptshistology,
         cpwt=cpwt,

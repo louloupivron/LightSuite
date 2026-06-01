@@ -6,6 +6,22 @@ import numpy as np
 from scipy import ndimage
 
 
+def cloud_xyz_to_volume_indices(xyz: np.ndarray) -> np.ndarray:
+    """Map point-cloud XYZ (x, y, z) to volume array indices (Y, X, Z)."""
+    pts = np.asarray(xyz, dtype=float)
+    if pts.size == 0:
+        return pts.reshape(0, 3)
+    return pts[:, [1, 0, 2]]
+
+
+def volume_indices_to_cloud_xyz(indices: np.ndarray) -> np.ndarray:
+    """Inverse of :func:`cloud_xyz_to_volume_indices`."""
+    pts = np.asarray(indices, dtype=float)
+    if pts.size == 0:
+        return pts.reshape(0, 3)
+    return pts[:, [1, 0, 2]]
+
+
 def _random_subsample(points: np.ndarray, fraction: float, seed: int = 1) -> np.ndarray:
     if points.shape[0] == 0:
         return points

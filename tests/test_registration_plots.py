@@ -17,6 +17,7 @@ from lightsuite.registration.plots import (
     save_registration_stage_previews,
 )
 from lightsuite.gui.affine import fit_affine_transform, transform_points
+from lightsuite.registration.points import cloud_xyz_to_volume_indices
 from lightsuite.registration.volume import resize_atlas_volume
 from lightsuite.registration.warp import (
     affinetform_rows_to_internal,
@@ -158,6 +159,34 @@ def test_warp_atlas_to_sample_matches_matlab_imwarp() -> None:
 
     assert np.count_nonzero(av_correct) > 500
     assert np.count_nonzero(av_wrong) < np.count_nonzero(av_correct) / 10
+
+
+def test_affine_fit_and_warp_share_volume_axis_order() -> None:
+    """Auto landmarks from clouds are XYZ; imwarp uses (Y, X, Z) array indices."""
+    downfac = 0.5
+    ann_full = np.zeros((40, 48, 36), dtype=np.float32)
+    ann_full[8:32, 12:36, 6:30] = 5
+    sample_shape = (80, 96, 64)
+
+    atlas_xyz = np.array(
+        [
+            [12.0, 24.0, 18.0],
+            [14.0, 26.0, 20.0],
+            [16.0, 28.0, 22.0],
+            [18.0, 30.0, 24.0],
+        ]
+    )
+    sample_xyz = atlas_xyz + np.array([5.0, -3.0, 2.0])
+    atlas_vol = cloud_xyz_to_volume_indices(atlas_xyz / downfac)
+    sample_vol = cloud_xyz_to_volume_indices(sample_xyz)
+    tform_wrong, _ = fit_affine_transform(atlas_xyz / downfac, sample_xyz)
+    tform_right, _ = fit_affine_transform(atlas_vol, sample_vol)
+
+    pred_wrong = transform_points(atlas_vol, tform_wrong)
+    pred_right = transform_points(atlas_vol, tform_right)
+    err_wrong = np.linalg.norm(pred_wrong - sample_vol, axis=1)
+    err_right = np.linalg.norm(pred_right - sample_vol, axis=1)
+    assert np.median(err_right) < np.median(err_wrong) / 5
 
 
 def test_affine_volume_warp_must_use_full_atlas_not_downsampled() -> None:

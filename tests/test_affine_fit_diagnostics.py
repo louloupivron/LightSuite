@@ -11,6 +11,7 @@ from lightsuite.gui.affine import (
     transform_points,
 )
 from lightsuite.registration.brain_register import _build_affine_fit_diagnostics
+from lightsuite.registration.points import cloud_xyz_to_volume_indices, volume_indices_to_cloud_xyz
 
 
 def test_affine_point_errors_identity() -> None:
@@ -47,6 +48,13 @@ def test_build_affine_fit_diagnostics_auto_only() -> None:
     assert diag.median_error_vox < 1.0
     assert diag.median_landmark_vox is not None
     assert diag.median_landmark_vox < 1.0
+
+
+def test_cloud_xyz_volume_index_roundtrip() -> None:
+    xyz = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+    vol = cloud_xyz_to_volume_indices(xyz)
+    assert np.allclose(vol, np.array([[2.0, 1.0, 3.0], [5.0, 4.0, 6.0]]))
+    assert np.allclose(volume_indices_to_cloud_xyz(vol), xyz)
 
 
 def test_summarize_point_errors_empty() -> None:
