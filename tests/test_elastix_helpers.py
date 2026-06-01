@@ -6,7 +6,7 @@ from pathlib import Path
 
 import numpy as np
 
-from lightsuite.registration.elastix.mhd import read_mhd_spacing, write_mhd
+from lightsuite.registration.elastix.mhd import read_mhd_spacing, read_mhd_volume, write_mhd
 from lightsuite.registration.elastix.runner import (
     _discover_transformix_result,
     _patch_transformix_params,
@@ -18,6 +18,31 @@ from lightsuite.registration.elastix.points import (
 )
 from lightsuite.registration.points_utils import thin_point_list
 from lightsuite.registration.warp import warp_volume_affine
+
+
+def test_read_mhd_volume_met_short(tmp_path: Path) -> None:
+    ny, nx, nz = 4, 5, 6
+    data = np.arange(ny * nx * nz, dtype=np.int16).reshape(ny, nx, nz)
+    flat = np.transpose(data, (1, 0, 2)).ravel(order="C")
+    raw_path = tmp_path / "result.raw"
+    flat.tofile(raw_path)
+    mhd_path = tmp_path / "result.mhd"
+    mhd_path.write_text(
+        "\n".join(
+            [
+                "ObjectType = Image",
+                "NDims = 3",
+                "BinaryData = True",
+                f"DimSize = {nx} {ny} {nz}",
+                "ElementType = MET_SHORT",
+                "ElementDataFile = result.raw",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    loaded = read_mhd_volume(mhd_path)
+    assert loaded.shape == (ny, nx, nz)
+    assert np.allclose(loaded, data.astype(np.float32))
 
 
 def test_write_and_read_mhd_roundtrip(tmp_path: Path) -> None:

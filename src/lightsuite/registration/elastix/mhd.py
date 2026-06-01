@@ -51,31 +51,62 @@ def write_mhd(volume: np.ndarray, base_path: Path, spacing_mm: float | list[floa
     return mhd_path
 
 
+_MHD_ELEMENT_DTYPES: dict[str, np.dtype] = {
+    "MET_FLOAT": np.dtype(np.float32),
+    "MET_DOUBLE": np.dtype(np.float64),
+    "MET_SHORT": np.dtype(np.int16),
+    "MET_USHORT": np.dtype(np.uint16),
+    "MET_INT": np.dtype(np.int32),
+    "MET_UINT": np.dtype(np.uint32),
+    "MET_CHAR": np.dtype(np.int8),
+    "MET_UCHAR": np.dtype(np.uint8),
+}
+
+
+def _mhd_header_field(text: str, key: str) -> str | None:
+    match = re.search(rf"(?im)^{re.escape(key)}\s*=\s*([^\r\n#]+)", text)
+    return match.group(1).strip() if match else None
+
+
+def _mhd_element_dtype(element_type: str) -> np.dtype:
+    key = element_type.strip().upper()
+    if key not in _MHD_ELEMENT_DTYPES:
+        msg = f"Unsupported MHD ElementType {element_type!r}"
+        raise ValueError(msg)
+    return _MHD_ELEMENT_DTYPES[key]
+
+
 def read_mhd_volume(mhd_path: Path) -> np.ndarray:
     """Load a 3D volume from MHD+RAW (returns Y, X, Z numpy indexing)."""
     mhd_path = mhd_path.expanduser()
     text = mhd_path.read_text(encoding="utf-8")
-    dim_match = None
-    for line in text.splitlines():
-        if line.lower().startswith("dimsize"):
-            dim_match = [int(v) for v in line.split("=", 1)[1].split()]
-            break
-    if dim_match is None:
+    dim_field = _mhd_header_field(text, "DimSize")
+    if dim_field is None:
         msg = f"DimSize missing in {mhd_path}"
         raise ValueError(msg)
-    nx, ny, nz = dim_match
-    raw_name = None
-    for line in text.splitlines():
-        if line.lower().startswith("elementdatafile"):
-            raw_name = line.split("=", 1)[1].strip()
-            break
+    nx, ny, nz = (int(v) for v in dim_field.split())
+    raw_name = _mhd_header_field(text, "ElementDataFile")
     if raw_name is None:
         msg = f"ElementDataFile missing in {mhd_path}"
         raise ValueError(msg)
+    element_type = _mhd_header_field(text, "ElementType") or "MET_FLOAT"
+    dtype = _mhd_element_dtype(element_type)
     raw_path = mhd_path.parent / raw_name
-    flat = np.fromfile(raw_path, dtype=np.float32)
+    if not raw_path.is_file():
+        msg = f"RAW file missing: {raw_path}"
+        raise FileNotFoundError(msg)
+    expected_count = nx * ny * nz
+    expected_bytes = expected_count * dtype.itemsize
+    raw_bytes = raw_path.stat().st_size
+    if raw_bytes != expected_bytes:
+        msg = (
+            f"RAW size mismatch for {raw_path}: {raw_bytes} bytes, "
+            f"expected {expected_bytes} for DimSize {nx} {ny} {nz} and {element_type}"
+        )
+        raise ValueError(msg)
+    flat = np.fromfile(raw_path, dtype=dtype)
     vol = flat.reshape((nx, ny, nz), order="C")
-    return np.transpose(vol, (1, 0, 2))
+    return np.transpose(vol, (1, 0, 2)).astype(np.float32, copy=False)
 
 
 def read_mhd_spacing(mhd_path: Path) -> np.ndarray:
