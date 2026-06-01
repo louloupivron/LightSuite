@@ -12,6 +12,7 @@ from skimage.exposure import equalize_adapthist
 from lightsuite.atlas.registry import resolve_brain_atlas
 from lightsuite.config.models import BrainPipelineConfig
 from lightsuite.gui.chooselist import generate_control_point_list
+from lightsuite.gui.affine import transform_points_inverse
 from lightsuite.gui.control_points import ControlPointSession, default_session_path
 from lightsuite.gui.slices import volume_index_to_image
 from lightsuite.preprocess.checkpoint import RegOptsCheckpoint
@@ -106,10 +107,104 @@ def load_brain_match_points_data(config: BrainPipelineConfig) -> BrainMatchPoint
     )
 
 
-def slice_pair(data: BrainMatchPointsData, slice_idx: int) -> tuple[np.ndarray, np.ndarray]:
-    row = data.chooselist[slice_idx - 1]
+def atlas_cut_axis_size(atlas_shape: tuple[int, int, int], chooserow: np.ndarray) -> int:
+    """Number of atlas planes along the chooselist cut axis (1-based indexing)."""
+    cut_axis = int(chooserow[1]) - 1
+    return int(atlas_shape[cut_axis])
+
+
+def chooserow_with_atlas_plane(chooserow: np.ndarray, atlas_plane: int) -> np.ndarray:
+    """Copy chooserow with atlas plane index along the cut axis (MATLAB atlas_slice)."""
+    row = np.asarray(chooserow, dtype=int).copy()
+    row[0] = int(atlas_plane)
+    return row
+
+
+def estimate_atlas_plane_index(
+    sample_volume: np.ndarray,
+    chooserow: np.ndarray,
+    atlas_to_sample: np.ndarray,
+    atlas_shape: tuple[int, int, int],
+) -> int:
+    """Estimate atlas plane along cut axis from inverse-transformed sample tissue (MATLAB update_slice)."""
+    chooserow = np.asarray(chooserow, dtype=int)
+    sample_slice = volume_index_to_image(sample_volume, chooserow)
+    cut_axis = int(chooserow[1]) - 1
+    plot_axes = [d for d in range(3) if d != cut_axis]
+    h, w = sample_slice.shape
+    tissue = sample_slice > float(np.quantile(sample_slice[sample_slice > 0], 0.05)) if np.any(
+        sample_slice > 0
+    ) else np.ones_like(sample_slice, dtype=bool)
+    yy, xx = np.where(tissue)
+    if yy.size == 0:
+        yy, xx = np.mgrid[0:h, 0:w]
+        yy, xx = yy.ravel(), xx.ravel()
+
+    pts = np.zeros((yy.size, 3), dtype=float)
+    pts[:, plot_axes[1]] = yy.astype(float) + 1.0
+    pts[:, plot_axes[0]] = xx.astype(float) + 1.0
+    pts[:, cut_axis] = float(chooserow[0])
+    pts_fit = pts[:, [1, 0, 2]]
+    atlas_pts = transform_points_inverse(pts_fit, np.asarray(atlas_to_sample, dtype=float))
+    atlas_coords = atlas_pts[:, [1, 0, 2]]
+    sluse = int(np.round(float(np.median(atlas_coords[:, cut_axis]))))
+    return int(np.clip(sluse, 1, atlas_cut_axis_size(atlas_shape, chooserow)))
+
+
+def resolve_atlas_plane_index(
+    data: BrainMatchPointsData,
+    slice_idx: int,
+) -> int:
+    """Atlas plane for one chooselist entry (manual, from points, or auto-estimated)."""
+    chooserow = np.asarray(data.chooselist[slice_idx - 1], dtype=int)
+    atlas_points = data.session.atlas_control_points[slice_idx - 1]
+    if atlas_points:
+        cut_axis = int(chooserow[1]) - 1
+        return int(
+            np.clip(
+                int(np.round(float(np.median([p[cut_axis] for p in atlas_points])))),
+                1,
+                atlas_cut_axis_size(data.atlas_template.shape, chooserow),
+            )
+        )
+
+    stored = data.session.atlas_slice_indices
+    if stored is not None and len(stored) >= slice_idx and int(stored[slice_idx - 1]) > 0:
+        return int(
+            np.clip(
+                int(stored[slice_idx - 1]),
+                1,
+                atlas_cut_axis_size(data.atlas_template.shape, chooserow),
+            )
+        )
+
+    matrix = np.asarray(data.session.atlas2histology_tform, dtype=float)
+    return estimate_atlas_plane_index(
+        data.sample_volume,
+        chooserow,
+        matrix,
+        data.atlas_template.shape,
+    )
+
+
+def set_atlas_plane_index(session: ControlPointSession, slice_idx: int, plane: int) -> None:
+    n_slices = len(session.histology_control_points)
+    if session.atlas_slice_indices is None or len(session.atlas_slice_indices) != n_slices:
+        session.atlas_slice_indices = [0] * n_slices
+    session.atlas_slice_indices[slice_idx - 1] = int(plane)
+
+
+def slice_pair(
+    data: BrainMatchPointsData,
+    slice_idx: int,
+    *,
+    atlas_plane: int | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    row = np.asarray(data.chooselist[slice_idx - 1], dtype=int)
     sample = _normalize_display(volume_index_to_image(data.sample_volume, row))
-    atlas = _normalize_display(volume_index_to_image(data.atlas_template, row))
+    plane = atlas_plane if atlas_plane is not None else resolve_atlas_plane_index(data, slice_idx)
+    atlas_row = chooserow_with_atlas_plane(row, plane)
+    atlas = _normalize_display(volume_index_to_image(data.atlas_template, atlas_row))
     return sample, atlas
 
 

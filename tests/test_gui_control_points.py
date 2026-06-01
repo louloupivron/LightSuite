@@ -11,7 +11,7 @@ import yaml
 
 from lightsuite.config.loader import load_config
 from lightsuite.gui.affine import fit_affine_transform
-from lightsuite.gui.brain_data import prepare_brain_match_points_session
+from lightsuite.gui.brain_data import estimate_atlas_plane_index, prepare_brain_match_points_session
 from lightsuite.gui.match_points_brain import (
     _boundary_overlay,
     _chooselist_slice_label,
@@ -24,6 +24,14 @@ from lightsuite.gui.control_points import ControlPointSession
 from lightsuite.gui.slices import volume_index_to_image
 from lightsuite.preprocess.brain import preprocess_lightsheet_volume
 from lightsuite.registration.init_brain import initialize_brain_registration
+
+
+def test_estimate_atlas_plane_identity() -> None:
+    vol = np.zeros((20, 20, 20), dtype=np.float32)
+    vol[:, :, 11] = 100.0
+    row = np.array([12, 3, 1, 1], dtype=int)
+    plane = estimate_atlas_plane_index(vol, row, np.eye(4), vol.shape)
+    assert plane == 12
 
 
 def test_boundary_overlay_follows_affine_warp() -> None:

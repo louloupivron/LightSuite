@@ -215,8 +215,9 @@ Requires `uv sync --extra gui`.
 **Workflow:**
 
 1. Navigate slices with the **Navigation** panel on the right:
-   - **←** / **→** arrow keys for previous/next slice (or use the panel buttons)
-   - Change **Slice #** and click **Show slice** to jump to a specific index
+   - **←** / **→** arrow keys for previous/next chooselist slice (or use the panel buttons)
+   - **Atlas plane** spinbox, **PgUp** / **PgDn**, or **mouse wheel over the atlas panel** to scroll along the atlas cut axis until anatomy matches the sample (like MATLAB)
+   - Change **Slice #** and click **Show slice** to jump to a specific chooselist index
    - Toggle the atlas boundary overlay with **O** or the checkbox in Navigation
    - The spinbox also refreshes when you press Enter or change the value
    - Do **not** use Napari’s bottom dimension slider — it does not switch chooselist slices

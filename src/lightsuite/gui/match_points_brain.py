@@ -13,8 +13,11 @@ from lightsuite.gui.affine import fit_affine_transform
 from lightsuite.registration.warp import warp_volume_affine
 from lightsuite.gui.brain_data import (
     BrainMatchPointsData,
+    atlas_cut_axis_size,
     load_brain_match_points_data,
     prepare_brain_match_points_session,
+    resolve_atlas_plane_index,
+    set_atlas_plane_index,
     slice_pair,
 )
 from lightsuite.gui.control_points import ControlPointSession
@@ -49,6 +52,7 @@ def _layer_xy_to_volume_point(
     chooserow: np.ndarray,
     *,
     timestamp: float,
+    plane_along_cut_axis: int | None = None,
 ) -> list[float]:
     """Map a 2D layer click/drag position back to MATLAB-style [x, y, z, t] storage."""
     plot_axes = _plot_axes_for_row(chooserow)
@@ -56,7 +60,9 @@ def _layer_xy_to_volume_point(
     point = np.zeros(4, dtype=float)
     point[plot_axes[1]] = xy[0]
     point[plot_axes[0]] = xy[1]
-    point[cut_axis] = int(chooserow[0])
+    point[cut_axis] = float(
+        plane_along_cut_axis if plane_along_cut_axis is not None else int(chooserow[0])
+    )
     point[3] = timestamp
     return point.tolist()
 
@@ -91,16 +97,24 @@ def _sync_store_from_layer(
     slice_idx: int,
     panel: str,
     layer_xy: np.ndarray,
+    *,
+    atlas_plane: int | None = None,
 ) -> None:
     """Persist napari layer coordinates; preserve timestamps when dragging existing points."""
     chooserow = np.asarray(session.chooselist[slice_idx - 1], dtype=int)
     store = _slice_point_store(session, panel)
     existing = store[slice_idx - 1]
+    plane = atlas_plane if panel == "atlas" else None
     updated: list[list[float]] = []
     for i, pt in enumerate(layer_xy):
         ts = float(existing[i][3]) if i < len(existing) else time.time()
         updated.append(
-            _layer_xy_to_volume_point((float(pt[0]), float(pt[1])), chooserow, timestamp=ts)
+            _layer_xy_to_volume_point(
+                (float(pt[0]), float(pt[1])),
+                chooserow,
+                timestamp=ts,
+                plane_along_cut_axis=plane,
+            )
         )
     store[slice_idx - 1] = updated
 
@@ -224,9 +238,41 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
         atlas_layer.translate = atlas_offset
         atlas_pts.translate = atlas_offset
 
-    def _refresh() -> None:
+    def _current_atlas_plane() -> int:
+        return resolve_atlas_plane_index(data, state["slice"])
+
+    def _atlas_plane_limits() -> tuple[int, int]:
+        row = np.asarray(data.chooselist[state["slice"] - 1], dtype=int)
+        nmax = atlas_cut_axis_size(data.atlas_template.shape, row)
+        return 1, nmax
+
+    def _set_atlas_plane(plane: int, *, persist: bool = True) -> None:
+        plane = int(np.clip(plane, *_atlas_plane_limits()))
+        if persist:
+            set_atlas_plane_index(data.session, state["slice"], plane)
+        _refresh(atlas_plane=plane)
+
+    def _update_status() -> None:
         idx = state["slice"]
-        sample, atlas = slice_pair(data, idx)
+        plane = state.get("_atlas_plane", _current_atlas_plane())
+        _pmin, pmax = _atlas_plane_limits()
+        n_s = len(data.session.histology_control_points[idx - 1])
+        n_a = len(data.session.atlas_control_points[idx - 1])
+        caption = _chooselist_slice_label(data.chooselist, idx)
+        overlay_flag = "on" if state["show_overlay"] else "off"
+        pair_info = _pair_status(n_s, n_a)
+        viewer.status = (
+            f"Slice {idx}/{n_slices} ({caption}) | {pair_info} "
+            f"| atlas plane {plane}/{pmax} (PgUp/PgDn or wheel on atlas) "
+            f"| overlay {overlay_flag} (O) | ←/→ chooselist | Backspace undo"
+        )
+
+    def _refresh(*, atlas_plane: int | None = None) -> None:
+        idx = state["slice"]
+        state["_atlas_plane"] = (
+            int(atlas_plane) if atlas_plane is not None else _current_atlas_plane()
+        )
+        sample, atlas = slice_pair(data, idx, atlas_plane=state["_atlas_plane"])
         sample_layer.data = sample
         atlas_layer.data = atlas
         _layout_panels()
@@ -252,15 +298,7 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
             overlay_layer.visible = True
         else:
             overlay_layer.visible = False
-        n_s = len(data.session.histology_control_points[idx - 1])
-        n_a = len(data.session.atlas_control_points[idx - 1])
-        caption = _chooselist_slice_label(data.chooselist, idx)
-        overlay_flag = "on" if state["show_overlay"] else "off"
-        pair_info = _pair_status(n_s, n_a)
-        viewer.status = (
-            f"Slice {idx}/{n_slices} ({caption}) | {pair_info} "
-            f"| overlay {overlay_flag} (O) | ←/→ slice | Backspace undo"
-        )
+        _update_status()
         if state["_view_shape"] != sample.shape:
             viewer.reset_view()
             state["_view_shape"] = sample.shape
@@ -274,7 +312,14 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
     def _on_panel_points_changed(panel: str) -> None:
         idx = state["slice"]
         layer = sample_pts if panel == "sample" else atlas_pts
-        _sync_store_from_layer(data.session, idx, panel, np.asarray(layer.data, dtype=float))
+        plane = state.get("_atlas_plane", _current_atlas_plane()) if panel == "atlas" else None
+        _sync_store_from_layer(
+            data.session,
+            idx,
+            panel,
+            np.asarray(layer.data, dtype=float),
+            atlas_plane=plane,
+        )
         n_s = len(data.session.histology_control_points[idx - 1])
         n_a = len(data.session.atlas_control_points[idx - 1])
         if n_s == n_a:
@@ -294,6 +339,10 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
         try:
             navigation.slice_index.value = int(state["slice"])
             navigation.show_overlay.value = bool(state["show_overlay"])
+            pmin, pmax = _atlas_plane_limits()
+            navigation.atlas_plane.min = pmin
+            navigation.atlas_plane.max = pmax
+            navigation.atlas_plane.value = int(state.get("_atlas_plane", _current_atlas_plane()))
         finally:
             state["_nav_syncing"] = False
 
@@ -343,11 +392,24 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
             "step": 1,
             "label": "Slice # (chooselist index)",
         },
+        atlas_plane={
+            "min": 1,
+            "max": 100,
+            "step": 1,
+            "label": "Atlas plane along cut axis",
+        },
         show_overlay={"label": "Atlas boundary overlay on sample (shortcut: O)"},
         call_button="Show slice",
     )
-    def navigation(slice_index: int = 1, show_overlay: bool = True) -> None:
+    def navigation(slice_index: int = 1, atlas_plane: int = 1, show_overlay: bool = True) -> None:
         _navigate_to(slice_index, show_overlay=show_overlay)
+        _set_atlas_plane(atlas_plane)
+
+    @navigation.atlas_plane.changed.connect
+    def _atlas_plane_widget_changed() -> None:
+        if state["_nav_syncing"]:
+            return
+        _set_atlas_plane(navigation.atlas_plane.value)
 
     @magicgui(call_button="◀  Previous slice")
     def previous_slice() -> None:
@@ -397,6 +459,18 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
             return float("-inf")
         return float(ts)
 
+    def _atlas_plane_step(delta: int) -> None:
+        plane = state.get("_atlas_plane", _current_atlas_plane()) + int(delta)
+        _set_atlas_plane(plane)
+        _sync_navigation_widget()
+        _refocus_canvas()
+
+    def _atlas_plane_up(_viewer) -> None:
+        _atlas_plane_step(1)
+
+    def _atlas_plane_down(_viewer) -> None:
+        _atlas_plane_step(-1)
+
     def _delete_last_point_key(_viewer) -> None:
         """Remove the most recently placed point (MATLAB Backspace)."""
         idx = state["slice"]
@@ -415,6 +489,27 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
     viewer.bind_key("Left", _previous_slice_key, overwrite=True)
     viewer.bind_key("Right", _next_slice_key, overwrite=True)
     viewer.bind_key("Backspace", _delete_last_point_key, overwrite=True)
+    viewer.bind_key("PageUp", _atlas_plane_up, overwrite=True)
+    viewer.bind_key("PageDown", _atlas_plane_down, overwrite=True)
+
+    @viewer.window._qt_viewer.canvas.events.mouse_wheel.connect
+    def _scroll_atlas_plane(event) -> None:
+        """Scroll atlas plane when the wheel is used over the atlas panel (MATLAB scroll)."""
+        if getattr(event, "delta", None) is None:
+            return
+        dy = event.delta[1] if len(event.delta) > 1 else event.delta[0]
+        if dy == 0:
+            return
+        pos = getattr(viewer.window._qt_viewer.cursor, "position", None)
+        if pos is None:
+            return
+        w = float(sample_layer.data.shape[1])
+        col = float(pos[-1]) if len(pos) >= 2 else float(pos[0])
+        if col < w + PANEL_GAP_X * 0.5:
+            return
+        step = 1 if dy < 0 else -1
+        _atlas_plane_step(step)
+        _sync_navigation_widget()
 
     viewer.window.add_dock_widget(navigation, area="right", name="Navigation")
     viewer.window.add_dock_widget(previous_slice, area="right", name="Previous slice")
@@ -427,8 +522,9 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
     console.print(
         "[bold]Napari control-point GUI[/bold] — sample (left), atlas (right). "
         "Numbered markers are matched pairs (1↔1, 2↔2, …). "
-        "Add points in order on each side; shortcuts: "
-        "[bold]←[/bold]/[bold]→[/bold] slices, [bold]O[/bold] overlay, [bold]Backspace[/bold] undo last point."
+        "Scroll the wheel over the atlas (or PgUp/PgDn) to adjust the atlas plane along the cut axis. "
+        "Shortcuts: [bold]←[/bold]/[bold]→[/bold] chooselist slices, [bold]O[/bold] overlay, "
+        "[bold]Backspace[/bold] undo last point."
     )
     napari.run()
     return data.session_path

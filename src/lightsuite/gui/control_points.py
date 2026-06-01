@@ -19,6 +19,8 @@ class ControlPointSession:
     atlas_control_points: list[list[list[float]]]
     ori_trans: list[list[float]]
     chooselist: list[list[int]] | None = None
+    # Per chooselist entry: atlas plane index along the cut axis (1-based). None = auto on load.
+    atlas_slice_indices: list[int] | None = None
 
     @classmethod
     def empty(cls, ori_trans: np.ndarray, n_slices: int) -> ControlPointSession:
@@ -36,6 +38,7 @@ class ControlPointSession:
             "atlas_control_points": self.atlas_control_points,
             "ori_trans": self.ori_trans,
             "chooselist": self.chooselist,
+            "atlas_slice_indices": self.atlas_slice_indices,
         }
 
     def save(self, path: Path) -> None:
@@ -46,6 +49,7 @@ class ControlPointSession:
     @classmethod
     def load(cls, path: Path) -> ControlPointSession:
         raw = json.loads(path.expanduser().read_text(encoding="utf-8"))
+        raw.setdefault("atlas_slice_indices", None)
         return cls(**raw)
 
     def paired_points_xyz(self) -> tuple[np.ndarray, np.ndarray]:
