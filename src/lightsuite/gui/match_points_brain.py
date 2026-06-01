@@ -20,6 +20,9 @@ from lightsuite.gui.slices import volume_index_to_image
 
 console = Console()
 
+# Horizontal gap between sample+overlay (left) and atlas (right), in pixels (dim 1 / X).
+PANEL_GAP_X = 24
+
 
 def _points_for_slice(session: ControlPointSession, slice_idx: int, panel: str) -> np.ndarray:
     store = (
@@ -115,9 +118,17 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
     state = {"slice": 1, "show_overlay": True, "_nav_syncing": False}
 
     viewer = napari.Viewer(title=f"LightSuite — {config.sample.name}")
+    viewer.dims.ndisplay = 2
     sample_layer = viewer.add_image(np.zeros((10, 10)), name="sample", colormap="gray")
     atlas_layer = viewer.add_image(np.zeros((10, 10)), name="atlas", colormap="gray")
-    overlay_layer = viewer.add_image(np.zeros((10, 10)), name="overlay", colormap="red", opacity=0.35, visible=True)
+    overlay_layer = viewer.add_image(
+        np.zeros((10, 10)),
+        name="overlay",
+        colormap="red",
+        opacity=0.35,
+        visible=True,
+        blending="additive",
+    )
     sample_pts = viewer.add_points(
         np.zeros((0, 2)),
         name="sample_points",
@@ -133,17 +144,22 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
         ndim=2,
     )
 
-    def _layout_atlas() -> None:
-        h, w = sample_layer.data.shape
-        atlas_layer.translate = (w + 20, 0)
-        atlas_pts.translate = (w + 20, 0)
+    def _layout_panels() -> None:
+        """Place sample + overlay on the left, atlas + atlas points on the right."""
+        _h, w = sample_layer.data.shape
+        sample_layer.translate = (0.0, 0.0)
+        overlay_layer.translate = (0.0, 0.0)
+        sample_pts.translate = (0.0, 0.0)
+        atlas_offset = (0.0, float(w + PANEL_GAP_X))
+        atlas_layer.translate = atlas_offset
+        atlas_pts.translate = atlas_offset
 
     def _refresh() -> None:
         idx = state["slice"]
         sample, atlas = slice_pair(data, idx)
         sample_layer.data = sample
         atlas_layer.data = atlas
-        _layout_atlas()
+        _layout_panels()
         # Block data events: programmatic updates must not re-enter the point
         # change handlers (_sample_changed / _atlas_changed), which call _try_align
         # and would otherwise recurse until vispy transform updates overflow.
@@ -190,9 +206,10 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
     def _atlas_changed(_event=None) -> None:
         idx = state["slice"]
         data.session.atlas_control_points[idx - 1] = []
-        offset = atlas_layer.translate[0]
+        # Napari returns click coords in canvas space; subtract horizontal panel offset.
+        offset_x = float(atlas_layer.translate[-1])
         for pt in atlas_pts.data:
-            _append_point(data.session, idx, "atlas", (float(pt[0] - offset), float(pt[1])))
+            _append_point(data.session, idx, "atlas", (float(pt[0]), float(pt[1] - offset_x)))
         if len(data.session.histology_control_points[idx - 1]) == len(
             data.session.atlas_control_points[idx - 1]
         ):
