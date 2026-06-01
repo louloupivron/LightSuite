@@ -115,7 +115,7 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
 
     data = load_brain_match_points_data(config)
     n_slices = int(data.chooselist.shape[0])
-    state = {"slice": 1, "show_overlay": True, "_nav_syncing": False}
+    state = {"slice": 1, "show_overlay": True, "_nav_syncing": False, "_view_shape": None}
 
     viewer = napari.Viewer(title=f"LightSuite — {config.sample.name}")
     viewer.dims.ndisplay = 2
@@ -185,7 +185,9 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
             f"Slice {idx}/{n_slices} ({caption}) | sample pts={n_s} atlas pts={n_a} "
             f"| overlay {overlay_flag} (O) | ←/→ prev/next slice"
         )
-        viewer.reset_view()
+        if state["_view_shape"] != sample.shape:
+            viewer.reset_view()
+            state["_view_shape"] = sample.shape
 
     def _try_align() -> None:
         mse = data.session.update_manual_alignment(min_pairs=4)
@@ -226,13 +228,44 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
         finally:
             state["_nav_syncing"] = False
 
-    def _navigate_to(slice_index: int | None = None, *, show_overlay: bool | None = None) -> None:
+    def _refocus_canvas() -> None:
+        """Keep arrow/O shortcuts working after dock widgets take focus."""
+        try:
+            qt_viewer = viewer.window._qt_viewer
+        except AttributeError:
+            try:
+                qt_viewer = viewer.window.qt_viewer
+            except AttributeError:
+                return
+        canvas_native = getattr(getattr(qt_viewer, "canvas", None), "native", None)
+        for target in (canvas_native, qt_viewer):
+            if target is not None and hasattr(target, "setFocus"):
+                target.setFocus()
+                return
+
+    def _navigate_to(
+        slice_index: int | None = None,
+        *,
+        show_overlay: bool | None = None,
+        refocus_canvas: bool = False,
+    ) -> None:
         if show_overlay is not None:
             state["show_overlay"] = bool(show_overlay)
         if slice_index is not None:
             state["slice"] = max(1, min(n_slices, int(slice_index)))
-        _sync_navigation_widget()
-        _refresh()
+        if refocus_canvas:
+            # Refresh first; sync the spinbox then return focus to the canvas so
+            # repeated ←/→ work without clicking back into the image.
+            _refresh()
+
+            def _after_keyboard_nav() -> None:
+                _sync_navigation_widget()
+                _refocus_canvas()
+
+            QTimer.singleShot(0, _after_keyboard_nav)
+        else:
+            _sync_navigation_widget()
+            _refresh()
 
     @magicgui(
         slice_index={
@@ -281,13 +314,13 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
         _refresh()
 
     def _toggle_overlay(_viewer) -> None:
-        _navigate_to(show_overlay=not state["show_overlay"])
+        _navigate_to(show_overlay=not state["show_overlay"], refocus_canvas=True)
 
     def _previous_slice_key(_viewer) -> None:
-        _navigate_to(state["slice"] - 1)
+        _navigate_to(state["slice"] - 1, refocus_canvas=True)
 
     def _next_slice_key(_viewer) -> None:
-        _navigate_to(state["slice"] + 1)
+        _navigate_to(state["slice"] + 1, refocus_canvas=True)
 
     # Napari normalizes key names; O and o are the same binding.
     viewer.bind_key("O", _toggle_overlay)
