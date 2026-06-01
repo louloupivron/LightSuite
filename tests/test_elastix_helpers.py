@@ -84,7 +84,15 @@ def test_patch_transformix_params_forces_mhd_output() -> None:
     patched = _patch_transformix_params(params, nearest=True)
     assert '(WriteResultImage "true")' in patched
     assert '(ResultImageFormat "mhd")' in patched
-    assert "(FinalBSplineInterpolationOrder 0)" in patched
+    assert '(FinalBSplineInterpolationOrder "0")' in patched
+
+
+def test_patch_transformix_params_replaces_duplicate_keys() -> None:
+    params = '(ResultImageFormat "nii.gz")\n(ResultImagePixelType "short")\n'
+    patched = _patch_transformix_params(params, nearest=False)
+    assert patched.lower().count("resultimageformat") == 1
+    assert '(ResultImageFormat "mhd")' in patched
+    assert '(ResultImagePixelType "float")' in patched
 
 
 def test_discover_transformix_result_nii_and_mhd(tmp_path: Path) -> None:

@@ -160,22 +160,29 @@ def run_bspline_registration(
     )
 
 
+def _upsert_elastix_param(params: str, key: str, value: str) -> str:
+    """Set one elastix parameter, removing any prior lines for the same key."""
+    import re
+
+    pat_new = re.compile(rf"^\s*\(\s*{re.escape(key)}\s+", re.IGNORECASE)
+    pat_old = re.compile(rf"^\s*{re.escape(key)}\s*=", re.IGNORECASE)
+    lines = [
+        line
+        for line in params.splitlines()
+        if line.strip() and not pat_new.match(line) and not pat_old.match(line)
+    ]
+    lines.append(f'({key} "{value}")')
+    return "\n".join(lines) + "\n"
+
+
 def _patch_transformix_params(params: str, *, nearest: bool) -> str:
     """Match transformAnnotationVolume.m: label resampling + always write a result image."""
+    params = _upsert_elastix_param(params, "WriteResultImage", "true")
+    params = _upsert_elastix_param(params, "ResultImageFormat", "mhd")
+    params = _upsert_elastix_param(params, "ResultImagePixelType", "float")
     if nearest:
-        for old, new in (
-            ("FinalBSplineInterpolationOrder = 3", "FinalBSplineInterpolationOrder = 0"),
-            ("(FinalBSplineInterpolationOrder 3)", "(FinalBSplineInterpolationOrder 0)"),
-        ):
-            params = params.replace(old, new)
-    overrides = [
-        '(WriteResultImage "true")',
-        '(ResultImageFormat "mhd")',
-        '(ResultImagePixelType "float")',
-    ]
-    if nearest:
-        overrides.append('(FinalBSplineInterpolationOrder 0)')
-    return params.rstrip() + "\n" + "\n".join(overrides) + "\n"
+        params = _upsert_elastix_param(params, "FinalBSplineInterpolationOrder", "0")
+    return params
 
 
 def _discover_transformix_result(output_dir: Path) -> Path | None:
