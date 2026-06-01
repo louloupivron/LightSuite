@@ -23,6 +23,9 @@ console = Console()
 
 # Horizontal gap between sample+overlay (left) and atlas (right), in pixels (dim 1 / X).
 PANEL_GAP_X = 24
+# Pair number labels: white text, nudged right of each marker (row, col) in layer data coords.
+TEXT_LABEL_COLOR = "white"
+TEXT_LABEL_OFFSET = (0.0, 8.0)
 
 
 def _plot_axes_for_row(chooserow: np.ndarray) -> list[int]:
@@ -59,6 +62,19 @@ def _layer_xy_to_volume_point(
 
 def _pair_labels(n_points: int) -> list[str]:
     return [str(i + 1) for i in range(n_points)]
+
+
+def _configure_point_text(layer) -> None:
+    """Style numbered pair labels (white, offset right of the marker)."""
+    if not hasattr(layer, "text"):
+        return
+    try:
+        layer.text.color = TEXT_LABEL_COLOR
+        layer.text.translation = np.array(TEXT_LABEL_OFFSET, dtype=float)
+        layer.text.anchor = "center"
+        layer.text.size = 12
+    except (TypeError, ValueError, AttributeError):
+        pass
 
 
 def _slice_point_store(session: ControlPointSession, panel: str) -> list[list[list[float]]]:
@@ -181,6 +197,8 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
         size=10,
         ndim=2,
     )
+    _configure_point_text(sample_pts)
+    _configure_point_text(atlas_pts)
 
     def _apply_layer_points(layer, xy: np.ndarray) -> None:
         labels = _pair_labels(int(xy.shape[0]))
@@ -191,6 +209,7 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
                     layer.text = labels
                 except (TypeError, ValueError, AttributeError):
                     pass
+            _configure_point_text(layer)
 
     def _layout_panels() -> None:
         """Place sample + overlay on the left, atlas + atlas points on the right."""
