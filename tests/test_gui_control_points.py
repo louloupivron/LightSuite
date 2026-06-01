@@ -20,7 +20,7 @@ from lightsuite.gui.match_points_brain import (
 )
 from lightsuite.registration.warp import warp_volume_affine
 from lightsuite.gui.chooselist import generate_control_point_list
-from lightsuite.gui.control_points import ControlPointSession
+from lightsuite.gui.control_points import ControlPointSession, load_registration_control_point_session
 from lightsuite.gui.slices import volume_index_to_image
 from lightsuite.preprocess.brain import preprocess_lightsheet_volume
 from lightsuite.registration.init_brain import initialize_brain_registration
@@ -101,6 +101,13 @@ def test_control_point_session_point_counts() -> None:
     assert matched == 2
     assert total_s == 3
     assert total_a == 4
+
+
+def test_load_registration_control_point_session_without_file(tmp_path: Path) -> None:
+    ori = np.eye(4)
+    session = load_registration_control_point_session(tmp_path, original_trans=ori)
+    assert session.paired_points_xyz()[0].shape == (0, 3)
+    assert np.allclose(session.ori_trans, ori)
 
 
 def test_control_point_session_roundtrip(tmp_path: Path) -> None:

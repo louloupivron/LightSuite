@@ -96,3 +96,16 @@ class ControlPointSession:
 
 def default_session_path(save_path: Path) -> Path:
     return save_path / "atlas2histology_tform.json"
+
+
+def load_registration_control_point_session(
+    save_path: Path,
+    *,
+    original_trans: list[list[float]] | np.ndarray,
+) -> ControlPointSession:
+    """Load manual control points if present; otherwise an empty session (MATLAB optional *tform.mat)."""
+    path = default_session_path(save_path)
+    if path.is_file():
+        return ControlPointSession.load(path)
+    matrix = np.asarray(original_trans, dtype=float)
+    return ControlPointSession.empty(matrix, n_slices=1)

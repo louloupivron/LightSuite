@@ -202,9 +202,11 @@ registration:
 
 If orientation is wrong, set `registration.orientation` in YAML or edit `brain_orientation.txt`, then re-run init-registration.
 
-### 4. Match control points (manual)
+### 4. Match control points (optional)
 
 Opens a Napari dual-pane GUI: sample on the left, atlas on the right.
+
+**Optional:** you can skip this step and run **register** using only the auto control point pairs written by **init-registration** (same as MATLAB when `*tform.mat` is absent).
 
 ```bash
 uv run lightsuite brain match-points -c my_mouse.yaml
@@ -340,7 +342,7 @@ Each stage reads checkpoints from `save_path`:
 | preprocess | Valid YAML, TIFF source path |
 | init-registration | `regopts.json` from preprocess |
 | match-points | `regopts.json` with `original_trans` |
-| register | `regopts.json` + `atlas2histology_tform.json` + Elastix |
+| register | `regopts.json` (with `original_trans` and auto pairs) + Elastix; `atlas2histology_tform.json` optional |
 | export | `regopts.json` + `transform_params.json` + transformix |
 
 Re-running a stage overwrites its outputs and downstream dependencies. After changing control points, re-run **register** and **export**.

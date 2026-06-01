@@ -17,7 +17,11 @@ from scipy.spatial.distance import cdist
 from lightsuite.atlas.registry import resolve_brain_atlas
 from lightsuite.config.models import BrainPipelineConfig
 from lightsuite.gui.affine import fit_affine_transform, transform_points, transform_points_inverse
-from lightsuite.gui.control_points import ControlPointSession, default_session_path
+from lightsuite.gui.control_points import (
+    ControlPointSession,
+    default_session_path,
+    load_registration_control_point_session,
+)
 from lightsuite.preprocess.checkpoint import RegOptsCheckpoint
 from lightsuite.registration.elastix.invert import (
     invert_elastix_transform,
@@ -78,21 +82,39 @@ def validate_registration_inputs(
     if not regopts_path.is_file():
         msg = f"Missing {regopts_path}. Run preprocess and init-registration first."
         raise FileNotFoundError(msg)
-    if not cp_path.is_file():
-        msg = f"Missing {cp_path}. Run match-points (interactive) or provide control points."
-        raise FileNotFoundError(msg)
 
     checkpoint = RegOptsCheckpoint.load(regopts_path)
-    session = ControlPointSession.load(cp_path)
 
     if checkpoint.original_trans is None:
         msg = "regopts.json missing original_trans from init-registration."
         raise RuntimeError(msg)
 
-    atlas_pts, sample_pts = session.paired_points_xyz()
-    if sample_pts.shape[0] < 4:
+    if not cp_path.is_file():
         console.print(
-            "[yellow]Warning:[/yellow] fewer than 4 paired control points — "
+            "[dim]No atlas2histology_tform.json — using auto control points from "
+            "init-registration only (match-points is optional).[/dim]"
+        )
+    session = load_registration_control_point_session(
+        save_path,
+        original_trans=checkpoint.original_trans,
+    )
+
+    atlas_pts, sample_pts = session.paired_points_xyz()
+    n_auto = len(checkpoint.autocpatlas or [])
+    if atlas_pts.shape[0] < 4 and n_auto < 4:
+        msg = (
+            "Need at least 4 control points from init-registration (autocpatlas) "
+            "or manual match-points."
+        )
+        raise RuntimeError(msg)
+    if atlas_pts.shape[0] < 4:
+        console.print(
+            "[yellow]Warning:[/yellow] no manual control points — "
+            "affine and B-spline use init-registration auto pairs only."
+        )
+    elif sample_pts.shape[0] < 4:
+        console.print(
+            "[yellow]Warning:[/yellow] fewer than 4 paired manual control points — "
             "registration quality may be poor."
         )
 
