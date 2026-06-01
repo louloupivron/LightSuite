@@ -10,6 +10,7 @@ import tifffile
 from lightsuite.config.models import TiffLayout
 from lightsuite.io.discover import TiffStackDiscovery, discover_tiff_stack
 from lightsuite.io.readers.base import VolumeMetadata
+from lightsuite.io.tiff_volume import read_volumetric_slice
 
 
 class TiffStackReader:
@@ -86,6 +87,8 @@ class TiffStackReader:
                 return tif.pages[z_index - 1].asarray()
             return tifffile.imread(path)
         path = d.tfiles[0]
+        if d.stack_read_mode != "pages":
+            return read_volumetric_slice(path, z_index - 1, d.stack_read_mode)
         if d.use_native_tiff_pages:
             tif = self._open_tiff(path)
             return tif.pages[z_index - 1].asarray()

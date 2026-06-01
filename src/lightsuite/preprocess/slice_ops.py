@@ -19,6 +19,7 @@ class SliceLoadJob:
     scale_xy: float
     fill_background: bool
     capture_binary: bool
+    stack_read_mode: str = "pages"
 
 
 @dataclass(frozen=True)
@@ -93,6 +94,10 @@ def resize_xy_fast(slice_2d: np.ndarray, scale_xy: float) -> np.ndarray:
 def read_source_plane(job: SliceLoadJob) -> np.ndarray:
     if job.z_page is None:
         return tifffile.imread(job.source_path)
+    if job.stack_read_mode != "pages":
+        from lightsuite.io.tiff_volume import read_volumetric_slice
+
+        return read_volumetric_slice(job.source_path, job.z_page, job.stack_read_mode)
     return tifffile.imread(job.source_path, key=job.z_page)
 
 

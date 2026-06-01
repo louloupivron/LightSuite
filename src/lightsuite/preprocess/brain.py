@@ -64,6 +64,7 @@ def _slice_jobs_for_channel(
                     scale_xy=scale_xy,
                     fill_background=fill_background,
                     capture_binary=capture_binary,
+                    stack_read_mode=discovery.stack_read_mode,
                 )
             )
         return jobs
@@ -78,6 +79,7 @@ def _slice_jobs_for_channel(
                     scale_xy=scale_xy,
                     fill_background=fill_background,
                     capture_binary=capture_binary,
+                    stack_read_mode=discovery.stack_read_mode,
                 )
             )
         return jobs
@@ -91,6 +93,7 @@ def _slice_jobs_for_channel(
                 scale_xy=scale_xy,
                 fill_background=fill_background,
                 capture_binary=capture_binary,
+                stack_read_mode=discovery.stack_read_mode,
             )
         )
     return jobs
@@ -244,7 +247,12 @@ def preprocess_lightsheet_volume(config: BrainPipelineConfig) -> PreprocessResul
     scratch_bytes = out_h * out_w * nz * 2
     max_ram_bytes = int(config.compute.max_in_memory_scratch_gb * (1024**3))
     scratch_in_ram = scratch_bytes <= max_ram_bytes
-    if discovery.tiff_type == TiffLayout.PLANE_PER_FILE and nchans == 1:
+    if discovery.stack_read_mode != "pages":
+        console.print(
+            f"Single-file volumetric TIFF: {nz} Z planes "
+            f"({discovery.stack_read_mode}, channelperfile)."
+        )
+    elif discovery.tiff_type == TiffLayout.PLANE_PER_FILE and nchans == 1:
         est_xy_gb = scratch_bytes / (1024**3)
         where = "RAM" if scratch_in_ram else f"disk memmap on {config.sample.scratch}"
         console.print(
