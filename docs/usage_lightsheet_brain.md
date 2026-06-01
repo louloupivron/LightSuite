@@ -222,7 +222,7 @@ Requires `uv sync --extra gui`.
    - The spinbox also refreshes when you press Enter or change the value
    - Do **not** use Napari’s bottom dimension slider — it does not switch chooselist slices
 2. Click corresponding landmarks on **sample** (left) and **atlas** (right). Markers are **numbered**; pair **1** on the sample matches pair **1** on the atlas, and so on.
-3. When point counts match on a slice, pairs are recorded. The **global** affine fit (and red boundary overlay) updates only after **≥16 matched pairs** total across all slices, same as MATLAB — each new pair refits using every slice, so adjust the atlas plane (**PgUp/PgDn** / wheel on atlas) before placing points on a new cut orientation.
+3. When point counts match on a slice, the affine fit updates automatically and the **red atlas boundary overlay** on the sample refits (toggle with **O**).
 4. **Backspace** removes the most recently placed point (on whichever side you clicked last).
 5. Use **Clear slice points** to reset the current slice.
 6. Click **Save && Close** when finished.

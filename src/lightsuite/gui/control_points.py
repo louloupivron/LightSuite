@@ -67,7 +67,7 @@ class ControlPointSession:
             return np.zeros((0, 3)), np.zeros((0, 3))
         return np.vstack(atlas_pts), np.vstack(sample_pts)
 
-    def update_manual_alignment(self, min_pairs: int = 16) -> float | None:  # MATLAB Nmin
+    def update_manual_alignment(self, min_pairs: int = 16) -> float | None:
         """Recompute manual alignment from paired slices; return MSE if fit."""
         from lightsuite.gui.affine import fit_affine_transform
 

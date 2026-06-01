@@ -30,8 +30,6 @@ PANEL_GAP_X = 24
 # Pair number labels: white text, nudged right of each marker (row, col) in layer data coords.
 TEXT_LABEL_COLOR = "white"
 TEXT_LABEL_OFFSET = (0.0, 8.0)
-# MATLAB fitAffineTrans3D / align_ccf_to_histology use at least 16 matched pairs.
-MIN_PAIRS_FOR_AFFINE_FIT = 16
 
 
 def _plot_axes_for_row(chooserow: np.ndarray) -> list[int]:
@@ -46,8 +44,7 @@ def _volume_points_to_layer_xy(points: list[list[float]], chooserow: np.ndarray)
         return np.zeros((0, 2))
     pts = np.asarray(points, dtype=float)
     plot_axes = _plot_axes_for_row(chooserow)
-    # Storage uses 1-based voxel indices (MATLAB); napari layers use 0-based.
-    return pts[:, [plot_axes[1], plot_axes[0]]] - 1.0
+    return pts[:, [plot_axes[1], plot_axes[0]]]
 
 
 def _layer_xy_to_volume_point(
@@ -61,9 +58,8 @@ def _layer_xy_to_volume_point(
     plot_axes = _plot_axes_for_row(chooserow)
     cut_axis = int(chooserow[1]) - 1
     point = np.zeros(4, dtype=float)
-    # MATLAB: cpt(alldims~=idim) = flip(click); volume indices are 1-based.
-    point[plot_axes[0]] = float(xy[1]) + 1.0
-    point[plot_axes[1]] = float(xy[0]) + 1.0
+    point[plot_axes[1]] = xy[0]
+    point[plot_axes[0]] = xy[1]
     point[cut_axis] = float(
         plane_along_cut_axis if plane_along_cut_axis is not None else int(chooserow[0])
     )
@@ -308,15 +304,9 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
             state["_view_shape"] = sample.shape
 
     def _try_align() -> None:
-        atlas_pts, sample_pts = data.session.paired_points_xyz()
-        n_pairs = int(atlas_pts.shape[0])
-        if n_pairs < MIN_PAIRS_FOR_AFFINE_FIT:
-            return
-        mse = data.session.update_manual_alignment(min_pairs=MIN_PAIRS_FOR_AFFINE_FIT)
+        mse = data.session.update_manual_alignment(min_pairs=4)
         if mse is not None:
-            state["_warped_annotation_key"] = None
-            state["_warped_annotation"] = None
-            show_info(f"Updated alignment fit (MSE={mse:.2f}, N={n_pairs})")
+            show_info(f"Updated alignment fit (MSE={mse:.2f})")
         _refresh()
 
     def _on_panel_points_changed(panel: str) -> None:
