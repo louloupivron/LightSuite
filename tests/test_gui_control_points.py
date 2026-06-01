@@ -91,6 +91,18 @@ def test_affine_fit_identity_with_noise() -> None:
     assert matrix.shape == (4, 4)
 
 
+def test_control_point_session_point_counts() -> None:
+    session = ControlPointSession.empty(np.eye(4), n_slices=3)
+    session.histology_control_points[0] = [[1, 2, 3, 0], [4, 5, 6, 0]]
+    session.atlas_control_points[0] = [[1, 2, 3, 0], [7, 8, 9, 0]]
+    session.histology_control_points[1] = [[1, 2, 3, 0]]
+    session.atlas_control_points[1] = [[1, 2, 3, 0], [4, 5, 6, 0]]
+    matched, total_s, total_a = session.point_counts()
+    assert matched == 2
+    assert total_s == 3
+    assert total_a == 4
+
+
 def test_control_point_session_roundtrip(tmp_path: Path) -> None:
     session = ControlPointSession.empty(np.eye(4), n_slices=3)
     session.histology_control_points[0] = [[1.0, 2.0, 3.0, float("nan")]]

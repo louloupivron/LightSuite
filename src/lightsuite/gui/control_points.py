@@ -52,6 +52,21 @@ class ControlPointSession:
         raw.setdefault("atlas_slice_indices", None)
         return cls(**raw)
 
+    def point_counts(self) -> tuple[int, int, int]:
+        """Return (matched_pair_count, total_sample_points, total_atlas_points)."""
+        total_sample = sum(len(s) for s in self.histology_control_points)
+        total_atlas = sum(len(s) for s in self.atlas_control_points)
+        matched = sum(
+            len(a_list)
+            for a_list, s_list in zip(
+                self.atlas_control_points,
+                self.histology_control_points,
+                strict=True,
+            )
+            if len(a_list) == len(s_list) and len(a_list) > 0
+        )
+        return matched, total_sample, total_atlas
+
     def paired_points_xyz(self) -> tuple[np.ndarray, np.ndarray]:
         """Return matched atlas/sample points as Nx3 (MATLAB dim order [2,1,3])."""
         atlas_pts: list[np.ndarray] = []

@@ -155,6 +155,7 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
     try:
         import napari
         from magicgui import magicgui
+        from magicgui.widgets import Label
         from napari.utils.notifications import show_info
         from qtpy.QtCore import QTimer
     except ImportError as exc:
@@ -200,6 +201,11 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
     )
     _configure_point_text(sample_pts)
     _configure_point_text(atlas_pts)
+
+    points_summary = Label(
+        label="Session totals",
+        value="Total points: 0 matched pairs (0 on sample, 0 on atlas)",
+    )
 
     def _apply_layer_points(layer, xy: np.ndarray) -> None:
         labels = _pair_labels(int(xy.shape[0]))
@@ -252,19 +258,28 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
             set_atlas_plane_index(data.session, state["slice"], plane)
         _refresh(atlas_plane=plane)
 
+    def _update_point_count_display() -> None:
+        matched, total_sample, total_atlas = data.session.point_counts()
+        points_summary.value = (
+            f"Total points: {matched} matched pairs "
+            f"({total_sample} on sample, {total_atlas} on atlas)"
+        )
+
     def _update_status() -> None:
         idx = state["slice"]
         plane = state.get("_atlas_plane", _current_atlas_plane())
         _pmin, pmax = _atlas_plane_limits()
         n_s = len(data.session.histology_control_points[idx - 1])
         n_a = len(data.session.atlas_control_points[idx - 1])
+        matched, total_sample, total_atlas = data.session.point_counts()
         caption = _chooselist_slice_label(data.chooselist, idx)
         overlay_flag = "on" if state["show_overlay"] else "off"
         pair_info = _pair_status(n_s, n_a)
+        _update_point_count_display()
         viewer.status = (
             f"Slice {idx}/{n_slices} ({caption}) | {pair_info} "
-            f"| atlas plane {plane}/{pmax} (PgUp/PgDn or wheel on atlas) "
-            f"| overlay {overlay_flag} (O) | ←/→ chooselist | Backspace undo"
+            f"| all slices: {matched} pairs ({total_sample} sample / {total_atlas} atlas) "
+            f"| atlas plane {plane}/{pmax} | overlay {overlay_flag} (O)"
         )
 
     def _refresh(*, atlas_plane: int | None = None) -> None:
@@ -511,6 +526,7 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
         _atlas_plane_step(step)
         _sync_navigation_widget()
 
+    viewer.window.add_dock_widget(points_summary, area="right", name="Point counts")
     viewer.window.add_dock_widget(navigation, area="right", name="Navigation")
     viewer.window.add_dock_widget(previous_slice, area="right", name="Previous slice")
     viewer.window.add_dock_widget(next_slice, area="right", name="Next slice")
