@@ -220,10 +220,11 @@ Requires `uv sync --extra gui`.
    - Toggle the atlas boundary overlay with **O** or the checkbox in Navigation
    - The spinbox also refreshes when you press Enter or change the value
    - Do **not** use Napari’s bottom dimension slider — it does not switch chooselist slices
-2. Click corresponding landmarks on **sample** (left) and **atlas** (right).
+2. Click corresponding landmarks on **sample** (left) and **atlas** (right). Markers are **numbered**; pair **1** on the sample matches pair **1** on the atlas, and so on.
 3. When point counts match on a slice, the affine fit updates automatically.
-4. Use **Clear slice points** to reset the current slice.
-5. Click **Save && Close** when finished.
+4. **Backspace** removes the most recently placed point (on whichever side you clicked last).
+5. Use **Clear slice points** to reset the current slice.
+6. Click **Save && Close** when finished.
 
 **Tips:**
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import numpy as np
@@ -24,39 +25,76 @@ console = Console()
 PANEL_GAP_X = 24
 
 
-def _points_for_slice(session: ControlPointSession, slice_idx: int, panel: str) -> np.ndarray:
-    store = (
+def _plot_axes_for_row(chooserow: np.ndarray) -> list[int]:
+    """0-based volume axes shown in the 2D viewer (MATLAB toplot)."""
+    cut_axis = int(chooserow[1]) - 1
+    return [d for d in range(3) if d != cut_axis]
+
+
+def _volume_points_to_layer_xy(points: list[list[float]], chooserow: np.ndarray) -> np.ndarray:
+    """Map stored 4-column points to napari layer (row, col) coordinates."""
+    if not points:
+        return np.zeros((0, 2))
+    pts = np.asarray(points, dtype=float)
+    plot_axes = _plot_axes_for_row(chooserow)
+    return pts[:, [plot_axes[1], plot_axes[0]]]
+
+
+def _layer_xy_to_volume_point(
+    xy: tuple[float, float],
+    chooserow: np.ndarray,
+    *,
+    timestamp: float,
+) -> list[float]:
+    """Map a 2D layer click/drag position back to MATLAB-style [x, y, z, t] storage."""
+    plot_axes = _plot_axes_for_row(chooserow)
+    cut_axis = int(chooserow[1]) - 1
+    point = np.zeros(4, dtype=float)
+    point[plot_axes[1]] = xy[0]
+    point[plot_axes[0]] = xy[1]
+    point[cut_axis] = int(chooserow[0])
+    point[3] = timestamp
+    return point.tolist()
+
+
+def _pair_labels(n_points: int) -> list[str]:
+    return [str(i + 1) for i in range(n_points)]
+
+
+def _slice_point_store(session: ControlPointSession, panel: str) -> list[list[list[float]]]:
+    return (
         session.histology_control_points
         if panel == "sample"
         else session.atlas_control_points
     )
-    pts = np.asarray(store[slice_idx - 1], dtype=float)
-    if pts.size == 0:
-        return np.zeros((0, 2))
-    row = session.chooselist[slice_idx - 1] if session.chooselist else None
-    if row is None:
-        return pts[:, :2]
-    axis = int(row[1])
-    dims = [0, 1, 2]
-    plot_axes = [d for d in dims if d != axis - 1]
-    return pts[:, [plot_axes[1], plot_axes[0]]]
 
 
-def _append_point(session: ControlPointSession, slice_idx: int, panel: str, xy: tuple[float, float]) -> None:
-    row = np.asarray(session.chooselist[slice_idx - 1], dtype=int)
-    axis = int(row[1])
-    slice_index = int(row[0])
-    point = np.zeros(4, dtype=float)
-    dims = [0, 1, 2]
-    plot_axes = [d for d in dims if d != axis - 1]
-    point[plot_axes[1]] = xy[0]
-    point[plot_axes[0]] = xy[1]
-    point[axis - 1] = slice_index
-    point[3] = np.nan
-    target = (
-        session.histology_control_points if panel == "sample" else session.atlas_control_points
-    )
-    target[slice_idx - 1] = [*target[slice_idx - 1], point.tolist()]
+def _sync_store_from_layer(
+    session: ControlPointSession,
+    slice_idx: int,
+    panel: str,
+    layer_xy: np.ndarray,
+) -> None:
+    """Persist napari layer coordinates; preserve timestamps when dragging existing points."""
+    chooserow = np.asarray(session.chooselist[slice_idx - 1], dtype=int)
+    store = _slice_point_store(session, panel)
+    existing = store[slice_idx - 1]
+    updated: list[list[float]] = []
+    for i, pt in enumerate(layer_xy):
+        ts = float(existing[i][3]) if i < len(existing) else time.time()
+        updated.append(
+            _layer_xy_to_volume_point((float(pt[0]), float(pt[1])), chooserow, timestamp=ts)
+        )
+    store[slice_idx - 1] = updated
+
+
+def _pair_status(n_sample: int, n_atlas: int) -> str:
+    n_pairs = min(n_sample, n_atlas)
+    if n_sample == n_atlas:
+        return f"pairs={n_pairs} (matched)"
+    if n_sample > n_atlas:
+        return f"pairs={n_pairs} | place atlas point #{n_atlas + 1}"
+    return f"pairs={n_pairs} | place sample point #{n_sample + 1}"
 
 
 def _boundary_overlay(
@@ -133,16 +171,28 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
         np.zeros((0, 2)),
         name="sample_points",
         face_color="yellow",
-        size=8,
+        border_color="black",
+        text="",
+        text_color="yellow",
+        size=10,
         ndim=2,
     )
     atlas_pts = viewer.add_points(
         np.zeros((0, 2)),
         name="atlas_points",
         face_color="cyan",
-        size=8,
+        border_color="black",
+        text="",
+        text_color="cyan",
+        size=10,
         ndim=2,
     )
+
+    def _apply_layer_points(layer, xy: np.ndarray) -> None:
+        labels = _pair_labels(int(xy.shape[0]))
+        with layer.events.data.blocker():
+            layer.data = xy
+            layer.text = labels
 
     def _layout_panels() -> None:
         """Place sample + overlay on the left, atlas + atlas points on the right."""
@@ -163,9 +213,16 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
         # Block data events: programmatic updates must not re-enter the point
         # change handlers (_sample_changed / _atlas_changed), which call _try_align
         # and would otherwise recurse until vispy transform updates overflow.
+        chooserow = np.asarray(data.chooselist[idx - 1], dtype=int)
         with sample_pts.events.data.blocker(), atlas_pts.events.data.blocker():
-            sample_pts.data = _points_for_slice(data.session, idx, "sample")
-            atlas_pts.data = _points_for_slice(data.session, idx, "atlas")
+            _apply_layer_points(
+                sample_pts,
+                _volume_points_to_layer_xy(data.session.histology_control_points[idx - 1], chooserow),
+            )
+            _apply_layer_points(
+                atlas_pts,
+                _volume_points_to_layer_xy(data.session.atlas_control_points[idx - 1], chooserow),
+            )
         matrix = np.asarray(data.session.atlas2histology_tform, dtype=float)
         if state["show_overlay"]:
             overlay_layer.data = _boundary_overlay(
@@ -181,9 +238,10 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
         n_a = len(data.session.atlas_control_points[idx - 1])
         caption = _chooselist_slice_label(data.chooselist, idx)
         overlay_flag = "on" if state["show_overlay"] else "off"
+        pair_info = _pair_status(n_s, n_a)
         viewer.status = (
-            f"Slice {idx}/{n_slices} ({caption}) | sample pts={n_s} atlas pts={n_a} "
-            f"| overlay {overlay_flag} (O) | ←/→ prev/next slice"
+            f"Slice {idx}/{n_slices} ({caption}) | {pair_info} "
+            f"| overlay {overlay_flag} (O) | ←/→ slice | Backspace undo"
         )
         if state["_view_shape"] != sample.shape:
             viewer.reset_view()
@@ -195,29 +253,22 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
             show_info(f"Updated alignment fit (MSE={mse:.2f})")
         _refresh()
 
+    def _on_panel_points_changed(panel: str) -> None:
+        idx = state["slice"]
+        layer = sample_pts if panel == "sample" else atlas_pts
+        _sync_store_from_layer(data.session, idx, panel, np.asarray(layer.data, dtype=float))
+        n_s = len(data.session.histology_control_points[idx - 1])
+        n_a = len(data.session.atlas_control_points[idx - 1])
+        if n_s == n_a:
+            _try_align()
+
     @sample_pts.events.data.connect
     def _sample_changed(_event=None) -> None:
-        idx = state["slice"]
-        data.session.histology_control_points[idx - 1] = []
-        for pt in sample_pts.data:
-            _append_point(data.session, idx, "sample", (float(pt[0]), float(pt[1])))
-        if len(data.session.histology_control_points[idx - 1]) == len(
-            data.session.atlas_control_points[idx - 1]
-        ):
-            _try_align()
+        _on_panel_points_changed("sample")
 
     @atlas_pts.events.data.connect
     def _atlas_changed(_event=None) -> None:
-        idx = state["slice"]
-        data.session.atlas_control_points[idx - 1] = []
-        # Napari returns click coords in canvas space; subtract horizontal panel offset.
-        offset_x = float(atlas_layer.translate[-1])
-        for pt in atlas_pts.data:
-            _append_point(data.session, idx, "atlas", (float(pt[0]), float(pt[1] - offset_x)))
-        if len(data.session.histology_control_points[idx - 1]) == len(
-            data.session.atlas_control_points[idx - 1]
-        ):
-            _try_align()
+        _on_panel_points_changed("atlas")
 
     def _sync_navigation_widget() -> None:
         """Keep the spinbox in sync with state without re-firing navigation callbacks."""
@@ -322,10 +373,30 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
     def _next_slice_key(_viewer) -> None:
         _navigate_to(state["slice"] + 1, refocus_canvas=True)
 
+    def _point_timestamp(point: list[float]) -> float:
+        ts = point[3]
+        if ts is None or (isinstance(ts, float) and np.isnan(ts)):
+            return float("-inf")
+        return float(ts)
+
+    def _delete_last_point_key(_viewer) -> None:
+        """Remove the most recently placed point (MATLAB Backspace)."""
+        idx = state["slice"]
+        hist = data.session.histology_control_points[idx - 1]
+        atlas = data.session.atlas_control_points[idx - 1]
+        t_hist = _point_timestamp(hist[-1]) if hist else float("-inf")
+        t_atlas = _point_timestamp(atlas[-1]) if atlas else float("-inf")
+        if t_hist >= t_atlas and hist:
+            hist.pop()
+        elif atlas:
+            atlas.pop()
+        _navigate_to(refocus_canvas=True)
+
     # Napari normalizes key names; O and o are the same binding.
     viewer.bind_key("O", _toggle_overlay)
     viewer.bind_key("Left", _previous_slice_key, overwrite=True)
     viewer.bind_key("Right", _next_slice_key, overwrite=True)
+    viewer.bind_key("Backspace", _delete_last_point_key, overwrite=True)
 
     viewer.window.add_dock_widget(navigation, area="right", name="Navigation")
     viewer.window.add_dock_widget(previous_slice, area="right", name="Previous slice")
@@ -337,8 +408,9 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
 
     console.print(
         "[bold]Napari control-point GUI[/bold] — sample (left), atlas (right). "
-        "Shortcuts: [bold]←[/bold]/[bold]→[/bold] previous/next slice, [bold]O[/bold] toggle overlay. "
-        "Or use the Navigation panel; the Napari dimension slider does not change slices here."
+        "Numbered markers are matched pairs (1↔1, 2↔2, …). "
+        "Add points in order on each side; shortcuts: "
+        "[bold]←[/bold]/[bold]→[/bold] slices, [bold]O[/bold] overlay, [bold]Backspace[/bold] undo last point."
     )
     napari.run()
     return data.session_path

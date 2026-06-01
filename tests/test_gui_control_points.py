@@ -12,12 +12,28 @@ import yaml
 from lightsuite.config.loader import load_config
 from lightsuite.gui.affine import fit_affine_transform
 from lightsuite.gui.brain_data import prepare_brain_match_points_session
-from lightsuite.gui.match_points_brain import _chooselist_slice_label
+from lightsuite.gui.match_points_brain import (
+    _chooselist_slice_label,
+    _layer_xy_to_volume_point,
+    _volume_points_to_layer_xy,
+)
 from lightsuite.gui.chooselist import generate_control_point_list
 from lightsuite.gui.control_points import ControlPointSession
 from lightsuite.gui.slices import volume_index_to_image
 from lightsuite.preprocess.brain import preprocess_lightsheet_volume
 from lightsuite.registration.init_brain import initialize_brain_registration
+
+
+def test_control_point_layer_xy_roundtrip() -> None:
+    chooserow = np.array([12, 2, 1, 1], dtype=int)  # cut along axis 2 (X)
+    stored = [_layer_xy_to_volume_point((4.0, 7.0), chooserow, timestamp=1.0)]
+    xy = _volume_points_to_layer_xy(stored, chooserow)
+    assert xy.shape == (1, 2)
+    assert np.allclose(xy[0], [4.0, 7.0])
+    again = _layer_xy_to_volume_point((float(xy[0, 0]), float(xy[0, 1])), chooserow, timestamp=2.0)
+    assert again[0] == stored[0][0]
+    assert again[1] == stored[0][1]
+    assert again[2] == stored[0][2]
 
 
 def test_chooselist_slice_label() -> None:
