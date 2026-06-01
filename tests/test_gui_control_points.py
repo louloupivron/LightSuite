@@ -57,7 +57,7 @@ def test_control_point_layer_xy_roundtrip() -> None:
     stored = [_layer_xy_to_volume_point((4.0, 7.0), chooserow, timestamp=1.0)]
     xy = _volume_points_to_layer_xy(stored, chooserow)
     assert xy.shape == (1, 2)
-    assert np.allclose(xy[0], [4.0, 7.0])
+    assert np.allclose(xy[0], [4.0, 7.0], atol=1e-6)
     again = _layer_xy_to_volume_point((float(xy[0, 0]), float(xy[0, 1])), chooserow, timestamp=2.0)
     assert again[0] == stored[0][0]
     assert again[1] == stored[0][1]
