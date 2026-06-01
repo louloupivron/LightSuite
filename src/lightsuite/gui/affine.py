@@ -37,3 +37,28 @@ def transform_points(points: np.ndarray, matrix: np.ndarray) -> np.ndarray:
 def transform_points_inverse(points: np.ndarray, matrix: np.ndarray) -> np.ndarray:
     inv = np.linalg.inv(matrix)
     return transform_points(points, inv)
+
+
+def affine_point_errors(
+    source: np.ndarray,
+    target: np.ndarray,
+    matrix: np.ndarray,
+) -> tuple[float, np.ndarray]:
+    """Return (MSE, per-point Euclidean errors) for ``matrix`` mapping source -> target."""
+    predicted = transform_points(source, matrix)
+    diff = predicted - target
+    per_point = np.linalg.norm(diff, axis=1)
+    mse = float(np.mean(per_point**2))
+    return mse, per_point
+
+
+def summarize_point_errors(errors: np.ndarray) -> dict[str, float]:
+    """Summary stats for a 1D error array (voxels)."""
+    if errors.size == 0:
+        return {"median": 0.0, "p95": 0.0, "max": 0.0, "mean": 0.0}
+    return {
+        "median": float(np.median(errors)),
+        "p95": float(np.percentile(errors, 95)),
+        "max": float(np.max(errors)),
+        "mean": float(np.mean(errors)),
+    }

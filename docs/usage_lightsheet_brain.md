@@ -264,6 +264,7 @@ uv run lightsuite brain register -c my_mouse.yaml --single-step
 - `transform_params.json` — full transform metadata (replaces `transform_params.mat`)
 - `bspline_samp_to_atlas_20um.txt` — inverse B-spline (sample → atlas)
 - `bspline_atlas_to_samp_20um.txt` — forward B-spline
+- `affine_fit_stats.json` — affine landmark residuals (voxels): median/p95/max, auto vs manual, coarse baseline
 - `{name}_dim{1,2,3}_affine_registration.png` — eight sample slices per axis with warped atlas region outlines overlaid (same style as `dim*_initial_registration.png`)
 - `{name}_dim{1,2,3}_bspline_registration.png` — same layout after B-spline
 - `elastix_temp/` — Elastix working directory (keep until register finishes)

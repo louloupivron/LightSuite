@@ -15,7 +15,14 @@ from scipy.spatial.distance import cdist
 
 from lightsuite.atlas.registry import resolve_brain_atlas
 from lightsuite.config.models import BrainPipelineConfig
-from lightsuite.gui.affine import fit_affine_transform, transform_points, transform_points_inverse
+from lightsuite.gui.affine import (
+    affine_point_errors,
+    fit_affine_transform,
+    summarize_point_errors,
+    transform_points,
+    transform_points_inverse,
+)
+from lightsuite.registration.warp import transform_points_affinetform
 from lightsuite.gui.control_points import (
     ControlPointSession,
     default_session_path,
@@ -34,6 +41,66 @@ from lightsuite.registration.volume import load_registration_volume, permute_bra
 from lightsuite.registration.warp import warp_volume_affine
 
 console = Console()
+
+
+@dataclass
+class AffineFitDiagnostics:
+    """Affine control-point fit quality (voxel units at registration resolution)."""
+
+    n_manual: int
+    n_auto: int
+    n_total: int
+    mse: float
+    median_error_vox: float
+    p95_error_vox: float
+    max_error_vox: float
+    mean_error_vox: float
+    median_error_manual_vox: float | None = None
+    median_error_auto_vox: float | None = None
+    median_coarse_auto_vox: float | None = None
+    median_landmark_vox: float | None = None
+    control_point_weight: float = 0.0
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    def save(self, path: Path) -> None:
+        path = path.expanduser()
+        path.write_text(json.dumps(self.to_dict(), indent=2), encoding="utf-8")
+
+    def print_summary(self) -> None:
+        console.print(
+            f"[bold]Affine fit[/bold] ({self.n_total} pairs: "
+            f"{self.n_manual} manual, {self.n_auto} auto)"
+        )
+        console.print(
+            f"  Residual: median {self.median_error_vox:.1f} vox, "
+            f"p95 {self.p95_error_vox:.1f}, max {self.max_error_vox:.1f} "
+            f"(MSE {self.mse:.1f})"
+        )
+        if self.median_error_manual_vox is not None:
+            console.print(f"  Manual pairs median: {self.median_error_manual_vox:.1f} vox")
+        if self.median_error_auto_vox is not None:
+            console.print(f"  Auto pairs median: {self.median_error_auto_vox:.1f} vox")
+        if self.median_coarse_auto_vox is not None:
+            console.print(
+                f"  Auto pairs vs coarse only: {self.median_coarse_auto_vox:.1f} vox "
+                "(before affine)"
+            )
+        if self.median_landmark_vox is not None:
+            console.print(
+                f"  B-spline landmarks median: {self.median_landmark_vox:.1f} vox "
+                f"(cpwt={self.control_point_weight:g})"
+            )
+        if self.median_error_vox > 25.0:
+            console.print(
+                "[yellow]Warning:[/yellow] high affine residual — check orientation, "
+                "add manual match-points, or set augment_points: true."
+            )
+        elif self.median_error_vox > 15.0:
+            console.print(
+                "[dim]Affine residual is moderate; manual landmarks often improve B-spline.[/dim]"
+            )
 
 
 @dataclass
@@ -121,11 +188,55 @@ def validate_registration_inputs(
     return checkpoint, session
 
 
+def _build_affine_fit_diagnostics(
+    *,
+    af_atlas: np.ndarray,
+    af_sample: np.ndarray,
+    tform_aff: np.ndarray,
+    n_manual: int,
+    n_auto: int,
+    autocpsample_kept: np.ndarray,
+    original_trans: np.ndarray,
+    cpaffine: np.ndarray,
+    cptshistology: np.ndarray,
+    cpwt: float,
+) -> AffineFitDiagnostics:
+    mse, errors = affine_point_errors(af_atlas, af_sample, tform_aff)
+    summary = summarize_point_errors(errors)
+    diag = AffineFitDiagnostics(
+        n_manual=n_manual,
+        n_auto=n_auto,
+        n_total=int(af_atlas.shape[0]),
+        mse=mse,
+        median_error_vox=summary["median"],
+        p95_error_vox=summary["p95"],
+        max_error_vox=summary["max"],
+        mean_error_vox=summary["mean"],
+        control_point_weight=cpwt,
+    )
+    if n_manual > 0:
+        manual_err = errors[:n_manual]
+        diag.median_error_manual_vox = float(np.median(manual_err))
+    if n_auto > 0:
+        auto_err = errors[n_manual:]
+        diag.median_error_auto_vox = float(np.median(auto_err))
+        if autocpsample_kept.shape[0] == n_auto:
+            coarse_atlas = transform_points_affinetform(autocpsample_kept, original_trans)
+            diag.median_coarse_auto_vox = float(
+                np.median(np.linalg.norm(coarse_atlas - af_atlas[n_manual:], axis=1))
+            )
+    if cpaffine.shape[0] > 0 and cptshistology.shape[0] == cpaffine.shape[0]:
+        diag.median_landmark_vox = float(
+            np.median(np.linalg.norm(cpaffine - cptshistology, axis=1))
+        )
+    return diag
+
+
 def _prepare_control_points(
     checkpoint: RegOptsCheckpoint,
     session: ControlPointSession,
     config: BrainPipelineConfig,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, float]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, float, AffineFitDiagnostics]:
     downfac = float(
         checkpoint.downfac_reg or (config.atlas.resolution_um / checkpoint.registres_um)
     )
@@ -172,14 +283,30 @@ def _prepare_control_points(
         raise RuntimeError(msg)
 
     tform_aff, _ = fit_affine_transform(af_atlas, af_sample)
-    if cptsatlas.shape[0] > 0:
+    n_manual = int(cptsatlas.shape[0])
+    if n_manual > 0:
         cpaffine = transform_points(cptsatlas, tform_aff)
+        autocpsample_kept = autocpsample[keep_idx] if keep_idx.size else np.zeros((0, 3))
     else:
         cpwt = cpwt / 2.0
-        cptshistology = autocpsample[keep_idx]
+        autocpsample_kept = autocpsample[keep_idx]
+        cptshistology = autocpsample_kept
         cpaffine = transform_points(autocpatlas[keep_idx], tform_aff)
 
-    return tform_aff, cpaffine, cptshistology, cpwt
+    diagnostics = _build_affine_fit_diagnostics(
+        af_atlas=af_atlas,
+        af_sample=af_sample,
+        tform_aff=tform_aff,
+        n_manual=n_manual,
+        n_auto=n_auto,
+        autocpsample_kept=autocpsample_kept,
+        original_trans=original_trans,
+        cpaffine=cpaffine,
+        cptshistology=cptshistology,
+        cpwt=cpwt,
+    )
+
+    return tform_aff, cpaffine, cptshistology, cpwt, diagnostics
 
 
 def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool = True) -> Path:
@@ -210,7 +337,11 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
             raise ValueError(msg)
     console.print(f"Done in {time.perf_counter() - t0:.1f}s.")
 
-    tform_aff, cpaffine, cptshistology, cpwt = _prepare_control_points(checkpoint, session, config)
+    tform_aff, cpaffine, cptshistology, cpwt, affine_diag = _prepare_control_points(
+        checkpoint, session, config
+    )
+    affine_diag.print_summary()
+    affine_diag.save(save_path / "affine_fit_stats.json")
     console.print(f"Using {cptshistology.shape[0]} landmark pairs for B-spline.")
 
     atlas = resolve_brain_atlas(config.atlas.provider.value, config.atlas.atlas_dir)
