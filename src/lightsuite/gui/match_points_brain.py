@@ -283,8 +283,8 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
     def _toggle_overlay(_viewer) -> None:
         _navigate_to(show_overlay=not state["show_overlay"])
 
+    # Napari normalizes key names; O and o are the same binding.
     viewer.bind_key("O", _toggle_overlay)
-    viewer.bind_key("o", _toggle_overlay)
 
     viewer.window.add_dock_widget(navigation, area="right", name="Navigation")
     viewer.window.add_dock_widget(previous_slice, area="right", name="Previous slice")
