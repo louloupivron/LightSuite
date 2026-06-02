@@ -8,12 +8,36 @@ from pathlib import Path
 import numpy as np
 
 
+def scale_volume_for_elastix_mi(volume: np.ndarray, *, quantile: float = 0.999) -> np.ndarray:
+    """Scale a volume to uint16 for elastix MI (matches MATLAB ``mhd_write`` ushort inputs).
+
+    Fixed (sample) and moving (affine-warped atlas template) often occupy very different
+    raw intensity ranges. Mattes MI uses a fixed bin count; when one image spans ~0–15k
+    and the other ~0–500, the moving histogram collapses to a few bins at full resolution
+    while pyramid downsampling artificially spreads it (R2 looks fine, R3 MI ≈ 0).
+    Per-volume quantile scaling puts both images on a comparable 16-bit range.
+    """
+    vol = np.asarray(volume, dtype=np.float32)
+    positive = vol[vol > 0]
+    if positive.size == 0:
+        return np.zeros(vol.shape, dtype=np.uint16)
+    hi = float(np.quantile(positive, quantile))
+    if hi <= 0:
+        hi = float(vol.max()) or 1.0
+    return np.clip(vol / hi * 65535.0, 0, 65535).astype(np.uint16)
+
+
 def write_mhd(volume: np.ndarray, base_path: Path, spacing_mm: float | list[float]) -> Path:
     """Write a 3D volume as MHD+RAW for elastix (volume indexed Y, X, Z)."""
     base_path = base_path.expanduser()
     base_path.parent.mkdir(parents=True, exist_ok=True)
 
-    data = np.ascontiguousarray(volume.astype(np.float32, copy=False))
+    if volume.dtype == np.uint16:
+        data = np.ascontiguousarray(volume)
+        element_type = "MET_USHORT"
+    else:
+        data = np.ascontiguousarray(volume.astype(np.float32, copy=False))
+        element_type = "MET_FLOAT"
     if data.ndim != 3:
         msg = f"Expected 3D volume, got shape {data.shape}"
         raise ValueError(msg)
@@ -43,7 +67,7 @@ def write_mhd(volume: np.ndarray, base_path: Path, spacing_mm: float | list[floa
         "CenterOfRotation = 0 0 0\n"
         f"ElementSpacing = {spacing_line}\n"
         f"DimSize = {nx} {ny} {nz}\n"
-        "ElementType = MET_FLOAT\n"
+        f"ElementType = {element_type}\n"
         f"ElementDataFile = {raw_name}\n"
     )
     mhd_path = base_path.with_suffix(".mhd")

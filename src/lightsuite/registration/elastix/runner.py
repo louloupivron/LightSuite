@@ -10,7 +10,11 @@ from pathlib import Path
 import numpy as np
 from rich.console import Console
 
-from lightsuite.registration.elastix.mhd import read_mhd_volume, write_mhd
+from lightsuite.registration.elastix.mhd import (
+    read_mhd_volume,
+    scale_volume_for_elastix_mi,
+    write_mhd,
+)
 from lightsuite.registration.elastix.params import build_bspline_params, write_parameter_file
 from lightsuite.registration.elastix.points import write_landmark_file
 
@@ -81,6 +85,12 @@ def run_bspline_registration(
     param_path = output_dir / "bspline_parameters.txt"
     write_parameter_file(param_path, params)
 
+    fixed_u16 = scale_volume_for_elastix_mi(fixed_volume)
+    moving_u16 = scale_volume_for_elastix_mi(moving_volume)
+    fixed_secondary_u16 = (
+        scale_volume_for_elastix_mi(fixed_secondary) if dual else None
+    )
+
     sp = [spacing_mm, spacing_mm, spacing_mm]
     if dual:
         stem = output_dir.name
@@ -90,12 +100,12 @@ def run_bspline_registration(
         base_m1 = output_dir / f"{stem}_dual_m1"
         base_f2 = output_dir / f"{stem}_dual_f2"
         base_m2 = output_dir / f"{stem}_dual_m2"
-        write_mhd(fixed_volume, base_f0, sp)
-        write_mhd(moving_volume, base_m0, sp)
-        write_mhd(fixed_secondary, base_f1, sp)
-        write_mhd(moving_volume, base_m1, sp)
-        write_mhd(fixed_volume, base_f2, sp)
-        write_mhd(moving_volume, base_m2, sp)
+        write_mhd(fixed_u16, base_f0, sp)
+        write_mhd(moving_u16, base_m0, sp)
+        write_mhd(fixed_secondary_u16, base_f1, sp)
+        write_mhd(moving_u16, base_m1, sp)
+        write_mhd(fixed_u16, base_f2, sp)
+        write_mhd(moving_u16, base_m2, sp)
         cmd = [
             "elastix",
             "-f0",
@@ -122,8 +132,8 @@ def run_bspline_registration(
     else:
         fixed_mhd = output_dir / "fixed.mhd"
         moving_mhd = output_dir / "moving.mhd"
-        write_mhd(fixed_volume, fixed_mhd.with_suffix(""), sp)
-        write_mhd(moving_volume, moving_mhd.with_suffix(""), sp)
+        write_mhd(fixed_u16, fixed_mhd.with_suffix(""), sp)
+        write_mhd(moving_u16, moving_mhd.with_suffix(""), sp)
         cmd = [
             "elastix",
             "-f",

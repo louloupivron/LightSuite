@@ -6,7 +6,12 @@ from pathlib import Path
 
 import numpy as np
 
-from lightsuite.registration.elastix.mhd import read_mhd_spacing, read_mhd_volume, write_mhd
+from lightsuite.registration.elastix.mhd import (
+    read_mhd_spacing,
+    read_mhd_volume,
+    scale_volume_for_elastix_mi,
+    write_mhd,
+)
 from lightsuite.registration.elastix.runner import (
     _discover_transformix_result,
     _patch_transformix_params,
@@ -53,6 +58,30 @@ def test_write_and_read_mhd_roundtrip(tmp_path: Path) -> None:
     spacing = read_mhd_spacing(mhd)
     assert np.allclose(spacing, [0.02, 0.02, 0.02])
     assert mhd.with_suffix(".raw").is_file()
+
+
+def test_write_and_read_mhd_uint16_roundtrip(tmp_path: Path) -> None:
+    vol = np.arange(24, dtype=np.uint16).reshape(2, 3, 4) * 100
+    base = tmp_path / "testvol_u16"
+    mhd = write_mhd(vol, base, 0.02)
+    text = mhd.read_text(encoding="utf-8")
+    assert "MET_USHORT" in text
+    loaded = read_mhd_volume(mhd)
+    assert loaded.shape == vol.shape
+    assert np.allclose(loaded, vol.astype(np.float32))
+
+
+def test_scale_volume_for_elastix_mi() -> None:
+    sample = np.zeros((10, 10, 10), dtype=np.float32)
+    sample[2:8, 2:8, 2:8] = 15000.0
+    atlas = np.zeros((10, 10, 10), dtype=np.float32)
+    atlas[2:8, 2:8, 2:8] = 500.0
+    sample_u16 = scale_volume_for_elastix_mi(sample)
+    atlas_u16 = scale_volume_for_elastix_mi(atlas)
+    assert sample_u16.dtype == np.uint16
+    assert atlas_u16.dtype == np.uint16
+    assert int(sample_u16.max()) > 60000
+    assert int(atlas_u16.max()) > 60000
 
 
 def test_build_bspline_params_single_channel() -> None:
