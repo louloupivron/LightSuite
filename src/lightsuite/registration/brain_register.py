@@ -302,6 +302,10 @@ def _prepare_control_points(
         cpaffine = transform_points(cptsatlas, tform_aff)
         autocpsample_kept = autocpsample[keep_idx] if keep_idx.size else np.zeros((0, 3))
     else:
+        # MATLAB multiobjRegistration.m "revert to automated mode": no manual points,
+        # so drive the B-spline with the auto landmarks at half the control-point weight
+        # while keeping the same image-dominant multistep schedule.
+        cpwt = cpwt / 2.0
         autocpsample_kept = autocpsample[keep_idx]
         cptshistology = autocpsample_kept
         cpaffine = transform_points(autocpatlas[keep_idx], tform_aff)
@@ -355,8 +359,6 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
     )
     affine_diag.print_summary()
     affine_diag.save(save_path / "affine_fit_stats.json")
-    n_manual = affine_diag.n_manual
-    auto_landmarks_only = n_manual == 0
     console.print(f"Using {cptshistology.shape[0]} landmark pairs for B-spline.")
 
     atlas = resolve_brain_atlas(config.atlas.provider.value, config.atlas.atlas_dir)
@@ -377,20 +379,6 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
         save_path, config.sample.name, voltoshow, avaffine, "affine_registration"
     )
 
-    skip_threshold = config.registration.auto_only_skip_bspline_max_affine_median_vox
-    skip_bspline_deformation = (
-        auto_landmarks_only
-        and skip_threshold > 0
-        and affine_diag.median_landmark_vox is not None
-        and affine_diag.median_landmark_vox <= skip_threshold
-    )
-    if skip_bspline_deformation:
-        console.print(
-            f"Affine landmark median {affine_diag.median_landmark_vox:.1f} vox "
-            f"(≤ {skip_threshold:g}) — "
-            "skipping B-spline deformation; B-spline previews will match affine."
-        )
-
     elastix_temp = save_path / "elastix_temp"
     moving_pts_mm = volume_indices_to_elastix_physical(cpaffine, spacing_mm)
     fixed_pts_mm = volume_indices_to_elastix_physical(cptshistology, spacing_mm)
@@ -410,37 +398,27 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
         use_multistep=use_multistep,
         dual_weight_autofluor=config.registration.dual_channel_mi_weight_autofluor,
         dual_weight_signal=config.registration.dual_channel_mi_weight_signal,
-        auto_landmarks_only=auto_landmarks_only,
-        identity_only=skip_bspline_deformation,
     )
 
-    if skip_bspline_deformation:
-        avreg = np.asarray(avaffine)
-        console.print("Using affine-warped annotation for B-spline stage output.")
-    else:
-        console.print("Warping annotation with B-spline transform...", end=" ")
-        t0 = time.perf_counter()
-        avreg = run_transformix(
-            moving_volume=np.rint(avaffine).astype(np.int32),
-            transform_path=bspline_result.transform_path,
-            output_dir=save_path / "transformix_annotation_temp",
-            spacing_mm=spacing_mm,
-            nearest=True,
-        )
-        affine_landmark_mm = float(affine_diag.median_landmark_vox) * spacing_mm
-        final_landmark_mm = read_elastix_landmark_metric_mm(bspline_result.output_dir)
-        if final_landmark_mm is not None and final_landmark_mm >= affine_landmark_mm * 0.98:
-            console.print(
-                f"\n[yellow]B-spline landmark metric ({final_landmark_mm:.3f} mm) did not "
-                f"clearly beat affine ({affine_landmark_mm:.3f} mm) — keeping affine "
-                "annotation warp.[/yellow]"
-            )
-            avreg = np.asarray(avaffine)
-        else:
-            console.print(
-                f"Done in {time.perf_counter() - t0:.1f}s "
-                f"({int(np.sum(np.rint(avreg) > 1)):,} label voxels after B-spline)."
-            )
+    console.print("Warping annotation with B-spline transform...", end=" ")
+    t0 = time.perf_counter()
+    avreg = run_transformix(
+        moving_volume=np.rint(avaffine).astype(np.int32),
+        transform_path=bspline_result.transform_path,
+        output_dir=save_path / "transformix_annotation_temp",
+        spacing_mm=spacing_mm,
+        nearest=True,
+    )
+    final_landmark_mm = read_elastix_landmark_metric_mm(bspline_result.output_dir)
+    landmark_note = (
+        f", final landmark metric {final_landmark_mm:.3f} mm"
+        if final_landmark_mm is not None
+        else ""
+    )
+    console.print(
+        f"Done in {time.perf_counter() - t0:.1f}s "
+        f"({int(np.sum(np.rint(avreg) > 1)):,} label voxels after B-spline{landmark_note})."
+    )
     save_registration_stage_previews(
         save_path, config.sample.name, voltoshow, avreg, "bspline_registration"
     )

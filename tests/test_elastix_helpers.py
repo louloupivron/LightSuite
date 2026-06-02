@@ -101,43 +101,27 @@ def test_build_bspline_params_single_channel() -> None:
     assert params["SP_a"] == 500
 
 
-def test_build_bspline_params_auto_landmarks_only() -> None:
+def test_build_bspline_params_auto_only_matches_manual_schedule() -> None:
+    # Auto-only (no manual landmarks) must use the same image-dominant, multi-resolution
+    # schedule as MATLAB performMultObjBsplineRegistration.m; the caller halves cpwt.
     params = build_bspline_params(
         dual_channel=False,
-        control_point_weight=0.2,
+        control_point_weight=0.1,
         n_histogram_bins=48,
         bspline_spatial_scale_mm=0.64,
         fixed_shape=(20, 20, 20),
         spacing_mm=0.02,
-        auto_landmarks_only=True,
     )
     assert params["Metric"] == [
         "AdvancedMattesMutualInformation",
         "CorrespondingPointsEuclideanDistanceMetric",
     ]
     assert params["Optimizer"] == "AdaptiveStochasticGradientDescent"
-    assert params["Metric0Weight"] == 0.05
-    assert params["Metric1Weight"] == 1.0
-    assert params["NumberOfResolutions"] == 1
-    assert params["MaximumNumberOfIterations"] == [2000]
-    assert params["FinalGridSpacingInPhysicalUnits"] == [1.28, 1.28, 1.28]
-    assert params["ImagePyramidSchedule"] == [1, 1, 1]
-
-
-def test_build_bspline_params_auto_landmarks_identity_only() -> None:
-    params = build_bspline_params(
-        dual_channel=False,
-        control_point_weight=0.2,
-        n_histogram_bins=48,
-        bspline_spatial_scale_mm=0.64,
-        fixed_shape=(20, 20, 20),
-        spacing_mm=0.02,
-        auto_landmarks_only=True,
-        identity_only=True,
-    )
-    assert params["MaximumNumberOfIterations"] == [0]
     assert params["Metric0Weight"] == 1.0
-    assert params["Metric1Weight"] == 0.2
+    assert params["Metric1Weight"] == 0.1
+    assert params["NumberOfResolutions"] == 4
+    assert params["MaximumNumberOfIterations"] == [500, 1000, 1500, 2000]
+    assert params["ImagePyramidSchedule"] == [8] * 3 + [4] * 3 + [2] * 3 + [1] * 3
 
 
 def test_write_parameter_file(tmp_path: Path) -> None:

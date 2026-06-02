@@ -19,10 +19,14 @@ def build_bspline_params(
     use_multistep: bool = True,
     dual_weight_autofluor: float = 1.0,
     dual_weight_signal: float = 0.5,
-    auto_landmarks_only: bool = False,
-    identity_only: bool = False,
 ) -> dict[str, Any]:
-    """Build elastix parameter dict for multi-metric B-spline registration."""
+    """Build elastix parameter dict for multi-metric B-spline registration.
+
+    Mirrors ``performMultObjBsplineRegistration.m`` exactly: the no-manual-landmark
+    (auto-only) case uses the same multi-resolution schedule and image-dominant metric
+    weights as the manual case. The caller simply halves the control-point weight for
+    auto-only runs (MATLAB "revert to automated mode").
+    """
     cpwt = control_point_weight
     ny, nx, nz = fixed_shape
     fixed_size_mm = np.array([ny, nx, nz], dtype=float) * spacing_mm
@@ -57,33 +61,7 @@ def build_bspline_params(
         # Elastix 5.1 defaults to true; our MHD headers use identity axes only (see elastix.log warning).
         "UseDirectionCosines": "false",
     }
-    if auto_landmarks_only:
-        # Auto landmarks are noisy; a fine B-spline grid often folds between points while
-        # barely improving landmark error. Use a single full-resolution level on a coarse
-        # grid. When affine is already good (identity_only), run 0 iterations so downstream
-        # transform files exist without deforming annotations.
-        grid_mm = max(bspline_spatial_scale_mm, 1.28)
-        params["NumberOfResolutions"] = 1
-        params["ImagePyramidSchedule"] = [1, 1, 1]
-        params["FinalGridSpacingInPhysicalUnits"] = [grid_mm] * 3
-        params["SampleRegionSize"] = [min(base_sizes[-1], max_sample_region)] * 3
-        params["Metric"] = [
-            "AdvancedMattesMutualInformation",
-            "CorrespondingPointsEuclideanDistanceMetric",
-        ]
-        params["FixedImagePyramid"] = "FixedRecursiveImagePyramid"
-        params["MovingImagePyramid"] = "MovingRecursiveImagePyramid"
-        params["ImageSampler"] = "RandomCoordinate"
-        params["Interpolator"] = "BSplineInterpolator"
-        if identity_only:
-            params["MaximumNumberOfIterations"] = [0]
-            params["Metric0Weight"] = 1.0
-            params["Metric1Weight"] = cpwt
-        else:
-            params["MaximumNumberOfIterations"] = [2000]
-            params["Metric0Weight"] = 0.05
-            params["Metric1Weight"] = max(cpwt, 1.0)
-    elif dual_channel:
+    if dual_channel:
         params["Metric"] = [
             "AdvancedMattesMutualInformation",
             "AdvancedMattesMutualInformation",
@@ -96,7 +74,7 @@ def build_bspline_params(
         params["Metric0Weight"] = dual_weight_autofluor
         params["Metric1Weight"] = dual_weight_signal
         params["Metric2Weight"] = cpwt
-    elif not auto_landmarks_only:
+    else:
         params["Metric"] = [
             "AdvancedMattesMutualInformation",
             "CorrespondingPointsEuclideanDistanceMetric",
@@ -108,12 +86,12 @@ def build_bspline_params(
         params["Metric0Weight"] = 1.0
         params["Metric1Weight"] = cpwt
 
-    if use_multistep and not auto_landmarks_only:
+    if use_multistep:
         sample_regions: list[float] = []
         for size in base_sizes:
             sample_regions.extend([size] * 3)
         params["SampleRegionSize"] = sample_regions
-    elif not auto_landmarks_only:
+    else:
         params["SampleRegionSize"] = [base_sizes[0]] * 3
 
     return params
