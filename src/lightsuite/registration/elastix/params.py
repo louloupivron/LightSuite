@@ -60,7 +60,10 @@ def build_bspline_params(
         # Affine pre-alignment is good; template MI is unreliable at full resolution and
         # its gradients cause high-frequency B-spline folding between landmarks. Fit a
         # smooth landmark-only B-spline at full resolution on a coarser control grid.
+        # ASGD requires AdvancedImageToImageMetric, so use StandardGradientDescent here.
         grid_mm = max(bspline_spatial_scale_mm, 1.28)
+        params["Optimizer"] = "StandardGradientDescent"
+        params["AutomaticParameterEstimation"] = "false"
         params["Metric"] = ["CorrespondingPointsEuclideanDistanceMetric"]
         params["FixedImagePyramid"] = "FixedRecursiveImagePyramid"
         params["MovingImagePyramid"] = "MovingRecursiveImagePyramid"

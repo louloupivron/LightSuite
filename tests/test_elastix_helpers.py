@@ -110,6 +110,8 @@ def test_build_bspline_params_auto_landmarks_only() -> None:
         auto_landmarks_only=True,
     )
     assert params["Metric"] == ["CorrespondingPointsEuclideanDistanceMetric"]
+    assert params["Optimizer"] == "StandardGradientDescent"
+    assert params["AutomaticParameterEstimation"] == "false"
     assert params["Metric0Weight"] == 1.0
     assert params["NumberOfResolutions"] == 1
     assert params["MaximumNumberOfIterations"] == [2000]
