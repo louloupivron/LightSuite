@@ -377,16 +377,17 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
         save_path, config.sample.name, voltoshow, avaffine, "affine_registration"
     )
 
+    skip_threshold = config.registration.auto_only_skip_bspline_max_affine_median_vox
     skip_bspline_deformation = (
         auto_landmarks_only
+        and skip_threshold > 0
         and affine_diag.median_landmark_vox is not None
-        and affine_diag.median_landmark_vox
-        <= config.registration.auto_only_skip_bspline_max_affine_median_vox
+        and affine_diag.median_landmark_vox <= skip_threshold
     )
     if skip_bspline_deformation:
         console.print(
             f"Affine landmark median {affine_diag.median_landmark_vox:.1f} vox "
-            f"(≤ {config.registration.auto_only_skip_bspline_max_affine_median_vox:g}) — "
+            f"(≤ {skip_threshold:g}) — "
             "skipping B-spline deformation; B-spline previews will match affine."
         )
 

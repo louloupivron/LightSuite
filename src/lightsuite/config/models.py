@@ -76,11 +76,11 @@ class RegistrationConfig(BaseModel):
     augment_points: bool = False
     auto_only_skip_bspline_max_affine_median_vox: float = Field(
         default=10.0,
-        gt=0,
+        ge=0,
         description=(
             "When no manual landmarks are used, skip B-spline deformation and keep the "
             "affine annotation warp if the affine landmark median is at or below this "
-            "threshold (voxels at registration resolution)."
+            "threshold (voxels at registration resolution). Set to 0 to always run B-spline."
         ),
     )
     dual_channel_mi_weight_autofluor: float = Field(default=0.4, ge=0, le=1)
