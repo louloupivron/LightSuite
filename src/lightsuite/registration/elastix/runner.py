@@ -56,6 +56,7 @@ def run_bspline_registration(
     dual_weight_autofluor: float,
     dual_weight_signal: float,
     auto_landmarks_only: bool = False,
+    identity_only: bool = False,
 ) -> BsplineRegistrationResult:
     """Run single- or dual-channel elastix B-spline registration."""
     if shutil.which("elastix") is None:
@@ -83,6 +84,7 @@ def run_bspline_registration(
         dual_weight_autofluor=dual_weight_autofluor,
         dual_weight_signal=dual_weight_signal,
         auto_landmarks_only=auto_landmarks_only,
+        identity_only=identity_only,
     )
     param_path = output_dir / "bspline_parameters.txt"
     write_parameter_file(param_path, params)
@@ -171,6 +173,43 @@ def run_bspline_registration(
         transform_path=transforms[0],
         copied_transform_path=forward_copy,
     )
+
+
+def read_elastix_landmark_metric_mm(output_dir: Path) -> float | None:
+    """Return the final landmark metric (mm) from elastix IterationInfo, if present."""
+    output_dir = output_dir.expanduser()
+    candidates = sorted(output_dir.glob("IterationInfo.*.R*.txt"))
+    if not candidates:
+        return None
+    text = candidates[-1].read_text(encoding="utf-8", errors="replace")
+    lines = [line for line in text.splitlines() if line.strip()]
+    if len(lines) < 2:
+        return None
+    header = lines[0]
+    metric_cols = [
+        idx
+        for idx, name in enumerate(header.split())
+        if name.endswith(":Metric1") or name == "2:Metric1"
+    ]
+    if not metric_cols:
+        metric_cols = [
+            idx
+            for idx, name in enumerate(header.split())
+            if name.endswith(":Metric0") or name == "2:Metric0"
+        ]
+    if not metric_cols:
+        return None
+    col = metric_cols[0]
+    data_lines = [line for line in lines[1:] if not line.startswith("1:")]
+    if not data_lines:
+        return None
+    fields = data_lines[-1].split()
+    if len(fields) <= col:
+        return None
+    try:
+        return float(fields[col])
+    except ValueError:
+        return None
 
 
 def _upsert_elastix_param(params: str, key: str, value: str) -> str:

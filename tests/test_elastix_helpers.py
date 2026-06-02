@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from lightsuite.registration.elastix.mhd import (
     read_mhd_spacing,
@@ -15,6 +16,7 @@ from lightsuite.registration.elastix.mhd import (
 from lightsuite.registration.elastix.runner import (
     _discover_transformix_result,
     _patch_transformix_params,
+    read_elastix_landmark_metric_mm,
     volume_shape_from_transform_params,
 )
 from lightsuite.registration.elastix.params import build_bspline_params, write_parameter_file
@@ -109,14 +111,33 @@ def test_build_bspline_params_auto_landmarks_only() -> None:
         spacing_mm=0.02,
         auto_landmarks_only=True,
     )
-    assert params["Metric"] == ["CorrespondingPointsEuclideanDistanceMetric"]
-    assert params["Optimizer"] == "StandardGradientDescent"
-    assert params["AutomaticParameterEstimation"] == "false"
-    assert params["Metric0Weight"] == 1.0
+    assert params["Metric"] == [
+        "AdvancedMattesMutualInformation",
+        "CorrespondingPointsEuclideanDistanceMetric",
+    ]
+    assert params["Optimizer"] == "AdaptiveStochasticGradientDescent"
+    assert params["Metric0Weight"] == 0.05
+    assert params["Metric1Weight"] == 1.0
     assert params["NumberOfResolutions"] == 1
     assert params["MaximumNumberOfIterations"] == [2000]
     assert params["FinalGridSpacingInPhysicalUnits"] == [1.28, 1.28, 1.28]
     assert params["ImagePyramidSchedule"] == [1, 1, 1]
+
+
+def test_build_bspline_params_auto_landmarks_identity_only() -> None:
+    params = build_bspline_params(
+        dual_channel=False,
+        control_point_weight=0.2,
+        n_histogram_bins=48,
+        bspline_spatial_scale_mm=0.64,
+        fixed_shape=(20, 20, 20),
+        spacing_mm=0.02,
+        auto_landmarks_only=True,
+        identity_only=True,
+    )
+    assert params["MaximumNumberOfIterations"] == [0]
+    assert params["Metric0Weight"] == 1.0
+    assert params["Metric1Weight"] == 0.2
 
 
 def test_write_parameter_file(tmp_path: Path) -> None:
@@ -168,7 +189,34 @@ def test_subsample_point_pairs() -> None:
     assert np.allclose(sub_s, sub_a + 1.0)
 
 
-def test_patch_transformix_params_disables_direction_cosines() -> None:
+def test_read_elastix_landmark_metric_mm(tmp_path: Path) -> None:
+    info = tmp_path / "IterationInfo.0.R0.txt"
+    info.write_text(
+        "\n".join(
+            [
+                "1:ItNr\t2:Metric\t2:Metric0\t2:Metric1",
+                "0\t0.200\t-0.100\t0.180",
+                "1\t0.150\t-0.110\t0.122",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    assert read_elastix_landmark_metric_mm(tmp_path) == pytest.approx(0.122)
+
+
+def test_read_elastix_landmark_metric_mm_single_metric(tmp_path: Path) -> None:
+    info = tmp_path / "IterationInfo.0.R0.txt"
+    info.write_text(
+        "\n".join(
+            [
+                "1:ItNr\t2:Metric\t2:Metric0",
+                "0\t0.167402\t0.167402",
+                "1\t0.143975\t0.143975",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    assert read_elastix_landmark_metric_mm(tmp_path) == pytest.approx(0.143975)
     patched = _patch_transformix_params("(UseDirectionCosines true)\n", nearest=True)
     assert '(UseDirectionCosines "false")' in patched
     assert '(DefaultPixelValue "0")' in patched

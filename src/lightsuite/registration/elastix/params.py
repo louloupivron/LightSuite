@@ -20,6 +20,7 @@ def build_bspline_params(
     dual_weight_autofluor: float = 1.0,
     dual_weight_signal: float = 0.5,
     auto_landmarks_only: bool = False,
+    identity_only: bool = False,
 ) -> dict[str, Any]:
     """Build elastix parameter dict for multi-metric B-spline registration."""
     cpwt = control_point_weight
@@ -57,24 +58,31 @@ def build_bspline_params(
         "UseDirectionCosines": "false",
     }
     if auto_landmarks_only:
-        # Affine pre-alignment is good; template MI is unreliable at full resolution and
-        # its gradients cause high-frequency B-spline folding between landmarks. Fit a
-        # smooth landmark-only B-spline at full resolution on a coarser control grid.
-        # ASGD requires AdvancedImageToImageMetric, so use StandardGradientDescent here.
+        # Auto landmarks are noisy; a fine B-spline grid often folds between points while
+        # barely improving landmark error. Use a single full-resolution level on a coarse
+        # grid. When affine is already good (identity_only), run 0 iterations so downstream
+        # transform files exist without deforming annotations.
         grid_mm = max(bspline_spatial_scale_mm, 1.28)
-        params["Optimizer"] = "StandardGradientDescent"
-        params["AutomaticParameterEstimation"] = "false"
-        params["Metric"] = ["CorrespondingPointsEuclideanDistanceMetric"]
+        params["NumberOfResolutions"] = 1
+        params["ImagePyramidSchedule"] = [1, 1, 1]
+        params["FinalGridSpacingInPhysicalUnits"] = [grid_mm] * 3
+        params["SampleRegionSize"] = [min(base_sizes[-1], max_sample_region)] * 3
+        params["Metric"] = [
+            "AdvancedMattesMutualInformation",
+            "CorrespondingPointsEuclideanDistanceMetric",
+        ]
         params["FixedImagePyramid"] = "FixedRecursiveImagePyramid"
         params["MovingImagePyramid"] = "MovingRecursiveImagePyramid"
         params["ImageSampler"] = "RandomCoordinate"
         params["Interpolator"] = "BSplineInterpolator"
-        params["Metric0Weight"] = 1.0
-        params["NumberOfResolutions"] = 1
-        params["ImagePyramidSchedule"] = [1, 1, 1]
-        params["MaximumNumberOfIterations"] = [2000]
-        params["FinalGridSpacingInPhysicalUnits"] = [grid_mm] * 3
-        params["SampleRegionSize"] = [min(base_sizes[-1], max_sample_region)] * 3
+        if identity_only:
+            params["MaximumNumberOfIterations"] = [0]
+            params["Metric0Weight"] = 1.0
+            params["Metric1Weight"] = cpwt
+        else:
+            params["MaximumNumberOfIterations"] = [2000]
+            params["Metric0Weight"] = 0.05
+            params["Metric1Weight"] = max(cpwt, 1.0)
     elif dual_channel:
         params["Metric"] = [
             "AdvancedMattesMutualInformation",
