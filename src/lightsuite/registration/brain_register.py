@@ -328,9 +328,9 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
     console.print("Loading registration volume...", end=" ")
     t0 = time.perf_counter()
     volume = load_registration_volume(Path(checkpoint.regvolpath))
-    regvolsize = list(volume.shape)
     perm = checkpoint.permute_sample_to_atlas or [1, 2, 3]
     volume = permute_brain_volume(volume.astype(np.float32), perm)
+    regvolsize = list(volume.shape)
 
     volume_secondary = None
     if checkpoint.regvolpath_secondary:
@@ -396,7 +396,7 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
     console.print("Warping annotation with B-spline transform...", end=" ")
     t0 = time.perf_counter()
     avreg = run_transformix(
-        moving_volume=avaffine,
+        moving_volume=np.rint(avaffine).astype(np.int32),
         transform_path=bspline_result.transform_path,
         output_dir=save_path / "transformix_annotation_temp",
         spacing_mm=spacing_mm,

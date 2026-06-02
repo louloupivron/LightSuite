@@ -122,11 +122,13 @@ def test_volume_shape_from_transform_params() -> None:
 
 
 def test_patch_transformix_params_forces_mhd_output() -> None:
-    params = "(FinalBSplineInterpolationOrder 3)\n"
+    params = "(FinalBSplineInterpolationOrder 3)\n(ResampleInterpolator \"FinalBSplineInterpolator\")\n"
     patched = _patch_transformix_params(params, nearest=True)
     assert '(WriteResultImage "true")' in patched
     assert '(ResultImageFormat "mhd")' in patched
     assert '(FinalBSplineInterpolationOrder "0")' in patched
+    assert '(ResampleInterpolator "FinalNearestNeighborInterpolator")' in patched
+    assert patched.lower().count("resampleinterpolator") == 1
 
 
 def test_patch_transformix_params_replaces_duplicate_keys() -> None:
