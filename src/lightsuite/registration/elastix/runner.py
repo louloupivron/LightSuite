@@ -55,6 +55,7 @@ def run_bspline_registration(
     use_multistep: bool,
     dual_weight_autofluor: float,
     dual_weight_signal: float,
+    auto_landmarks_only: bool = False,
 ) -> BsplineRegistrationResult:
     """Run single- or dual-channel elastix B-spline registration."""
     if shutil.which("elastix") is None:
@@ -81,6 +82,7 @@ def run_bspline_registration(
         use_multistep=use_multistep,
         dual_weight_autofluor=dual_weight_autofluor,
         dual_weight_signal=dual_weight_signal,
+        auto_landmarks_only=auto_landmarks_only,
     )
     param_path = output_dir / "bspline_parameters.txt"
     write_parameter_file(param_path, params)

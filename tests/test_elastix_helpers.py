@@ -22,7 +22,7 @@ from lightsuite.registration.elastix.points import (
     volume_indices_to_elastix_physical,
     write_landmark_file,
 )
-from lightsuite.registration.points_utils import thin_point_list
+from lightsuite.registration.points_utils import subsample_point_pairs, thin_point_list
 from lightsuite.registration.warp import warp_volume_affine
 
 
@@ -96,6 +96,22 @@ def test_build_bspline_params_single_channel() -> None:
     assert params["Registration"] == "MultiMetricMultiResolutionRegistration"
     assert len(params["Metric"]) == 2
     assert params["Metric1Weight"] == 0.2
+    assert params["SP_a"] == 500
+
+
+def test_build_bspline_params_auto_landmarks_only() -> None:
+    params = build_bspline_params(
+        dual_channel=False,
+        control_point_weight=0.2,
+        n_histogram_bins=48,
+        bspline_spatial_scale_mm=0.64,
+        fixed_shape=(20, 20, 20),
+        spacing_mm=0.02,
+        auto_landmarks_only=True,
+    )
+    assert params["Metric0Weight"] == 0.25
+    assert params["Metric1Weight"] == 0.5
+    assert params["MaximumNumberOfIterations"] == [200, 400, 1000, 2000]
 
 
 def test_write_parameter_file(tmp_path: Path) -> None:
@@ -137,6 +153,14 @@ def test_thin_point_list() -> None:
     pts = np.array([[0.0, 0.0, 0.0], [0.1, 0.0, 0.0], [5.0, 5.0, 5.0]])
     kept = thin_point_list(pts, min_distance=1.0)
     assert kept.tolist() == [True, False, True]
+
+
+def test_subsample_point_pairs() -> None:
+    atlas = np.arange(300, dtype=float).reshape(100, 3)
+    sample = atlas + 1.0
+    sub_a, sub_s = subsample_point_pairs(atlas, sample, max_points=20)
+    assert sub_a.shape == (20, 3)
+    assert np.allclose(sub_s, sub_a + 1.0)
 
 
 def test_patch_transformix_params_disables_direction_cosines() -> None:

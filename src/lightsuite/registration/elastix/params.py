@@ -19,6 +19,7 @@ def build_bspline_params(
     use_multistep: bool = True,
     dual_weight_autofluor: float = 1.0,
     dual_weight_signal: float = 0.5,
+    auto_landmarks_only: bool = False,
 ) -> dict[str, Any]:
     """Build elastix parameter dict for multi-metric B-spline registration."""
     cpwt = control_point_weight
@@ -43,13 +44,22 @@ def build_bspline_params(
         "NumberOfResolutions": 4,
         "NumberOfHistogramBins": n_histogram_bins,
         "SP_A": 20,
+        "SP_a": 500,
+        "SP_alpha": 0.6,
         "MaximumNumberOfIterations": [500, 1000, 1500, 2000],
         "NumberOfSpatialSamples": 5000,
         "ImagePyramidSchedule": [8] * 3 + [4] * 3 + [2] * 3 + [1] * 3,
         "FinalGridSpacingInPhysicalUnits": [bspline_spatial_scale_mm] * 3,
+        "FixedLimitRangeRatio": 0.01,
+        "MovingLimitRangeRatio": 0.01,
+        "FixedImageBSplineInterpolationOrder": 1,
         # Elastix 5.1 defaults to true; our MHD headers use identity axes only (see elastix.log warning).
         "UseDirectionCosines": "false",
     }
+    if auto_landmarks_only:
+        # Template MI is often unreliable at full resolution for AF-only auto runs; lean on
+        # landmarks and limit coarse-level iterations so R2 warps do not break R3.
+        params["MaximumNumberOfIterations"] = [200, 400, 1000, 2000]
 
     if dual_channel:
         params["Metric"] = [
@@ -73,8 +83,12 @@ def build_bspline_params(
         params["MovingImagePyramid"] = "MovingRecursiveImagePyramid"
         params["ImageSampler"] = "RandomCoordinate"
         params["Interpolator"] = "BSplineInterpolator"
-        params["Metric0Weight"] = 1.0
-        params["Metric1Weight"] = cpwt
+        if auto_landmarks_only:
+            params["Metric0Weight"] = 0.25
+            params["Metric1Weight"] = max(cpwt, 0.5)
+        else:
+            params["Metric0Weight"] = 1.0
+            params["Metric1Weight"] = cpwt
 
     if use_multistep:
         sample_regions: list[float] = []
