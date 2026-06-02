@@ -194,15 +194,11 @@ def _patch_transformix_params(params: str, *, nearest: bool) -> str:
     params = _upsert_elastix_param(params, "ResultImageFormat", "mhd")
     params = _upsert_elastix_param(params, "UseDirectionCosines", "false")
     params = _upsert_elastix_param(params, "DefaultPixelValue", "0")
-    params = _upsert_elastix_param(params, "ResultImagePixelType", "float")
     if nearest:
-        # Order 0 on FinalBSplineInterpolator still leaves grid/cell artifacts on labels;
-        # elastix docs recommend FinalNearestNeighborInterpolator for masks/annotations.
-        params = _upsert_elastix_param(
-            params, "ResampleInterpolator", "FinalNearestNeighborInterpolator"
-        )
+        params = _upsert_elastix_param(params, "ResultImagePixelType", "double")
         params = _upsert_elastix_param(params, "FinalBSplineInterpolationOrder", "0")
-        params = _upsert_elastix_param(params, "ResultImagePixelType", "short")
+    else:
+        params = _upsert_elastix_param(params, "ResultImagePixelType", "float")
     return params
 
 

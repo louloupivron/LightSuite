@@ -109,9 +109,12 @@ def test_build_bspline_params_auto_landmarks_only() -> None:
         spacing_mm=0.02,
         auto_landmarks_only=True,
     )
-    assert params["Metric0Weight"] == 0.25
-    assert params["Metric1Weight"] == 0.5
-    assert params["MaximumNumberOfIterations"] == [200, 400, 1000, 2000]
+    assert params["Metric"] == ["CorrespondingPointsEuclideanDistanceMetric"]
+    assert params["Metric0Weight"] == 1.0
+    assert params["NumberOfResolutions"] == 1
+    assert params["MaximumNumberOfIterations"] == [2000]
+    assert params["FinalGridSpacingInPhysicalUnits"] == [1.28, 1.28, 1.28]
+    assert params["ImagePyramidSchedule"] == [1, 1, 1]
 
 
 def test_write_parameter_file(tmp_path: Path) -> None:
@@ -180,8 +183,8 @@ def test_patch_transformix_params_forces_mhd_output() -> None:
     assert '(WriteResultImage "true")' in patched
     assert '(ResultImageFormat "mhd")' in patched
     assert '(FinalBSplineInterpolationOrder "0")' in patched
-    assert '(ResampleInterpolator "FinalNearestNeighborInterpolator")' in patched
-    assert patched.lower().count("resampleinterpolator") == 1
+    assert '(ResultImagePixelType "double")' in patched
+    assert "FinalNearestNeighborInterpolator" not in patched
 
 
 def test_patch_transformix_params_replaces_duplicate_keys() -> None:

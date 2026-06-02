@@ -57,11 +57,22 @@ def build_bspline_params(
         "UseDirectionCosines": "false",
     }
     if auto_landmarks_only:
-        # Template MI is often unreliable at full resolution for AF-only auto runs; lean on
-        # landmarks and limit coarse-level iterations so R2 warps do not break R3.
-        params["MaximumNumberOfIterations"] = [200, 400, 1000, 2000]
-
-    if dual_channel:
+        # Affine pre-alignment is good; template MI is unreliable at full resolution and
+        # its gradients cause high-frequency B-spline folding between landmarks. Fit a
+        # smooth landmark-only B-spline at full resolution on a coarser control grid.
+        grid_mm = max(bspline_spatial_scale_mm, 1.28)
+        params["Metric"] = ["CorrespondingPointsEuclideanDistanceMetric"]
+        params["FixedImagePyramid"] = "FixedRecursiveImagePyramid"
+        params["MovingImagePyramid"] = "MovingRecursiveImagePyramid"
+        params["ImageSampler"] = "RandomCoordinate"
+        params["Interpolator"] = "BSplineInterpolator"
+        params["Metric0Weight"] = 1.0
+        params["NumberOfResolutions"] = 1
+        params["ImagePyramidSchedule"] = [1, 1, 1]
+        params["MaximumNumberOfIterations"] = [2000]
+        params["FinalGridSpacingInPhysicalUnits"] = [grid_mm] * 3
+        params["SampleRegionSize"] = [min(base_sizes[-1], max_sample_region)] * 3
+    elif dual_channel:
         params["Metric"] = [
             "AdvancedMattesMutualInformation",
             "AdvancedMattesMutualInformation",
@@ -74,7 +85,7 @@ def build_bspline_params(
         params["Metric0Weight"] = dual_weight_autofluor
         params["Metric1Weight"] = dual_weight_signal
         params["Metric2Weight"] = cpwt
-    else:
+    elif not auto_landmarks_only:
         params["Metric"] = [
             "AdvancedMattesMutualInformation",
             "CorrespondingPointsEuclideanDistanceMetric",
@@ -83,19 +94,15 @@ def build_bspline_params(
         params["MovingImagePyramid"] = "MovingRecursiveImagePyramid"
         params["ImageSampler"] = "RandomCoordinate"
         params["Interpolator"] = "BSplineInterpolator"
-        if auto_landmarks_only:
-            params["Metric0Weight"] = 0.25
-            params["Metric1Weight"] = max(cpwt, 0.5)
-        else:
-            params["Metric0Weight"] = 1.0
-            params["Metric1Weight"] = cpwt
+        params["Metric0Weight"] = 1.0
+        params["Metric1Weight"] = cpwt
 
-    if use_multistep:
+    if use_multistep and not auto_landmarks_only:
         sample_regions: list[float] = []
         for size in base_sizes:
             sample_regions.extend([size] * 3)
         params["SampleRegionSize"] = sample_regions
-    else:
+    elif not auto_landmarks_only:
         params["SampleRegionSize"] = [base_sizes[0]] * 3
 
     return params

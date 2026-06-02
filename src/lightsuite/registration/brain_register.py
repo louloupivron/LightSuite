@@ -37,7 +37,7 @@ from lightsuite.registration.elastix.invert import (
 from lightsuite.registration.elastix.points import volume_indices_to_elastix_physical
 from lightsuite.registration.elastix.runner import run_bspline_registration, run_transformix
 from lightsuite.registration.plots import save_registration_stage_previews
-from lightsuite.registration.points_utils import subsample_point_pairs, thin_point_list
+from lightsuite.registration.points_utils import thin_point_list
 from lightsuite.registration.volume import load_registration_volume, permute_brain_volume
 from lightsuite.registration.warp import warp_volume_affine
 
@@ -353,18 +353,7 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
     affine_diag.save(save_path / "affine_fit_stats.json")
     n_manual = affine_diag.n_manual
     auto_landmarks_only = n_manual == 0
-    bspline_cpaffine = cpaffine
-    bspline_cptshistology = cptshistology
-    if auto_landmarks_only and cpaffine.shape[0] > 80:
-        bspline_cpaffine, bspline_cptshistology = subsample_point_pairs(
-            cpaffine, cptshistology, max_points=80
-        )
-        console.print(
-            f"Using {bspline_cpaffine.shape[0]} landmark pairs for B-spline "
-            f"(subsampled from {cpaffine.shape[0]} auto pairs)."
-        )
-    else:
-        console.print(f"Using {cptshistology.shape[0]} landmark pairs for B-spline.")
+    console.print(f"Using {cptshistology.shape[0]} landmark pairs for B-spline.")
 
     atlas = resolve_brain_atlas(config.atlas.provider.value, config.atlas.atlas_dir)
     tv = np.asanyarray(nib.load(atlas.template_path).dataobj).astype(np.float32)
@@ -385,8 +374,8 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
     )
 
     elastix_temp = save_path / "elastix_temp"
-    moving_pts_mm = volume_indices_to_elastix_physical(bspline_cpaffine, spacing_mm)
-    fixed_pts_mm = volume_indices_to_elastix_physical(bspline_cptshistology, spacing_mm)
+    moving_pts_mm = volume_indices_to_elastix_physical(cpaffine, spacing_mm)
+    fixed_pts_mm = volume_indices_to_elastix_physical(cptshistology, spacing_mm)
 
     bspline_result = run_bspline_registration(
         fixed_volume=volume,
