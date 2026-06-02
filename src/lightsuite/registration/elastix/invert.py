@@ -35,15 +35,14 @@ def invert_elastix_transform(transform_dir: Path, output_dir: Path | None = None
         raise FileNotFoundError(msg)
 
     _ = read_mhd_spacing(fixed_mhd)
+    fixpath = transform_dir / "fixed.txt"
+    movpath = transform_dir / "moving.txt"
 
-    # Invert with the elastix-documented DisplacementMagnitudePenalty metric rather than
-    # re-running the forward Mutual-Information registration of the fixed image against
-    # itself. MI(self) is flat/noisy near the optimum, so at the finest resolution the
-    # B-spline coefficients drift and fold (grid-period striping in the exported volume).
-    # DisplacementMagnitudePenalty directly minimises ||T_inv(T_fwd(x)) - x||: no image
-    # content, no landmarks, and a clean monotone convergence to the true inverse.
-    inverse_param = _write_inverse_parameter_file(param_paths[0], output_dir)
-
+    # Invert exactly like MATLAB invertElastixTransformCP.m: re-run the forward registration
+    # parameter file with the fixed image as both -f and -m and the forward coefficients as
+    # the initial transform (-t0). The optimum drives the *combined* transform to identity,
+    # so the newly estimated transform is the inverse. (DisplacementMagnitudePenalty with the
+    # forward's aggressive ASGD schedule diverges — coefficients explode to ~1e92.)
     cmd = [
         "elastix",
         "-f",
@@ -55,8 +54,10 @@ def invert_elastix_transform(transform_dir: Path, output_dir: Path | None = None
         "-t0",
         str(coef_files[0]),
         "-p",
-        str(inverse_param),
+        str(param_paths[0]),
     ]
+    if fixpath.is_file() and movpath.is_file():
+        cmd.extend(["-fp", str(fixpath), "-mp", str(movpath)])
 
     proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if proc.returncode != 0:
@@ -68,57 +69,21 @@ def invert_elastix_transform(transform_dir: Path, output_dir: Path | None = None
         msg = f"No inverted TransformParameters in {output_dir}"
         raise RuntimeError(msg)
 
-    text = inverted[0].read_text(encoding="utf-8")
-    if "InitialTransformParametersFileName" not in text:
-        text += '\n(InitialTransformParametersFileName "NoInitialTransform")\n'
-        inverted[0].write_text(text, encoding="utf-8")
+    # Elastix writes the inverse transform with InitialTransformParametersFileName pointing
+    # back at the forward t0, so applying it as-is yields T_inv ∘ T_fwd (≈ identity), not the
+    # pure inverse. MATLAB (invertElastixTransformCP.m) forces NoInitialTransform; do the same.
+    text = _force_no_initial_transform(inverted[0].read_text(encoding="utf-8"))
+    inverted[0].write_text(text, encoding="utf-8")
     return inverted[0]
 
 
-def _param_line_key(line: str) -> str | None:
-    match = re.match(r"\(\s*([A-Za-z0-9_]+)\b", line.strip())
-    return match.group(1) if match else None
-
-
-def _first_quoted_value(line: str) -> str | None:
-    match = re.search(r'"([^"]+)"', line)
-    return match.group(1) if match else None
-
-
-def _write_inverse_parameter_file(forward_param: Path, output_dir: Path) -> Path:
-    """Derive a DisplacementMagnitudePenalty inverse parameter file from the forward one.
-
-    Keeps the transform/grid/pyramid/optimizer schedule but replaces the image+landmark
-    metrics with a single displacement penalty (elastix manual, "Inverting a transform").
-    """
-    text = forward_param.read_text(encoding="utf-8")
-    single_value_keys = {
-        "FixedImagePyramid",
-        "MovingImagePyramid",
-        "ImageSampler",
-        "Interpolator",
-    }
-    drop_keys = {"Metric0Weight", "Metric1Weight", "Metric2Weight"}
-    out_lines: list[str] = []
-    for line in text.splitlines():
-        key = _param_line_key(line)
-        if key in drop_keys:
-            continue
-        if key == "Registration":
-            out_lines.append('(Registration "MultiResolutionRegistration")')
-            continue
-        if key == "Metric":
-            out_lines.append('(Metric "DisplacementMagnitudePenalty")')
-            continue
-        if key in single_value_keys:
-            value = _first_quoted_value(line)
-            if value is not None:
-                out_lines.append(f'({key} "{value}")')
-                continue
-        out_lines.append(line)
-    inverse_path = output_dir / "inverse_parameters.txt"
-    inverse_path.write_text("\n".join(out_lines) + "\n", encoding="utf-8")
-    return inverse_path
+def _force_no_initial_transform(text: str) -> str:
+    """Strip any chained initial transform so the saved file is the pure inverse."""
+    replacement = '(InitialTransformParametersFileName "NoInitialTransform")'
+    pattern = re.compile(r'\(\s*InitialTransformParametersFileName\s+"[^"]*"\s*\)')
+    if pattern.search(text):
+        return pattern.sub(replacement, text)
+    return text.rstrip("\n") + "\n" + replacement + "\n"
 
 
 def write_inverted_transform_copy(source: Path, destination: Path) -> Path:
