@@ -60,6 +60,28 @@ def build_bspline_params(
         "FixedImageBSplineInterpolationOrder": 1,
         # Elastix 5.1 defaults to true; our MHD headers use identity axes only (see elastix.log warning).
         "UseDirectionCosines": "false",
+        # Faithful copy of matlab_elastix elastix_default.yml, which the MATLAB pipeline
+        # merges with its param struct (elastix(..., 'elastix_default.yml', ...)). Python
+        # writes only the explicit dict, so without these elastix falls back to its own
+        # internal defaults — which differ from MATLAB. The critical one is
+        # ASGDParameterEstimationMethod: the YAML uses "DisplacementDistribution" (bounded,
+        # robust step sizes) while elastix's built-in default is "Original", whose
+        # over-aggressive steps fold the B-spline grid (striped/shredded annotation warps).
+        "ASGDParameterEstimationMethod": "DisplacementDistribution",
+        "ResampleInterpolator": "FinalBSplineInterpolator",
+        "Resampler": "DefaultResampler",
+        "UseFastAndLowMemoryVersion": "true",
+        "HowToCombineTransforms": "Compose",
+        "ErodeMask": "true",
+        "UseAdaptiveStepSizes": "true",
+        "CheckNumberOfSamples": "true",
+        "DefaultPixelValue": 0,
+        "WriteResultImage": "true",
+        "ResultImagePixelType": "short",
+        "ResultImageFormat": "mhd",
+        "FixedInternalImagePixelType": "float",
+        "MovingInternalImagePixelType": "float",
+        "CompressResultImage": "false",
     }
     if dual_channel:
         params["Metric"] = [

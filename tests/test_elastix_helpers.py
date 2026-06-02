@@ -99,6 +99,10 @@ def test_build_bspline_params_single_channel() -> None:
     assert len(params["Metric"]) == 2
     assert params["Metric1Weight"] == 0.2
     assert params["SP_a"] == 500
+    # Must mirror matlab_elastix elastix_default.yml: the robust ASGD step estimator,
+    # otherwise elastix falls back to "Original" and folds the B-spline grid.
+    assert params["ASGDParameterEstimationMethod"] == "DisplacementDistribution"
+    assert params["HowToCombineTransforms"] == "Compose"
 
 
 def test_build_bspline_params_auto_only_matches_manual_schedule() -> None:
