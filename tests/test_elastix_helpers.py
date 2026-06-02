@@ -19,6 +19,7 @@ from lightsuite.registration.elastix.runner import (
     read_elastix_landmark_metric_mm,
     volume_shape_from_transform_params,
 )
+from lightsuite.registration.elastix.invert import _write_inverse_parameter_file
 from lightsuite.registration.elastix.params import build_bspline_params, write_parameter_file
 from lightsuite.registration.elastix.points import (
     volume_indices_to_elastix_physical,
@@ -126,6 +127,38 @@ def test_build_bspline_params_auto_only_matches_manual_schedule() -> None:
     assert params["NumberOfResolutions"] == 4
     assert params["MaximumNumberOfIterations"] == [500, 1000, 1500, 2000]
     assert params["ImagePyramidSchedule"] == [8] * 3 + [4] * 3 + [2] * 3 + [1] * 3
+
+
+def test_write_inverse_parameter_file(tmp_path: Path) -> None:
+    forward = tmp_path / "bspline_parameters.txt"
+    forward.write_text(
+        "\n".join(
+            [
+                '(Registration "MultiMetricMultiResolutionRegistration")',
+                '(Metric "AdvancedMattesMutualInformation" '
+                '"CorrespondingPointsEuclideanDistanceMetric")',
+                "(Metric0Weight 1)",
+                "(Metric1Weight 0.1)",
+                '(FixedImagePyramid "FixedRecursiveImagePyramid")',
+                '(ImageSampler "RandomCoordinate")',
+                "(NumberOfResolutions 4)",
+                "(FinalGridSpacingInPhysicalUnits 0.64 0.64 0.64)",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    inverse = _write_inverse_parameter_file(forward, tmp_path)
+    text = inverse.read_text(encoding="utf-8")
+    assert '(Registration "MultiResolutionRegistration")' in text
+    assert '(Metric "DisplacementMagnitudePenalty")' in text
+    assert "AdvancedMattesMutualInformation" not in text
+    assert "CorrespondingPointsEuclideanDistanceMetric" not in text
+    assert "Metric0Weight" not in text
+    assert "Metric1Weight" not in text
+    # Schedule/grid are preserved so the inverse is computed on the same B-spline lattice.
+    assert "(NumberOfResolutions 4)" in text
+    assert "(FinalGridSpacingInPhysicalUnits 0.64 0.64 0.64)" in text
 
 
 def test_write_parameter_file(tmp_path: Path) -> None:
