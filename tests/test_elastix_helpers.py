@@ -32,7 +32,8 @@ from lightsuite.registration.warp import warp_volume_affine
 def test_read_mhd_volume_met_short(tmp_path: Path) -> None:
     ny, nx, nz = 4, 5, 6
     data = np.arange(ny * nx * nz, dtype=np.int16).reshape(ny, nx, nz)
-    flat = np.transpose(data, (1, 0, 2)).ravel(order="C")
+    # Standard MetaIO raw layout: X (first DimSize axis) varies fastest.
+    flat = np.transpose(data, (2, 0, 1)).ravel(order="C")
     raw_path = tmp_path / "result.raw"
     flat.tofile(raw_path)
     mhd_path = tmp_path / "result.mhd"
@@ -72,6 +73,21 @@ def test_write_and_read_mhd_uint16_roundtrip(tmp_path: Path) -> None:
     loaded = read_mhd_volume(mhd)
     assert loaded.shape == vol.shape
     assert np.allclose(loaded, vol.astype(np.float32))
+
+
+def test_write_mhd_uses_standard_x_fastest_layout(tmp_path: Path) -> None:
+    # Non-cubic volume so a wrong fastest-axis would scramble (the bspline-shredding bug).
+    ny, nx, nz = 3, 5, 7
+    data = np.arange(ny * nx * nz, dtype=np.uint16).reshape(ny, nx, nz)
+    base = tmp_path / "vol"
+    mhd = write_mhd(data, base, 0.02)
+    text = mhd.read_text(encoding="utf-8")
+    assert f"DimSize = {nx} {ny} {nz}" in text
+    # MetaIO/elastix: first DimSize axis (X) varies fastest. data is (Y, X, Z), so the
+    # standard buffer is (Z, Y, X) C-order. Decode raw the canonical way and compare.
+    raw = np.fromfile(mhd.with_suffix(".raw"), dtype=np.uint16)
+    standard = np.transpose(raw.reshape((nz, ny, nx), order="C"), (1, 2, 0))
+    assert np.array_equal(standard, data)
 
 
 def test_scale_volume_for_elastix_mi() -> None:

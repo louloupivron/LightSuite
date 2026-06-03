@@ -52,7 +52,11 @@ def write_mhd(volume: np.ndarray, base_path: Path, spacing_mm: float | list[floa
     ny, nx, nz = data.shape
     raw_name = f"{base_path.name}.raw"
     raw_path = base_path.parent / raw_name
-    flat = np.transpose(data, (1, 0, 2)).ravel(order="C")
+    # MetaIO/elastix expect the raw buffer with the first DimSize axis (X) varying
+    # fastest. Our volume is indexed (Y, X, Z), so emit (Z, Y, X) C-order: X innermost.
+    # (Previously this used (1, 0, 2) which put Z fastest while DimSize said X — elastix
+    # then read a sheared/scrambled non-cubic volume, shredding every B-spline warp.)
+    flat = np.transpose(data, (2, 0, 1)).ravel(order="C")
     flat.tofile(raw_path)
 
     spacing_line = " ".join(f"{v:.12g}" for v in sp)
@@ -129,8 +133,9 @@ def read_mhd_volume(mhd_path: Path) -> np.ndarray:
         )
         raise ValueError(msg)
     flat = np.fromfile(raw_path, dtype=dtype)
-    vol = flat.reshape((nx, ny, nz), order="C")
-    return np.transpose(vol, (1, 0, 2)).astype(np.float32, copy=False)
+    # Standard MetaIO layout: X varies fastest, so reshape (Z, Y, X) then return (Y, X, Z).
+    vol = flat.reshape((nz, ny, nx), order="C")
+    return np.transpose(vol, (1, 2, 0)).astype(np.float32, copy=False)
 
 
 def read_mhd_spacing(mhd_path: Path) -> np.ndarray:
