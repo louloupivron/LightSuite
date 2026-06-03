@@ -44,9 +44,6 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/lightsuite"]
 
-[tool.hatch.build.targets.wheel.force-include]
-"src/lightsuite" = "lightsuite"
-
 [tool.hatch.build.targets.sdist]
 only-include = ["src/lightsuite", "examples", "tests"]
 
