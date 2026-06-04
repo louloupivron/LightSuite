@@ -5,14 +5,22 @@ function [finvol, opts] = readSpinalCordSample(dp, sampleres)
 tiffiles = dir(fullfile(dp, '*.tiff'));
 tifiles  = dir(fullfile(dp, '*.tif'));
 tfiles   = cat(1, tifiles, tiffiles);
+if isempty(tfiles)
+    error('readSpinalCordSample:NoTiffs', ...
+        'No .tif or .tiff files found in:\n  %s', dp);
+end
 tic;
 if numel(tfiles) == 1
-    data   = bfopen(fullfile(tfiles.folder, tfiles.name));
-    finvol = cat(3, data{1}{:,1});
-    Nchans = str2double(data{1}{1,2}(end)); 
-    Nz     = size(finvol, 3)/Nchans;
-    finvol = reshape(finvol, [size(finvol, [1 2]) Nchans Nz]);
-    finvol = permute(finvol, [1 2 4 3]);
+    tiffpath = fullfile(tfiles(1).folder, tfiles(1).name);
+    dataim   = BioformatsImage(tiffpath);
+    Nchans   = dataim.sizeC;
+    Nz       = dataim.sizeZ;
+    finvol   = zeros(dataim.height, dataim.width, Nz, Nchans, 'uint16');
+    for ichan = 1:Nchans
+        for iz = 1:Nz
+            finvol(:, :, iz, ichan) = dataim.getPlane(iz, ichan, 1, 1);
+        end
+    end
 else
     Nchans = numel(tfiles);
     finvol = cell(Nchans, 1);
@@ -24,6 +32,10 @@ else
     finvol = cat(4, finvol{:});
 end
 [Nslices, Ny, Nx, Nchan] = size(finvol);
+assert(all([Nslices, Ny, Nx, Nchan] > 0), ...
+    'readSpinalCordSample:EmptyVolume', ...
+    'Loaded volume is empty (file: %s). Check that Bio-Formats can read this TIFF.', ...
+    fullfile(tfiles(1).folder, tfiles(1).name));
 fprintf('Parsed spinal cord sample in %2.1f s. Size %d x %d x %d with %d channels\n', ...
     toc, Nslices, Ny, Nx, Nchan)
 %--------------------------------------------------------------------------
@@ -37,20 +49,5 @@ opts.Nchan           = Nchan;
 opts.sampleres       = sampleres;
 opts.registrationres = targetres;
 %--------------------------------------------------------------------------
-
-
-
-% dataim  = BioformatsImage(dp);
-% Nchans = dataim.sizeC;
-
-% finvol  = zeros(dataim.height, dataim.width, dataim.sizeZ, Nchans, 'uint16');
-% for ii = 1:Nchans
-%     currchan = zeros(dataim.height, dataim.width, dataim.sizeZ, 'uint16');
-%     for iz = 1:dataim.sizeZ
-%         currchan(:, :, iz) = dataim.getPlane(iz, ii, 1, 1);
-%     end
-%     currchan(currchan==0) = mode(currchan(currchan>0));
-%     finvol(:, :, :, ii) = currchan;
-% end
 
 end
