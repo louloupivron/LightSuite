@@ -65,16 +65,30 @@ opts.cordarea = cordarea;
 % find and remove brain parts
 ihigh    = cordarea > (median(cordarea) + 3*robustStd(cordarea));
 fprintf('%2.2f%% of the cord has larger size than expected, skipping\n', mean(ihigh)*100)
-ikeep    = [1 size(regvol, 3)];
+nz       = size(regvol, 3);
+ikeep    = [1 nz];
 if mean(ihigh) > 0.01
-    if opts.tofliprc 
-        ilast = find(ihigh==1, 1);
-        ikeep = [1 ilast+1];
+    if opts.tofliprc
+        ilast = find(ihigh, 1, 'last');
+        if isempty(ilast)
+            ikeep = [1 nz];
+        else
+            ikeep = [1 min(ilast + 1, nz)];
+        end
     else
-        ifirst = find(ihigh==0, 1);
-        ikeep  = [ifirst-1 size(regvol, 3)];
+        ifirst = find(~ihigh, 1, 'first');
+        if isempty(ifirst)
+            ikeep = [1 nz];
+        else
+            ikeep = [max(ifirst - 1, 1) nz];
+        end
     end
 end
+ikeep(1) = max(ikeep(1), 1);
+ikeep(2) = min(ikeep(2), nz);
+assert(numel(ikeep) == 2 && ikeep(2) >= ikeep(1), ...
+    'prepareCordSampleForRegistration:InvalidIkeep', ...
+    'Could not determine a valid rostrocaudal slice range (ikeep=%s).', mat2str(ikeep));
 opts.ikeeprange = ikeep;
 %--------------------------------------------------------------------------
 % reducing volume
