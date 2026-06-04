@@ -7,7 +7,6 @@ from pathlib import Path
 import numpy as np
 import tifffile
 from scipy.ndimage import zoom
-from skimage.transform import resize
 
 from lightsuite.preprocess.slice_ops import (
     background_fill_fast,
@@ -27,6 +26,31 @@ def test_resize_xy_fast_output_shape() -> None:
     got = resize_xy_fast(plane, scale)
     assert got.shape == output_xy_shape(80, 120, scale)
     assert got.dtype == np.uint16
+
+
+def test_resize_xy_fast_preserves_bottom_right_fov() -> None:
+    """Regression: 2048² at scale 0.655 must not top-left crop (Julie 10 µm case)."""
+    plane = np.zeros((2048, 2048), dtype=np.uint16)
+    plane[1900:, 1900:] = 5000
+    scale = 6.55 / 10.0
+    got = resize_xy_fast(plane, scale)
+    assert got.shape == output_xy_shape(2048, 2048, scale)
+    assert int(got[-20:, -20:].max()) == 5000
+
+
+def test_resize_xy_fast_matches_linear_resize_at_high_scale() -> None:
+    plane = np.arange(2048 * 2048, dtype=np.uint16).reshape(2048, 2048)
+    scale = 6.55 / 10.0
+    got = resize_xy_fast(plane, scale)
+    nh, nw = output_xy_shape(2048, 2048, scale)
+    expected = zoom(
+        plane.astype(np.float32),
+        (nh / 2048, nw / 2048),
+        order=1,
+        prefilter=False,
+    )
+    expected = np.clip(expected, 0, np.iinfo(np.uint16).max).astype(np.uint16)
+    assert np.allclose(got, expected, atol=2)
 
 
 def test_background_fill_fast_zeros() -> None:

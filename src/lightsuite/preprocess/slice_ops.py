@@ -65,7 +65,7 @@ def background_fill_fast(slice_2d: np.ndarray) -> np.ndarray:
 
 
 def resize_xy_fast(slice_2d: np.ndarray, scale_xy: float) -> np.ndarray:
-    """Downsample one XY plane using striding (crop) with a small zoom fallback."""
+    """Downsample one XY plane to the target shape (ceil(h*scale), ceil(w*scale))."""
     if np.isclose(scale_xy, 1.0):
         return np.asarray(slice_2d, dtype=np.uint16)
 
@@ -74,20 +74,23 @@ def resize_xy_fast(slice_2d: np.ndarray, scale_xy: float) -> np.ndarray:
     new_w = max(1, int(np.ceil(w * scale_xy)))
 
     source = np.asarray(slice_2d, dtype=np.uint16)
+    if new_h == h and new_w == w:
+        return source
+
+    # Integer striding is a cheap pre-filter when scale is coarse enough.
     stride = max(1, min(int(h // new_h), int(w // new_w)))
     if stride > 1:
         source = source[::stride, ::stride]
 
     sh, sw = source.shape
-    if sh >= new_h and sw >= new_w:
-        return source[:new_h, :new_w].copy()
-
     if sh == new_h and sw == new_w:
         return source
 
+    # Always resize to the target grid. Top-left cropping when stride==1 dropped
+    # the bottom-right FOV (e.g. 6.55 µm voxels at 10 µm registration resolution).
     zy = new_h / sh
     zx = new_w / sw
-    out = zoom(source, (zy, zx), order=1, prefilter=False)
+    out = zoom(source.astype(np.float32), (zy, zx), order=1, prefilter=False)
     return np.clip(out, 0, np.iinfo(np.uint16).max).astype(np.uint16)
 
 
