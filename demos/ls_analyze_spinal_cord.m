@@ -4,7 +4,8 @@ bcpdpath           = which('bcpd.exe'); % path for point-cloud registration
 
 %% load sample and atlas - set resolution and channel for registration
 sampleres          = [20, 20, 20]; % in micrometers across sides
-[cordvol, opts]    = readSpinalCordSample(dpspinesample, sampleres);
+% tifftype: 'auto' | 'planeperfile' (one 2D TIFF per slice) | 'channelperfile'
+[cordvol, opts]    = readSpinalCordSample(dpspinesample, sampleres, 'planeperfile');
 %%
 opts.regchan       = 2; % choose registration channel
 opts.bcpdpath      = bcpdpath;

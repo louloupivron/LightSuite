@@ -30,6 +30,20 @@ The analysis is driven by the main script: `ls_analyze_spinal_cord`.
 
 **Functions:** `readSpinalCordSample(dpspinesample, sampleres)` → `prepareCordSampleForRegistration(cordvol, opts)`
 
+Optional third argument `tifftype` controls how TIFFs in the folder are interpreted:
+
+| Value | Layout |
+| :--- | :--- |
+| `'auto'` (default) | Infer from file count and page count |
+| `'planeperfile'` | One 2D TIFF per slice (Terastitcher-style series) |
+| `'channelperfile'` | One multi-page TIFF, or one stack file per channel |
+
+Example for a slice series:
+
+```matlab
+[cordvol, opts] = readSpinalCordSample(dpspinesample, sampleres, 'planeperfile');
+```
+
 These functions load your raw TIFF data at the specified resolution and prepare a downsampled registration volume, similar to the lightsheet brain pipeline. The registration options are saved to `regopts.mat`.
 
 ---
