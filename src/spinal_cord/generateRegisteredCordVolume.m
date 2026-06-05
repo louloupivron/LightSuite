@@ -2,22 +2,11 @@ function straightvol = generateRegisteredCordVolume(regopts, transformparams)
 %UNTITLED Summary of this function goes here
 %   Detailed explanation goes here
 %==========================================================================
-cordvol   = readSpinalCordSample(regopts.datafolder, regopts.sampleres);
+cordvol   = readSpinalCordSample(regopts.datafolder, regopts.sampleres, ...
+    getOr(regopts, 'tifftype', 'auto'), regopts.registrationres);
 Nchannels = size(cordvol, 4);
 %==========================================================================
-% scalefac = regopts.registrationres./regopts.sampleres;
-% scalefac  = scalefac(howtoperm(1:3));
-% yrange    = yrange*scalefac(1);
-% xrange    = xrange*scalefac(2);
-% zrange    = zrange*scalefac(3);
-% 
-
-resfac = regopts.sampleres./regopts.registrationres;
-finvoluse = zeros([ceil(resfac.*size(cordvol,1:3)) Nchannels],'uint16');
-for ii = 1:Nchannels
-    finvoluse(:, :, :, ii) = imresize3(cordvol(:, :, :, ii), 'Scale', resfac);
-end
-cordvol = finvoluse;
+cordvol = cordDownsampleVolume(cordvol, regopts);
 %==========================================================================
 channames = cell(Nchannels, 1);
 if isfield(regopts, 'channames')

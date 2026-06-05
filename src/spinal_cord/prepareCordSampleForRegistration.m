@@ -3,12 +3,8 @@ function regopts = prepareCordSampleForRegistration(cordvol, opts)
 %   Detailed explanation goes here
 %=========================================================================
 fprintf('Adjusting sample to target resolution for registration... '); tic;
-resfac = opts.sampleres./opts.registrationres;
-finvoluse = zeros([ceil(resfac.*size(cordvol,1:3)) opts.Nchan],'uint16');
-for ii = 1:opts.Nchan
-    finvoluse(:, :, :, ii) = imresize3(cordvol(:, :, :, ii), 'Scale', resfac);
-end
-cordvol = finvoluse;
+cordvol = cordDownsampleVolume(cordvol, opts);
+finvoluse = cordvol;
 opts.regvolsize = size(finvoluse);
 fprintf('Done! Took %2.2f s.\n', toc)
 %==========================================================================

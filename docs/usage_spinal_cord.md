@@ -41,8 +41,12 @@ Optional third argument `tifftype` controls how TIFFs in the folder are interpre
 Example for a slice series:
 
 ```matlab
+% Set sampleres to your microscope's native voxel size (um), not the registration grid.
+sampleres = [2.0, 2.0, 5.0];
 [cordvol, opts] = readSpinalCordSample(dpspinesample, sampleres, 'planeperfile');
 ```
+
+Large plane-per-file stacks are downsampled **while loading** to the registration grid (default 20 µm isotropic) so the full native volume is never held in RAM.
 
 These functions load your raw TIFF data at the specified resolution and prepare a downsampled registration volume, similar to the lightsheet brain pipeline. The registration options are saved to `regopts.mat`.
 

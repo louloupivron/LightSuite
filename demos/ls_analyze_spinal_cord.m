@@ -1,9 +1,11 @@
 % set main data path - where the tiffs are
-dpspinesample      = 'D:\spine_registration\sample1';
+dpspinesample      = 'D:\Louis\spinal-cord\All_Channels';
 bcpdpath           = which('bcpd.exe'); % path for point-cloud registration
 
 %% load sample and atlas - set resolution and channel for registration
-sampleres          = [20, 20, 20]; % in micrometers across sides
+%% load sample and atlas - set resolution and channel for registration
+% sampleres: native voxel size in micrometers — NOT the registration grid (20 um).
+sampleres          = [1.8, 1.8, 4]; % in micrometers across sides
 % tifftype: 'auto' | 'planeperfile' (one 2D TIFF per slice) | 'channelperfile'
 [cordvol, opts]    = readSpinalCordSample(dpspinesample, sampleres, 'planeperfile');
 %%
