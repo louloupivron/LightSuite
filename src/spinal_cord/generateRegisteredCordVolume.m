@@ -60,6 +60,27 @@ if transformparams.tofliprc
     straightvol = flip(straightvol, 3);
 end
 %==========================================================================
+% upsample from registration grid (default 20 um isotropic) to native template (10x10x20 um)
+[tvNative, ~, ~, ~] = loadSpinalCordAtlas();
+targetSize = size(tvNative);
+atlasResNative = getOr(regopts, 'atlasres', [10 10 20]);
+regRes = regopts.registrationres(:).';
+if numel(atlasResNative) == 1
+    atlasResNative = repmat(atlasResNative, 1, 3);
+end
+if numel(regRes) == 1
+    regRes = repmat(regRes, 1, 3);
+end
+if ~isequal(size(straightvol, 1:3), targetSize)
+    fprintf(['Upsampling registered volume from registration grid ' ...
+        '(%s um) to template grid (%s um)... '], mat2str(regRes), mat2str(atlasResNative));
+    upsampleTic = tic;
+    for ichan = 1:Nchannels
+        straightvol(:, :, :, ichan) = imresize3(straightvol(:, :, :, ichan), targetSize);
+    end
+    fprintf('Done! Size %s. Took %2.2f s.\n', mat2str(targetSize), toc(upsampleTic));
+end
+%==========================================================================
 fprintf('Saving registered volume... '); savetic = tic;
 finalpath     = fullfile(regopts.lsfolder, 'volume_registered');
 saveLargeSliceVolume(permute(straightvol, [1 2 4 3]), channames, finalpath);

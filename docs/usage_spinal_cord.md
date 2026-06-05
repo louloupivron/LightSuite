@@ -146,7 +146,7 @@ Refines the alignment using Elastix B-spline registration, incorporating both yo
 
 **Function:** `generateRegisteredCordVolume(regopts, transform_params)`
 
-Warps all channels into atlas space and computes regional statistics per anatomical area.
+Warps all channels into atlas space at the registration grid (default 20 µm isotropic), then upsamples to the native Fiederling template grid (**10 × 10 × 20 µm**, matching `Template.tif` / `Annotation.tif`).
 
 ### Atlas Regions
 
@@ -158,8 +158,8 @@ The spinal cord atlas is organized into two levels:
 Statistics are aggregated along the rostrocaudal axis in anatomically defined segments.
 
 **Output files** (in `volume_registered/`):
-* `chan0X_intensities.mat` — median signal intensity and volume per region and segment
-* Registered volume slices
+* Registered volume slices at native template resolution (10 × 10 × 20 µm)
+* `chan0X_intensities.mat` — median signal intensity and volume per region and segment (if computed)
 
 ---
 

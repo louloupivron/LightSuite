@@ -30,7 +30,9 @@ for isample  = 1:Nmice
 
     for ichan = 1:numel(ichanuse)
         currvals    = squeeze(imgStack(:,:, ichan,:));
-        currvals    = imresize3(currvals, size(av));
+        if ~isequal(size(currvals), size(av))
+            currvals    = imresize3(currvals, size(av));
+        end
         valsgrouped = single(accumarray([avic leninds], currvals(:), [Ngroups, Nsegments], @median));
         relsignal   = (valsgrouped - valsgrouped(1, :))./ valsgrouped(1, :);
         medianoverareas(:, :, ichan, isample) = relsignal(2:end, :);
