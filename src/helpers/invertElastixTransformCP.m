@@ -146,7 +146,12 @@ end
 
 %--------------------------------------------------------------------------
 function fixedFile = localParseFixedImagePath(txt, transformDir)
-% Prefer log delimiters (-f0 … -m0) so quoted and unquoted Windows paths work.
+% 1. Try -f0 <path> -m0 (single or dual fixed; quoted or bare; Windows/Linux)
+% 2. Try -f <path> -m  (single fixed, legacy matlab_elastix call)
+% 3. Dual fixed fallback: *_dual_f0.mhd written by elastixDualFixedSameMovingBspline
+% 4. Single fixed fallback: *_target.mhd written by elastix.m (matlab_elastix)
+%    Windows Elastix 5.1 logs omit the CLI entirely, so we must fall back here
+%    for the cord B-spline run (performCordBsplineRegistration uses single elastix).
 fixedFile = '';
 toks = regexp(txt, '-f0\s+(.+?)\s+-m0\b', 'tokens');
 if isempty(toks)
@@ -158,12 +163,33 @@ end
 if isempty(fixedFile) || exist(fixedFile, 'file') ~= 2
     fixedFile = localGuessDualFixedMhd(transformDir);
 end
+if isempty(fixedFile) || exist(fixedFile, 'file') ~= 2
+    fixedFile = localGuessTargetMhd(transformDir);
+end
 end
 
 %--------------------------------------------------------------------------
 function fixedFile = localGuessDualFixedMhd(transformDir)
+% Dual-channel runs write <name>_dual_f0.mhd via elastixDualFixedSameMovingBspline.
 fixedFile = '';
 d = [dir(fullfile(transformDir, '*_dual_f0.mhd')); dir(fullfile(transformDir, '*_dual_f0.MHD'))];
+d = d(~[d.isdir]);
+if isempty(d)
+    return
+end
+[~, ui] = unique({d.name}, 'stable');
+d = d(ui);
+[~, ix] = max([d.datenum]);
+fixedFile = fullfile(transformDir, d(ix).name);
+end
+
+%--------------------------------------------------------------------------
+function fixedFile = localGuessTargetMhd(transformDir)
+% Single-fixed runs (matlab_elastix elastix.m) write <dirName>_target.mhd.
+% Windows Elastix 5.1 omits the CLI from the log, so the -f parse fails.
+% Pick the most-recently modified *_target.mhd in the folder.
+fixedFile = '';
+d = [dir(fullfile(transformDir, '*_target.mhd')); dir(fullfile(transformDir, '*_target.MHD'))];
 d = d(~[d.isdir]);
 if isempty(d)
     return
