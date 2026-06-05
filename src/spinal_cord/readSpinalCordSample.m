@@ -136,11 +136,12 @@ nativeSize = [Ny0, Nx0, Nz];
 [resfac, targetSize] = cordVolumeDownsampleSpec(nativeSize, sampleres, registrationres);
 nativeBytes = double(Ny0) * double(Nx0) * double(Nz) * 2;
 localAssertPlanePerFileLoadable(nativeSize, sampleres, registrationres, nativeBytes, resfac);
+localWarnSuspiciousSliceFiles(tfiles);
 
 if isequal(targetSize, nativeSize)
     finvol = zeros(Ny0, Nx0, Nz, 1, 'uint16');
     for iz = 1:Nz
-        finvol(:, :, iz, 1) = imread(fullfile(folder, tfiles(iz).name));
+        finvol(:, :, iz, 1) = localReadStackSlice(folder, tfiles, iz, Ny0, Nx0);
         localPrintSliceProgress(iz, Nz);
     end
     return
@@ -156,12 +157,7 @@ targetNx = targetSize(2);
 targetNz = targetSize(3);
 backvol = zeros(targetNy, targetNx, Nz, 'uint16');
 for iz = 1:Nz
-    currim = imread(fullfile(folder, tfiles(iz).name));
-    if ~isequal(size(currim, 1:2), [Ny0 Nx0])
-        error('readSpinalCordSample:SliceSizeMismatch', ...
-            'Slice %d (%s) is %dx%d px, expected %dx%d px.', ...
-            iz, tfiles(iz).name, size(currim, 1), size(currim, 2), Ny0, Nx0);
-    end
+    currim = localReadStackSlice(folder, tfiles, iz, Ny0, Nx0);
     if resfac(1) == 1 && resfac(2) == 1
         backvol(:, :, iz) = currim;
     else
@@ -219,6 +215,47 @@ end
 function localPrintSliceProgress(iz, Nz)
 if mod(iz, 100) == 0 || iz == Nz
     fprintf('  read slice %d / %d\n', iz, Nz);
+end
+end
+
+%--------------------------------------------------------------------------
+function currim = localReadStackSlice(folder, tfiles, iz, Ny0, Nx0)
+path = fullfile(folder, tfiles(iz).name);
+try
+    currim = readPlaneTiff(path);
+catch ME
+    error('readSpinalCordSample:SliceReadFailed', ...
+        ['Failed reading slice %d of %d:\n  %s\n%s\n', ...
+        'This file is corrupt or not a valid TIFF. Re-export it from your ', ...
+        'stitcher or remove it from the folder.'], ...
+        iz, numel(tfiles), path, ME.message);
+end
+if ~isequal(size(currim, 1:2), [Ny0 Nx0])
+    error('readSpinalCordSample:SliceSizeMismatch', ...
+        'Slice %d (%s) is %dx%d px, expected %dx%d px.', ...
+        iz, tfiles(iz).name, size(currim, 1), size(currim, 2), Ny0, Nx0);
+end
+end
+
+%--------------------------------------------------------------------------
+function localWarnSuspiciousSliceFiles(tfiles)
+bytes = double([tfiles.bytes]);
+if isempty(bytes)
+    return
+end
+med = median(bytes);
+small = find(bytes < 0.85 * med);
+if isempty(small)
+    return
+end
+fprintf('  warning: %d slice(s) are smaller than 85%% of median file size (%d bytes):\n', ...
+    numel(small), round(med));
+for k = 1:min(5, numel(small))
+    ix = small(k);
+    fprintf('    %s (%d bytes)\n', tfiles(ix).name, round(bytes(ix)));
+end
+if numel(small) > 5
+    fprintf('    ... and %d more\n', numel(small) - 5);
 end
 end
 
