@@ -127,8 +127,7 @@ def brain_register(
     from lightsuite.registration.brain_register import run_brain_registration
 
     cfg = load_config(config)
-    path = run_brain_registration(cfg, use_multistep=not single_step)
-    typer.echo(f"Transform parameters: {path}")
+    run_brain_registration(cfg, use_multistep=not single_step)
 
 
 @brain_app.command("refine-auto-points")
@@ -209,9 +208,7 @@ def brain_init_registration(
     from lightsuite.registration.init_brain import initialize_brain_registration
 
     cfg = load_config(config)
-    checkpoint = initialize_brain_registration(cfg)
-    n_pairs = len(checkpoint.autocpsample or [])
-    typer.echo(f"Initial registration complete. Auto control point pairs: {n_pairs}")
+    initialize_brain_registration(cfg)
 
 
 @brain_app.command("preprocess")

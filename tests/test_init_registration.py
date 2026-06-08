@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import nibabel as nib
@@ -77,3 +78,9 @@ def test_initialize_brain_registration(tmp_path: Path) -> None:
     assert result.autocpsample is not None
     assert (save / "dim1_initial_registration.png").is_file()
     assert (save / "dim1_initial_registration.png").stat().st_size > 10_000
+    diag_path = save / "init_registration_diagnostics.json"
+    assert diag_path.is_file()
+    diag = json.loads(diag_path.read_text(encoding="utf-8"))
+    assert diag["status"] in {"good", "moderate", "poor", "failed"}
+    assert diag["auto_pairs"] >= 0
+    assert "median_error_vox" in diag

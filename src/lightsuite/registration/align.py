@@ -365,15 +365,40 @@ def _triage_icp(
     return sample_orig, atlas_kept
 
 
+def coarse_alignment_metrics(
+    sample_points: np.ndarray,
+    atlas_points: np.ndarray,
+    transform_icp: np.ndarray,
+    *,
+    inlier_threshold_vox: float = 25.0,
+) -> dict[str, float]:
+    """Bidirectional nearest-neighbour distances after coarse similarity alignment."""
+    aligned = _transform_points(sample_points, transform_icp)
+    inv = np.linalg.inv(transform_icp)
+    atlas_in_sample = _transform_points(atlas_points, inv)
+
+    dist_s2a, _ = cKDTree(atlas_points).query(aligned, k=1)
+    dist_a2s, _ = cKDTree(sample_points).query(atlas_in_sample, k=1)
+    median_s2a = float(np.median(dist_s2a))
+    median_a2s = float(np.median(dist_a2s))
+    return {
+        "median_sample_to_atlas_vox": median_s2a,
+        "median_atlas_to_sample_vox": median_a2s,
+        "median_vox": max(median_s2a, median_a2s),
+        "p95_sample_to_atlas_vox": float(np.percentile(dist_s2a, 95)),
+        "p95_atlas_to_sample_vox": float(np.percentile(dist_a2s, 95)),
+        "inlier_fraction": float(np.mean(dist_s2a <= inlier_threshold_vox)),
+        "inlier_threshold_vox": inlier_threshold_vox,
+    }
+
+
 def coarse_alignment_median_error(
     sample_points: np.ndarray,
     atlas_points: np.ndarray,
     transform_icp: np.ndarray,
 ) -> float:
-    """Median nearest-neighbour distance after mapping sample points to atlas space."""
-    aligned = _transform_points(sample_points, transform_icp)
-    dists, _ = cKDTree(atlas_points).query(aligned, k=1)
-    return float(np.median(dists))
+    """Median sample→atlas NN distance (legacy single-direction metric)."""
+    return coarse_alignment_metrics(sample_points, atlas_points, transform_icp)["median_vox"]
 
 
 def triage_and_match_clouds(

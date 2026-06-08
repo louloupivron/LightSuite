@@ -13,13 +13,17 @@ from lightsuite.atlas.registry import resolve_brain_atlas
 from lightsuite.config.models import BrainPipelineConfig
 from lightsuite.preprocess.checkpoint import RegOptsCheckpoint
 from lightsuite.registration.align import (
-    coarse_alignment_median_error,
+    coarse_alignment_metrics,
     downsample_point_cloud,
     estimate_similarity_transform,
     similarity_scale,
     triage_and_match_clouds,
 )
 from lightsuite.registration.bcpd import find_bcpd_executable
+from lightsuite.registration.init_diagnostics import (
+    InitRegistrationDiagnostics,
+    classify_init_registration_status,
+)
 from lightsuite.registration.orientation import orientation_path, resolve_orientation, save_orientation
 from lightsuite.registration.plots import save_initial_registration_previews
 from lightsuite.registration.points import extract_atlas_points_gradient, extract_sample_points
@@ -31,6 +35,7 @@ from lightsuite.registration.volume import (
 )
 
 console = Console()
+INIT_DIAGNOSTICS_FILENAME = "init_registration_diagnostics.json"
 
 
 def initialize_brain_registration(config: BrainPipelineConfig) -> RegOptsCheckpoint:
@@ -53,12 +58,7 @@ def initialize_brain_registration(config: BrainPipelineConfig) -> RegOptsCheckpo
 
     if atlas.boundary_path is not None:
         boundary_full = np.asanyarray(nib.load(atlas.boundary_path).dataobj)
-        console.print(f"Using atlas boundary volume [bold]{atlas.boundary_path.name}[/bold]")
     else:
-        console.print(
-            "[yellow]annotation_boundary_10.nii.gz not found in atlas_dir;[/yellow] "
-            "deriving boundaries from annotation labels."
-        )
         from lightsuite.registration.plots import boundary_volume_from_annotation
 
         boundary_full = boundary_volume_from_annotation(av)
@@ -69,16 +69,13 @@ def initialize_brain_registration(config: BrainPipelineConfig) -> RegOptsCheckpo
     orient_file = orientation_path(save_path)
     if config.registration.orientation is not None:
         save_orientation(save_path, permvec)
-    elif orient_file.is_file():
-        console.print(f"Loaded brain orientation {permvec} from {orient_file}")
-    else:
+    elif not orient_file.is_file():
         console.print(
-            "[yellow]No brain_orientation.txt found;[/yellow] using default [1, 2, 3]. "
-            "Run 'lightsuite brain check-orientation' to verify axes interactively."
+            "[dim]No brain_orientation.txt — using default [1, 2, 3]. "
+            "Run check-orientation to verify axes.[/dim]"
         )
 
     newvol = normalize_registration_volume(backvol)
-    console.print("Creating cloud for sample volume...", end=" ")
     t0 = time.perf_counter()
     volumereg = permute_brain_volume(newvol, permvec)
     ls_cloud = extract_sample_points(
@@ -86,61 +83,32 @@ def initialize_brain_registration(config: BrainPipelineConfig) -> RegOptsCheckpo
         config.registration.cloud_threshold,
         subsample_fraction=config.registration.sample_cloud_subsample,
     )
-    console.print(
-        f"Done in {time.perf_counter() - t0:.1f}s. Found {ls_cloud.shape[0]:,} points "
-        f"(subsample={config.registration.sample_cloud_subsample:g}, "
-        f"threshold={config.registration.cloud_threshold:g})."
-    )
+    sample_cloud_elapsed = time.perf_counter() - t0
 
-    console.print("Loading atlas and generating atlas cloud...", end=" ")
     t0 = time.perf_counter()
     tv_for_points = tvreg.copy()
     tv_for_points[avreg == 0] = 0
     tv_cloud = extract_atlas_points_gradient(tv_for_points, avreg, sigma=20.0, threshold=5.0)
-    console.print(f"Done in {time.perf_counter() - t0:.1f}s. Found {tv_cloud.shape[0]} points.")
+    atlas_cloud_elapsed = time.perf_counter() - t0
 
     if ls_cloud.shape[0] < 10 or tv_cloud.shape[0] < 10:
         msg = "Too few points extracted for coarse registration."
         raise RuntimeError(msg)
 
     bcpd_path = find_bcpd_executable(config.registration.bcpd_path)
-    if bcpd_path is None:
-        console.print(
-            "[yellow]bcpd not found on PATH;[/yellow] using Open3D ICP fallback for coarse alignment. "
-            "Install bcpd (same binary as the MATLAB pipeline) for best results."
-        )
-        if tv_cloud.shape[0] > 100_000:
-            before = tv_cloud.shape[0]
-            tv_cloud = downsample_point_cloud(tv_cloud, 100_000)
-            console.print(
-                f"Downsampled atlas cloud from {before:,} to {tv_cloud.shape[0]:,} points for ICP."
-            )
-    else:
-        console.print(f"Using BCPD coarse alignment ([bold]{bcpd_path}[/bold])")
+    if bcpd_path is None and tv_cloud.shape[0] > 100_000:
+        tv_cloud = downsample_point_cloud(tv_cloud, 100_000)
 
-    console.print(
-        f"Sample shape {volumereg.shape}, atlas shape {tvreg.shape}, orientation {permvec}"
-    )
-
-    console.print("Estimating initial similarity transform...", end=" ")
     t0 = time.perf_counter()
     transform_icp, transform_matlab, backend = estimate_similarity_transform(
         tv_cloud,
         ls_cloud,
         bcpd_path=bcpd_path,
     )
-    console.print(
-        f"Done in {time.perf_counter() - t0:.1f}s "
-        f"({backend}, scale={similarity_scale(transform_icp):.3f})."
-    )
-    if ls_cloud.shape[0] > 0:
-        median_err = coarse_alignment_median_error(ls_cloud, tv_cloud, transform_icp)
-        console.print(
-            f"Coarse alignment median atlas distance: {median_err:.1f} voxels "
-            f"(orientation {permvec} applied to sample volume and preview slices)."
-        )
+    alignment_elapsed = time.perf_counter() - t0
+    scale = similarity_scale(transform_icp)
+    metrics = coarse_alignment_metrics(ls_cloud, tv_cloud, transform_icp)
 
-    console.print("Identifying candidate corresponding points...", end=" ")
     t0 = time.perf_counter()
     cpsample, cpatlas = triage_and_match_clouds(
         ls_cloud,
@@ -148,9 +116,8 @@ def initialize_brain_registration(config: BrainPipelineConfig) -> RegOptsCheckpo
         transform_icp,
         bcpd_path=bcpd_path,
     )
-    console.print(f"Done in {time.perf_counter() - t0:.1f}s. Pairs: {cpsample.shape[0]}")
+    triage_elapsed = time.perf_counter() - t0
 
-    console.print("Saving initial registration previews...", end=" ")
     t0 = time.perf_counter()
     warped_boundary = save_initial_registration_previews(
         save_path,
@@ -159,15 +126,58 @@ def initialize_brain_registration(config: BrainPipelineConfig) -> RegOptsCheckpo
         transform_matlab,
         boundary_atlas=boundary_reg,
     )
-    console.print(
-        f"Done in {time.perf_counter() - t0:.1f}s "
-        f"({warped_boundary:,} warped boundary voxels)."
+    preview_elapsed = time.perf_counter() - t0
+
+    status, status_message, warnings = classify_init_registration_status(
+        median_error_vox=metrics["median_vox"],
+        auto_pairs=int(cpsample.shape[0]),
+        inlier_fraction=metrics["inlier_fraction"],
+        similarity_scale=scale,
+        warped_boundary_voxels=int(warped_boundary),
+        sample_cloud_points=int(ls_cloud.shape[0]),
+        atlas_cloud_points=int(tv_cloud.shape[0]),
+        alignment_backend=backend,
     )
-    if warped_boundary == 0:
-        console.print(
-            "[yellow]Warning:[/yellow] no atlas boundaries overlapped the sample after warping. "
-            "Check coarse alignment and ensure annotation_boundary_10.nii.gz is in atlas_dir."
+    if atlas.boundary_path is None:
+        warnings.append(
+            "annotation_boundary_10.nii.gz not found in atlas_dir — "
+            "boundaries derived from annotation labels."
         )
+
+    diagnostics = InitRegistrationDiagnostics(
+        sample_shape=[int(v) for v in volumereg.shape],
+        atlas_shape=[int(v) for v in tvreg.shape],
+        orientation=list(permvec),
+        registration_resolution_um=float(checkpoint.registres_um),
+        cloud_threshold=float(config.registration.cloud_threshold),
+        sample_cloud_subsample=float(config.registration.sample_cloud_subsample),
+        sample_cloud_points=int(ls_cloud.shape[0]),
+        atlas_cloud_points=int(tv_cloud.shape[0]),
+        alignment_backend=backend,
+        similarity_scale=scale,
+        median_error_sample_to_atlas_vox=metrics["median_sample_to_atlas_vox"],
+        median_error_atlas_to_sample_vox=metrics["median_atlas_to_sample_vox"],
+        median_error_vox=metrics["median_vox"],
+        p95_error_sample_to_atlas_vox=metrics["p95_sample_to_atlas_vox"],
+        p95_error_atlas_to_sample_vox=metrics["p95_atlas_to_sample_vox"],
+        inlier_fraction=metrics["inlier_fraction"],
+        inlier_threshold_vox=metrics["inlier_threshold_vox"],
+        auto_pairs=int(cpsample.shape[0]),
+        warped_boundary_voxels=int(warped_boundary),
+        alignment_elapsed_s=alignment_elapsed,
+        triage_elapsed_s=triage_elapsed,
+        preview_elapsed_s=preview_elapsed,
+        status=status,
+        status_message=status_message,
+        warnings=warnings,
+    )
+    diag_path = save_path / INIT_DIAGNOSTICS_FILENAME
+    diagnostics.save(diag_path)
+    diagnostics.print_summary(console=console)
+    console.print(
+        f"[dim]Checkpoint {regopts_path.name} · diagnostics {diag_path.name} · "
+        f"cloud extraction {sample_cloud_elapsed + atlas_cloud_elapsed:.1f}s[/dim]"
+    )
 
     checkpoint.permute_sample_to_atlas = permvec
     checkpoint.original_trans = transform_matlab.tolist()
@@ -180,5 +190,4 @@ def initialize_brain_registration(config: BrainPipelineConfig) -> RegOptsCheckpo
     checkpoint.auto_points_correspondence_path = None
     checkpoint.brain_atlas = config.atlas.provider.value
     checkpoint.save(regopts_path)
-    console.print(f"Updated checkpoint [bold]{regopts_path}[/bold]")
     return checkpoint

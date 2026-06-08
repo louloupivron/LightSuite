@@ -42,10 +42,16 @@ from lightsuite.registration.elastix.runner import (
 )
 from lightsuite.registration.plots import save_registration_stage_previews
 from lightsuite.registration.points_utils import thin_point_list
+from lightsuite.registration.register_diagnostics import (
+    RegistrationDiagnostics,
+    classify_registration_status,
+    landmark_mm_to_vox,
+)
 from lightsuite.registration.volume import load_registration_volume, permute_brain_volume
 from lightsuite.registration.warp import warp_volume_affine
 
 console = Console()
+REGISTRATION_DIAGNOSTICS_FILENAME = "registration_diagnostics.json"
 
 
 @dataclass
@@ -72,41 +78,6 @@ class AffineFitDiagnostics:
     def save(self, path: Path) -> None:
         path = path.expanduser()
         path.write_text(json.dumps(self.to_dict(), indent=2), encoding="utf-8")
-
-    def print_summary(self) -> None:
-        console.print(
-            f"[bold]Affine fit[/bold] ({self.n_total} pairs: "
-            f"{self.n_manual} manual, {self.n_auto} auto)"
-        )
-        console.print(
-            f"  Residual: median {self.median_error_vox:.1f} vox, "
-            f"p95 {self.p95_error_vox:.1f}, max {self.max_error_vox:.1f} "
-            f"(MSE {self.mse:.1f})"
-        )
-        if self.median_error_manual_vox is not None:
-            console.print(f"  Manual pairs median: {self.median_error_manual_vox:.1f} vox")
-        if self.median_error_auto_vox is not None:
-            console.print(f"  Auto pairs median: {self.median_error_auto_vox:.1f} vox")
-        if self.median_coarse_auto_vox is not None:
-            console.print(
-                f"  Auto pairs vs coarse only: {self.median_coarse_auto_vox:.1f} vox "
-                "(before affine)"
-            )
-        if self.median_landmark_vox is not None:
-            console.print(
-                f"  B-spline landmarks median: {self.median_landmark_vox:.1f} vox "
-                f"(cpwt={self.control_point_weight:g})"
-            )
-        if self.median_error_vox > 25.0:
-            console.print(
-                "[yellow]Warning:[/yellow] high affine residual — check orientation, "
-                "add manual match-points, or set augment_points: true."
-            )
-        elif self.median_error_vox > 15.0:
-            console.print(
-                "[dim]Affine residual is moderate; manual landmarks often improve B-spline.[/dim]"
-            )
-
 
 @dataclass
 class TransformParamsCheckpoint:
@@ -282,7 +253,6 @@ def _prepare_control_points(
     else:
         keep_idx = np.zeros(0, dtype=bool)
     n_auto = int(np.count_nonzero(keep_idx))
-    console.print(f"Augmentation with {n_auto} auto-extracted control points.")
 
     if keep_idx.size:
         af_atlas = np.vstack([cptsatlas, autocpatlas[keep_idx]])
@@ -331,11 +301,10 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
     checkpoint, session = validate_registration_inputs(config)
     save_path = config.sample.save_path.expanduser()
     spacing_mm = checkpoint.registres_um * 1e-3
+    perm = checkpoint.permute_sample_to_atlas or [1, 2, 3]
 
-    console.print("Loading registration volume...", end=" ")
     t0 = time.perf_counter()
     volume = load_registration_volume(Path(checkpoint.regvolpath))
-    perm = checkpoint.permute_sample_to_atlas or [1, 2, 3]
     volume = permute_brain_volume(volume.astype(np.float32), perm)
     regvolsize = list(volume.shape)
 
@@ -352,14 +321,12 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
                 f"primary {volume.shape}"
             )
             raise ValueError(msg)
-    console.print(f"Done in {time.perf_counter() - t0:.1f}s.")
+    load_elapsed = time.perf_counter() - t0
 
     tform_aff, cpaffine, cptshistology, cpwt, affine_diag = _prepare_control_points(
         checkpoint, session, config
     )
-    affine_diag.print_summary()
     affine_diag.save(save_path / "affine_fit_stats.json")
-    console.print(f"Using {cptshistology.shape[0]} landmark pairs for B-spline.")
 
     atlas = resolve_brain_atlas(config.atlas.provider.value, config.atlas.atlas_dir)
     tv = np.asanyarray(nib.load(atlas.template_path).dataobj).astype(np.float32)
@@ -367,11 +334,10 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
 
     # Match multiobjRegistration.m: affine is fit in full-atlas index space (points / downfac_reg)
     # and imwarp uses full-resolution moving volumes, not the downsampled tvreg grid.
-    console.print("Applying affine pre-alignment to atlas...", end=" ")
     t0 = time.perf_counter()
     tvaffine = warp_volume_affine(tv, tform_aff, volume.shape, order=1)
     avaffine = warp_volume_affine(av, tform_aff, volume.shape, order=0)
-    console.print(f"Done in {time.perf_counter() - t0:.1f}s.")
+    affine_warp_elapsed = time.perf_counter() - t0
 
     hi = float(np.quantile(volume, 0.999))
     voltoshow = np.clip(volume / max(hi, 1e-6) * 255.0, 0, 255).astype(np.uint8)
@@ -383,6 +349,7 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
     moving_pts_mm = volume_indices_to_elastix_physical(cpaffine, spacing_mm)
     fixed_pts_mm = volume_indices_to_elastix_physical(cptshistology, spacing_mm)
 
+    t0 = time.perf_counter()
     bspline_result = run_bspline_registration(
         fixed_volume=volume,
         moving_volume=tvaffine,
@@ -399,8 +366,8 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
         dual_weight_autofluor=config.registration.dual_channel_mi_weight_autofluor,
         dual_weight_signal=config.registration.dual_channel_mi_weight_signal,
     )
+    bspline_elapsed = time.perf_counter() - t0
 
-    console.print("Warping annotation with B-spline transform...", end=" ")
     t0 = time.perf_counter()
     avreg = run_transformix(
         moving_volume=np.rint(avaffine).astype(np.int32),
@@ -409,16 +376,15 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
         spacing_mm=spacing_mm,
         nearest=True,
     )
+    transformix_elapsed = time.perf_counter() - t0
+    annotation_label_voxels = int(np.sum(np.rint(avreg) > 1))
     final_landmark_mm = read_elastix_landmark_metric_mm(bspline_result.output_dir)
-    landmark_note = (
-        f", final landmark metric {final_landmark_mm:.3f} mm"
+    final_landmark_vox = (
+        landmark_mm_to_vox(final_landmark_mm, checkpoint.registres_um)
         if final_landmark_mm is not None
-        else ""
+        else None
     )
-    console.print(
-        f"Done in {time.perf_counter() - t0:.1f}s "
-        f"({int(np.sum(np.rint(avreg) > 1)):,} label voxels after B-spline{landmark_note})."
-    )
+
     save_registration_stage_previews(
         save_path, config.sample.name, voltoshow, avreg, "bspline_registration"
     )
@@ -430,6 +396,51 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
 
     affine_inv = np.linalg.inv(tform_aff)
     reg = config.registration
+    use_dual = volume_secondary is not None
+    status, status_message, warnings = classify_registration_status(
+        affine_median_error_vox=affine_diag.median_error_vox,
+        affine_p95_error_vox=affine_diag.p95_error_vox,
+        n_manual=affine_diag.n_manual,
+        n_landmark_pairs=int(cptshistology.shape[0]),
+        bspline_landmark_metric_vox=final_landmark_vox,
+        annotation_label_voxels=annotation_label_voxels,
+        use_multistep=use_multistep,
+    )
+    diagnostics = RegistrationDiagnostics(
+        sample_shape=regvolsize,
+        atlas_shape=list(tv.shape),
+        orientation=list(perm),
+        registration_resolution_um=float(checkpoint.registres_um),
+        n_manual_pairs=affine_diag.n_manual,
+        n_auto_pairs=affine_diag.n_auto,
+        n_landmark_pairs=int(cptshistology.shape[0]),
+        control_point_weight=cpwt,
+        use_multistep=use_multistep,
+        use_dual_channel_mi=use_dual,
+        bspline_spatial_scale_mm=float(reg.bspline_spatial_scale_mm),
+        dual_channel_mi_weight_autofluor=reg.dual_channel_mi_weight_autofluor if use_dual else None,
+        dual_channel_mi_weight_signal=reg.dual_channel_mi_weight_signal if use_dual else None,
+        affine_median_error_vox=affine_diag.median_error_vox,
+        affine_p95_error_vox=affine_diag.p95_error_vox,
+        affine_max_error_vox=affine_diag.max_error_vox,
+        affine_median_manual_vox=affine_diag.median_error_manual_vox,
+        affine_median_auto_vox=affine_diag.median_error_auto_vox,
+        affine_median_coarse_auto_vox=affine_diag.median_coarse_auto_vox,
+        bspline_landmark_metric_mm=final_landmark_mm,
+        bspline_landmark_metric_vox=final_landmark_vox,
+        annotation_label_voxels=annotation_label_voxels,
+        load_elapsed_s=load_elapsed,
+        affine_warp_elapsed_s=affine_warp_elapsed,
+        bspline_elapsed_s=bspline_elapsed,
+        transformix_elapsed_s=transformix_elapsed,
+        status=status,
+        status_message=status_message,
+        warnings=warnings,
+    )
+    diag_path = save_path / REGISTRATION_DIAGNOSTICS_FILENAME
+    diagnostics.save(diag_path)
+    diagnostics.print_summary(console=console)
+
     transform_params = TransformParamsCheckpoint(
         atlas_resolution_um=config.atlas.resolution_um,
         regvolsize=regvolsize,
@@ -437,22 +448,25 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
         brain_atlas=config.atlas.provider.value,
         ori_voxel_um=checkpoint.voxel_um,
         ori_size=[checkpoint.ny, checkpoint.nx, checkpoint.nz],
-        permute_sample_to_atlas=checkpoint.permute_sample_to_atlas or [1, 2, 3],
+        permute_sample_to_atlas=perm,
         elastix_um_to_mm=1e-3,
         tform_bspline_samp20um_to_atlas_20um_px=str(samp_to_atlas_path),
         tform_affine_samp20um_to_atlas_10um_px=affine_inv.tolist(),
         control_point_weight=cpwt,
         use_multistep=use_multistep,
-        use_dual_channel_mi=volume_secondary is not None,
+        use_dual_channel_mi=use_dual,
         dual_channel_mi_weight_autofluor=reg.dual_channel_mi_weight_autofluor
-        if volume_secondary is not None
+        if use_dual
         else None,
         dual_channel_mi_weight_signal=reg.dual_channel_mi_weight_signal
-        if volume_secondary is not None
+        if use_dual
         else None,
         channel_secondary=checkpoint.channel_secondary,
     )
     out_json = save_path / "transform_params.json"
     transform_params.save(out_json)
-    console.print(f"[green]Registration complete.[/green] Transform params: {out_json}")
+    console.print(
+        f"[dim]Checkpoint {out_json.name} · diagnostics {diag_path.name} · "
+        f"affine_fit_stats.json · load {load_elapsed:.1f}s[/dim]"
+    )
     return out_json
