@@ -1,13 +1,17 @@
 % set main data path - where the tiffs are
-dpspinesample      = 'D:\Louis\spinal-cord\All_Channels';
+dpspinesample      = 'F:\Louis\spinal-cord\All_Channels';
 bcpdpath           = which('bcpd.exe'); % path for point-cloud registration
 
-%% load sample and atlas - set resolution and channel for registration
+
 %% load sample and atlas - set resolution and channel for registration
 % sampleres: native voxel size in micrometers — NOT the registration grid (20 um).
 sampleres          = [1.8, 1.8, 4]; % in micrometers across sides
+% List corrupt slice TIFFs before loading (recommended for large series):
+% bad = validateSpinalCordSliceSeries(dpspinesample);
 % tifftype: 'auto' | 'planeperfile' (one 2D TIFF per slice) | 'channelperfile'
 [cordvol, opts]    = readSpinalCordSample(dpspinesample, sampleres, 'planeperfile');
+% If a few slices are corrupt and cannot be re-exported, use:
+% [cordvol, opts] = readSpinalCordSample(dpspinesample, sampleres, 'planeperfile', [], 'SkipCorruptSlices', true);
 %%
 opts.regchan       = 2; % choose registration channel
 opts.bcpdpath      = bcpdpath;

@@ -1,0 +1,19 @@
+function raiseCorruptSpinalCordSliceError(bad, totalSlices)
+%RAISECORRUPTSPINALCORDSLICEERROR Fail with a list of unreadable slice TIFFs.
+nBad = height(bad);
+lines = cell(min(nBad, 25), 1);
+for k = 1:min(nBad, 25)
+    lines{k} = sprintf('  [%d] %s', bad.sliceIndex(k), bad.filePath{k});
+end
+msg = sprintf(['Found %d corrupt or unreadable slice TIFF(s) out of %d.\n', ...
+    'Re-copy or re-export these files from your source, then rerun.\n', ...
+    'To list them: bad = validateSpinalCordSliceSeries(dpspinesample);\n', ...
+    'To skip bad slices (small gaps only): ', ...
+    'readSpinalCordSample(..., ''SkipCorruptSlices'', true);\n\n', ...
+    'Examples:\n%s'], ...
+    nBad, totalSlices, strjoin(lines, newline));
+if nBad > 25
+    msg = [msg sprintf('\n  ... and %d more (see validateSpinalCordSliceSeries).', nBad - 25)];
+end
+error('readSpinalCordSample:CorruptSlices', '%s', msg);
+end

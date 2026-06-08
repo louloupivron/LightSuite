@@ -1,7 +1,8 @@
-function [finvol, opts] = readSpinalCordSample(dp, sampleres, tifftype, registrationres)
+function [finvol, opts] = readSpinalCordSample(dp, sampleres, tifftype, registrationres, varargin)
 %READSPINALCORDSAMPLE Load a spinal cord lightsheet TIFF stack.
 %   [finvol, opts] = readSpinalCordSample(dp, sampleres)
 %   [finvol, opts] = readSpinalCordSample(dp, sampleres, tifftype, registrationres)
+%   [finvol, opts] = readSpinalCordSample(..., 'SkipCorruptSlices', true)
 %
 %   dp is a folder containing TIFF files. Supported layouts:
 %     'planeperfile'   — one 2D TIFF per slice (Terastitcher-style series)
@@ -13,6 +14,12 @@ function [finvol, opts] = readSpinalCordSample(dp, sampleres, tifftype, registra
 %   registrationres (default 20 x 20 x 20 um) so the full stack is never held
 %   in memory at native resolution.
 %
+%   Name-value pairs:
+%     'SkipCorruptSlices' — if true, unreadable slice TIFFs are skipped (use
+%       only for a few bad files; gaps may affect registration). Default false.
+%       When false, all slices are validated before loading and every corrupt
+%       file is listed in the error.
+%
 %   finvol is [height x width x depth x channels] in uint16.
 
 if nargin < 3 || isempty(tifftype)
@@ -21,6 +28,10 @@ end
 if nargin < 4 || isempty(registrationres)
     registrationres = [20 20 20];
 end
+ip = inputParser;
+ip.addParameter('SkipCorruptSlices', false, @islogical);
+ip.parse(varargin{:});
+skipCorruptSlices = ip.Results.SkipCorruptSlices;
 tifftype = lower(strtrim(char(tifftype)));
 
 tiffiles = dir(fullfile(dp, '*.tiff'));
@@ -33,11 +44,14 @@ end
 
 layout = localResolveTiffLayout(tfiles, tifftype);
 nativeSize = [];
+skippedSlices = table([], [], [], [], ...
+    'VariableNames', {'sliceIndex', 'fileName', 'filePath', 'message'});
 tic;
 switch layout
     case 'planeperfile'
         fprintf('Using planeperfile loading (%d slice TIFFs)\n', numel(tfiles));
-        [finvol, nativeSize] = localLoadPlanePerFileStack(tfiles, sampleres, registrationres);
+        [finvol, nativeSize, skippedSlices] = localLoadPlanePerFileStack( ...
+            tfiles, sampleres, registrationres, skipCorruptSlices);
     case 'channelperfile'
         if numel(tfiles) == 1
             finvol = localLoadSingleTiffStack(tfiles(1));
@@ -58,7 +72,7 @@ assert(all([Nslices, Ny, Nx, Nchan] > 0), ...
 assert(Nslices > 1 && Ny > 1 && Nx > 1, ...
     'readSpinalCordSample:DegenerateStack', ...
     ['Loaded stack is %d x %d x %d. Expected a 3D volume with depth > 1 along ' ...
-    'the cord. If depth is 1, Bio-Formats may not have parsed Z/T correctly.'], ...
+    'the cord. Too many corrupt slices were skipped, or Bio-Formats parsed Z/T incorrectly.'], ...
     Nslices, Ny, Nx);
 fprintf('Parsed spinal cord sample in %2.1f s. Size %d x %d x %d with %d channels\n', ...
     toc, Nslices, Ny, Nx, Nchan)
@@ -78,6 +92,9 @@ opts.Nchan           = Nchan;
 opts.sampleres       = sampleres;
 opts.registrationres = registrationres;
 opts.tifftype        = layout;
+if ~isempty(skippedSlices)
+    opts.skipped_slices = skippedSlices;
+end
 %--------------------------------------------------------------------------
 
 end
@@ -123,54 +140,90 @@ tf = true;
 end
 
 %--------------------------------------------------------------------------
-function [finvol, nativeSize] = localLoadPlanePerFileStack(tfiles, sampleres, registrationres)
+function [finvol, nativeSize, skippedSlices] = localLoadPlanePerFileStack(tfiles, sampleres, registrationres, skipCorruptSlices)
+if nargin < 4
+    skipCorruptSlices = false;
+end
+skippedSlices = table([], [], [], [], ...
+    'VariableNames', {'sliceIndex', 'fileName', 'filePath', 'message'});
+
 [~, sortIdx] = natsortfiles({tfiles.name});
 tfiles = tfiles(sortIdx);
 folder = tfiles(1).folder;
-Nz = numel(tfiles);
+NzListed = numel(tfiles);
 tinfo = imfinfo(fullfile(folder, tfiles(1).name));
 Ny0 = tinfo.Height;
 Nx0 = tinfo.Width;
-nativeSize = [Ny0, Nx0, Nz];
 
-[resfac, targetSize] = cordVolumeDownsampleSpec(nativeSize, sampleres, registrationres);
-nativeBytes = double(Ny0) * double(Nx0) * double(Nz) * 2;
-localAssertPlanePerFileLoadable(nativeSize, sampleres, registrationres, nativeBytes, resfac);
+if ~skipCorruptSlices
+    [tfiles, skippedSlices] = filterSpinalCordSlices(tfiles, false);
+    NzListed = numel(tfiles);
+end
+nativeSizeListed = [Ny0, Nx0, NzListed];
+
+[resfac, targetSize] = cordVolumeDownsampleSpec(nativeSizeListed, sampleres, registrationres);
+nativeBytes = double(Ny0) * double(Nx0) * double(NzListed) * 2;
+localAssertPlanePerFileLoadable(nativeSizeListed, sampleres, registrationres, nativeBytes, resfac);
 localWarnSuspiciousSliceFiles(tfiles);
 
-if isequal(targetSize, nativeSize)
-    finvol = zeros(Ny0, Nx0, Nz, 1, 'uint16');
-    for iz = 1:Nz
-        finvol(:, :, iz, 1) = localReadStackSlice(folder, tfiles, iz, Ny0, Nx0);
-        localPrintSliceProgress(iz, Nz);
+targetNy = targetSize(1);
+targetNx = targetSize(2);
+targetNz = targetSize(3);
+
+if isequal(targetSize, nativeSizeListed)
+    finvol = zeros(Ny0, Nx0, NzListed, 1, 'uint16');
+    nLoaded = 0;
+    for iz = 1:NzListed
+        [currim, ok, skipRow] = localTryReadStackSlice(folder, tfiles, iz, Ny0, Nx0, skipCorruptSlices);
+        if ~ok
+            skippedSlices = [skippedSlices; skipRow]; %#ok<AGROW>
+            continue
+        end
+        nLoaded = nLoaded + 1;
+        finvol(:, :, nLoaded, 1) = currim;
+        localPrintSliceProgress(nLoaded, NzListed);
     end
+    finvol = finvol(:, :, 1:nLoaded, :);
+    nativeSize = [Ny0, Nx0, nLoaded];
     return
 end
 
 fprintf(['  downsampling while loading: %d x %d x %d -> %d x %d x %d px ' ...
     '(sampleres %s um -> registration %s um)\n'], ...
-    Ny0, Nx0, Nz, targetSize(1), targetSize(2), targetSize(3), ...
+    Ny0, Nx0, NzListed, targetSize(1), targetSize(2), targetSize(3), ...
     mat2str(sampleres), mat2str(registrationres));
 
-targetNy = targetSize(1);
-targetNx = targetSize(2);
-targetNz = targetSize(3);
-backvol = zeros(targetNy, targetNx, Nz, 'uint16');
-for iz = 1:Nz
-    currim = localReadStackSlice(folder, tfiles, iz, Ny0, Nx0);
-    if resfac(1) == 1 && resfac(2) == 1
-        backvol(:, :, iz) = currim;
-    else
-        backvol(:, :, iz) = imresize(currim, [targetNy targetNx]);
+backvol = zeros(targetNy, targetNx, NzListed, 'uint16');
+nLoaded = 0;
+for iz = 1:NzListed
+    [currim, ok, skipRow] = localTryReadStackSlice(folder, tfiles, iz, Ny0, Nx0, skipCorruptSlices);
+    if ~ok
+        skippedSlices = [skippedSlices; skipRow]; %#ok<AGROW>
+        continue
     end
-    localPrintSliceProgress(iz, Nz);
+    nLoaded = nLoaded + 1;
+    if resfac(1) == 1 && resfac(2) == 1
+        backvol(:, :, nLoaded) = currim;
+    else
+        backvol(:, :, nLoaded) = imresize(currim, [targetNy targetNx]);
+    end
+    localPrintSliceProgress(nLoaded, NzListed);
 end
+backvol = backvol(:, :, 1:nLoaded);
 
 finvol = zeros(targetNy, targetNx, targetNz, 1, 'uint16');
 if resfac(3) == 1
     finvol(:, :, :, 1) = backvol;
+    nativeSize = [targetNy, targetNx, nLoaded];
 else
-    finvol(:, :, :, 1) = imresize3(backvol, targetSize);
+    [~, targetSizeLoaded] = cordVolumeDownsampleSpec( ...
+        [Ny0, Nx0, nLoaded], sampleres, registrationres);
+    finvol(:, :, :, 1) = imresize3(backvol, targetSizeLoaded);
+    nativeSize = targetSizeLoaded;
+end
+if ~isempty(skippedSlices)
+    fprintf('  loaded %d / %d slices (%d skipped as corrupt)\n', ...
+        nLoaded, NzListed, height(skippedSlices));
 end
 end
 
@@ -219,21 +272,31 @@ end
 end
 
 %--------------------------------------------------------------------------
-function currim = localReadStackSlice(folder, tfiles, iz, Ny0, Nx0)
+function [currim, ok, skipRow] = localTryReadStackSlice(folder, tfiles, iz, Ny0, Nx0, allowSkip)
 path = fullfile(folder, tfiles(iz).name);
+skipRow = table([], [], [], [], ...
+    'VariableNames', {'sliceIndex', 'fileName', 'filePath', 'message'});
 try
     currim = readPlaneTiff(path);
+    if ~isequal(size(currim, 1:2), [Ny0 Nx0])
+        error('readSpinalCordSample:SliceSizeMismatch', ...
+            'Slice %d (%s) is %dx%d px, expected %dx%d px.', ...
+            iz, tfiles(iz).name, size(currim, 1), size(currim, 2), Ny0, Nx0);
+    end
+    ok = true;
 catch ME
+    if allowSkip
+        ok = false;
+        currim = [];
+        skipRow = {iz, tfiles(iz).name, path, ME.message};
+        fprintf('  skipping corrupt slice %d: %s\n', iz, tfiles(iz).name);
+        return
+    end
     error('readSpinalCordSample:SliceReadFailed', ...
         ['Failed reading slice %d of %d:\n  %s\n%s\n', ...
-        'This file is corrupt or not a valid TIFF. Re-export it from your ', ...
-        'stitcher or remove it from the folder.'], ...
+        'Run validateSpinalCordSliceSeries(dpspinesample) to list all bad files, ', ...
+        're-export them, or pass ''SkipCorruptSlices'', true (small gaps only).'], ...
         iz, numel(tfiles), path, ME.message);
-end
-if ~isequal(size(currim, 1:2), [Ny0 Nx0])
-    error('readSpinalCordSample:SliceSizeMismatch', ...
-        'Slice %d (%s) is %dx%d px, expected %dx%d px.', ...
-        iz, tfiles(iz).name, size(currim, 1), size(currim, 2), Ny0, Nx0);
 end
 end
 
