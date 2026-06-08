@@ -19,6 +19,7 @@ from lightsuite.gui.chooselist import (
 )
 from lightsuite.gui.control_points import ControlPointSession, default_session_path
 from lightsuite.gui.slice_correspondence import (
+    VOLUME_AXES,
     SliceAnchor,
     SliceCorrespondence,
     default_correspondence_path,
@@ -49,11 +50,14 @@ class BrainMatchPointsData:
 class BrainAlignSlicesData:
     sample_volume: np.ndarray
     atlas_template: np.ndarray
-    chooselist: np.ndarray
+    chooselist_by_axis: dict[int, np.ndarray]
     original_trans: np.ndarray
     correspondence_path: Path
     correspondence: SliceCorrespondence
-    cut_axis: int
+    axis_order: tuple[int, ...] = VOLUME_AXES
+
+    def chooselist_for_axis(self, cut_axis: int) -> np.ndarray:
+        return self.chooselist_by_axis[int(cut_axis)]
 
 
 def _normalize_display(image: np.ndarray) -> np.ndarray:
@@ -180,57 +184,72 @@ def apply_slice_correspondence_to_session(
     session.atlas_slice_indices = indices
 
 
+def _ensure_axis_correspondence(
+    correspondence: SliceCorrespondence,
+    *,
+    cut_axis: int,
+    sample_volume: np.ndarray,
+    original_trans: np.ndarray,
+    atlas_shape: tuple[int, int, int],
+    chooselist: np.ndarray,
+) -> None:
+    anchors = correspondence.anchors_for_axis(cut_axis)
+    if len(anchors) != chooselist.shape[0]:
+        correspondence.axes[cut_axis] = _build_correspondence_anchors(
+            sample_volume,
+            chooselist,
+            original_trans,
+            atlas_shape,
+            confirmed=False,
+        )
+
+
 def load_brain_align_slices_data(config: BrainPipelineConfig) -> BrainAlignSlicesData:
     sample_warped, tvreg, _avreg, original_trans, _downfac = _load_brain_registration_volumes(
         config
     )
-    cut_axis = default_ap_cut_axis(sample_warped.shape)
-    chooselist = generate_ap_alignment_list(sample_warped.shape, cut_axis=cut_axis)
+    chooselist_by_axis = {
+        axis: generate_ap_alignment_list(sample_warped.shape, cut_axis=axis)
+        for axis in VOLUME_AXES
+    }
     correspondence_path = default_correspondence_path(config.sample.save_path)
 
     if correspondence_path.is_file():
         correspondence = SliceCorrespondence.load(correspondence_path)
-        if correspondence.cut_axis != cut_axis:
-            correspondence.cut_axis = cut_axis
     else:
         correspondence = SliceCorrespondence(
-            cut_axis=cut_axis,
             original_trans=original_trans.tolist(),
-            anchors=_build_correspondence_anchors(
-                sample_warped,
-                chooselist,
-                original_trans,
-                tvreg.shape,
-                confirmed=False,
-            ),
+            axes={},
             source="auto",
         )
 
-    if len(correspondence.anchors) != chooselist.shape[0]:
-        correspondence.anchors = _build_correspondence_anchors(
-            sample_warped,
-            chooselist,
-            original_trans,
-            tvreg.shape,
-            confirmed=False,
+    correspondence.original_trans = original_trans.tolist()
+    for axis, chooselist in chooselist_by_axis.items():
+        _ensure_axis_correspondence(
+            correspondence,
+            cut_axis=axis,
+            sample_volume=sample_warped,
+            original_trans=original_trans,
+            atlas_shape=tvreg.shape,
+            chooselist=chooselist,
         )
 
     return BrainAlignSlicesData(
         sample_volume=sample_warped,
         atlas_template=tvreg,
-        chooselist=chooselist,
+        chooselist_by_axis=chooselist_by_axis,
         original_trans=original_trans,
         correspondence_path=correspondence_path,
         correspondence=correspondence,
-        cut_axis=cut_axis,
     )
 
 
 def prepare_brain_align_slices_session(config: BrainPipelineConfig) -> Path:
-    """Auto-estimate and save slice correspondence without opening Napari."""
+    """Auto-estimate and save slice correspondence on all axes without opening Napari."""
     data = load_brain_align_slices_data(config)
-    for anchor in data.correspondence.anchors:
-        anchor.confirmed = True
+    for axis in data.axis_order:
+        for anchor in data.correspondence.anchors_for_axis(axis):
+            anchor.confirmed = True
     data.correspondence.source = "auto"
     data.correspondence.save(data.correspondence_path)
     return data.correspondence_path
@@ -251,7 +270,7 @@ def load_brain_match_points_data(config: BrainPipelineConfig) -> BrainMatchPoint
         session = ControlPointSession.empty(original_trans, chooselist.shape[0])
         session.chooselist = chooselist.tolist()
 
-    if slice_correspondence is not None and slice_correspondence.confirmed_anchors():
+    if slice_correspondence is not None and slice_correspondence.has_confirmed_anchors():
         has_manual_planes = (
             session.atlas_slice_indices is not None
             and any(int(v) > 0 for v in session.atlas_slice_indices)

@@ -23,10 +23,10 @@ from lightsuite.registration.refine_auto_points import refine_brain_auto_points
 
 
 def _correspondence_x_axis() -> SliceCorrespondence:
-    return SliceCorrespondence(
-        cut_axis=2,
-        original_trans=np.eye(4).tolist(),
-        anchors=[
+    return SliceCorrespondence.single_axis(
+        2,
+        np.eye(4).tolist(),
+        [
             SliceAnchor(sample_index=10, atlas_plane=20, confirmed=True),
             SliceAnchor(sample_index=30, atlas_plane=50, confirmed=True),
         ],
@@ -51,7 +51,7 @@ def test_ap_filter_keeps_consistent_pairs() -> None:
     assert filtered_s.shape[0] == 1
     assert np.allclose(filtered_s[0], cpsample[0])
     assert np.allclose(filtered_a[0], cpatlas[0])
-    assert stats.pairs_removed_ap == 1
+    assert stats.pairs_removed == 1
 
 
 def test_ap_filter_relaxes_tolerance_when_needed() -> None:
@@ -70,6 +70,36 @@ def test_ap_filter_relaxes_tolerance_when_needed() -> None:
     )
     assert stats.pairs_after == 2
     assert stats.tolerance_vox == 5.0
+
+
+def test_multi_axis_filter_uses_max_residual() -> None:
+    atlas_shape = (40, 60, 30)
+    corr = SliceCorrespondence(
+        original_trans=np.eye(4).tolist(),
+        axes={
+            2: [
+                SliceAnchor(sample_index=10, atlas_plane=20, confirmed=True),
+                SliceAnchor(sample_index=30, atlas_plane=50, confirmed=True),
+            ],
+            3: [
+                SliceAnchor(sample_index=10, atlas_plane=20, confirmed=True),
+                SliceAnchor(sample_index=30, atlas_plane=50, confirmed=True),
+            ],
+        },
+    )
+    cpsample = np.array([[19.0, 5.0, 19.0], [19.0, 5.0, 5.0]], dtype=float)
+    cpatlas = np.array([[34.0, 5.0, 19.0], [34.0, 5.0, 5.0]], dtype=float)
+    _, _, stats = filter_pairs_by_ap_correspondence(
+        cpsample,
+        cpatlas,
+        corr,
+        np.eye(4),
+        atlas_shape,
+        tolerance_vox=12.0,
+        min_pairs_kept=1,
+    )
+    assert stats.active_axes == [2, 3]
+    assert stats.pairs_after == 1
 
 
 def test_ap_residuals_identity_transform() -> None:
@@ -135,7 +165,7 @@ def test_refine_auto_points_integration(tmp_path: Path) -> None:
 
     checkpoint = RegOptsCheckpoint.load(save / "regopts.json")
     assert checkpoint.auto_points_refined is True
-    assert checkpoint.auto_points_mode == "ap_filter"
+    assert checkpoint.auto_points_mode == "multi_axis_filter"
     assert len(checkpoint.autocpsample or []) <= n_before
     assert (save / "auto_points_refine_stats.json").is_file()
 

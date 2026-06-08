@@ -76,7 +76,7 @@ def refine_brain_auto_points(
         prepare_brain_align_slices_session(config)
         correspondence = load_slice_correspondence(save_path)
 
-    if correspondence is None or not correspondence.confirmed_anchors():
+    if correspondence is None or not correspondence.has_confirmed_anchors():
         msg = (
             "slice_correspondence.json missing or has no confirmed anchors. "
             "Run align-slices or pass --bootstrap-correspondence."
@@ -112,18 +112,25 @@ def refine_brain_auto_points(
     checkpoint.autocpatlas = filtered_atlas.tolist()
     checkpoint.auto_points_source = "global_triage"
     checkpoint.auto_points_refined = True
-    checkpoint.auto_points_mode = "ap_filter"
+    checkpoint.auto_points_mode = "multi_axis_filter"
     checkpoint.auto_points_correspondence_path = default_correspondence_path(save_path).name
     checkpoint.save(regopts_path)
 
     stats.save(save_path / "auto_points_refine_stats.json")
-    console.print(
-        f"[green]Refined auto points:[/green] {stats.pairs_after}/{stats.pairs_before} pairs kept "
-        f"({stats.pairs_removed_ap} removed, tol={stats.tolerance_vox:g} vox, "
-        f"median AP residual {stats.median_ap_residual_before_vox:.1f} → "
-        f"{stats.median_ap_residual_after_vox:.1f} vox)."
-        if stats.median_ap_residual_before_vox is not None
-        and stats.median_ap_residual_after_vox is not None
-        else f"[green]Refined auto points:[/green] {stats.pairs_after}/{stats.pairs_before} pairs kept."
-    )
+    axes_label = ",".join(str(axis) for axis in stats.active_axes) or "none"
+    if (
+        stats.median_residual_before_vox is not None
+        and stats.median_residual_after_vox is not None
+    ):
+        console.print(
+            f"[green]Refined auto points:[/green] {stats.pairs_after}/{stats.pairs_before} pairs kept "
+            f"({stats.pairs_removed} removed, axes [{axes_label}], tol={stats.tolerance_vox:g} vox, "
+            f"median max-axis residual {stats.median_residual_before_vox:.1f} → "
+            f"{stats.median_residual_after_vox:.1f} vox)."
+        )
+    else:
+        console.print(
+            f"[green]Refined auto points:[/green] {stats.pairs_after}/{stats.pairs_before} pairs kept "
+            f"(axes [{axes_label}])."
+        )
     return regopts_path

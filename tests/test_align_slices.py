@@ -1,7 +1,8 @@
-"""Tests for AP slice correspondence (align-slices stage)."""
+"""Tests for multi-axis slice correspondence (align-slices stage)."""
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import nibabel as nib
@@ -13,16 +14,16 @@ from lightsuite.config.loader import load_config
 from lightsuite.gui.brain_data import (
     apply_slice_correspondence_to_session,
     load_brain_match_points_data,
+    prepare_brain_align_slices_session,
 )
 from lightsuite.gui.chooselist import (
     default_ap_cut_axis,
     generate_ap_alignment_list,
 )
 from lightsuite.gui.control_points import ControlPointSession
-from lightsuite.gui.slice_correspondence import SliceAnchor, SliceCorrespondence
+from lightsuite.gui.slice_correspondence import SliceAnchor, SliceCorrespondence, VOLUME_AXES
 from lightsuite.preprocess.brain import preprocess_lightsheet_volume
 from lightsuite.registration.init_brain import initialize_brain_registration
-from lightsuite.gui.brain_data import prepare_brain_align_slices_session
 
 
 def test_default_ap_cut_axis_is_longest() -> None:
@@ -36,10 +37,10 @@ def test_generate_ap_alignment_list_shape() -> None:
 
 
 def test_slice_correspondence_interpolation() -> None:
-    corr = SliceCorrespondence(
-        cut_axis=2,
-        original_trans=np.eye(4).tolist(),
-        anchors=[
+    corr = SliceCorrespondence.single_axis(
+        2,
+        np.eye(4).tolist(),
+        [
             SliceAnchor(sample_index=10, atlas_plane=20, confirmed=True),
             SliceAnchor(sample_index=30, atlas_plane=50, confirmed=True),
         ],
@@ -50,13 +51,47 @@ def test_slice_correspondence_interpolation() -> None:
     assert corr.interpolate_atlas_plane(20, 3, 100) is None
 
 
+def test_slice_correspondence_v1_json_migration() -> None:
+    raw = {
+        "version": 1,
+        "source": "manual",
+        "cut_axis": 2,
+        "original_trans": np.eye(4).tolist(),
+        "anchors": [
+            {"sample_index": 10, "atlas_plane": 20, "confirmed": True},
+            {"sample_index": 30, "atlas_plane": 50, "confirmed": True},
+        ],
+    }
+    corr = SliceCorrespondence.from_dict(raw)
+    assert corr.axes[2]
+    assert corr.interpolate_atlas_plane(20, 2, 100) == 35
+    saved = json.loads(json.dumps(corr.to_dict()))
+    assert "axes" in saved
+    assert "2" in saved["axes"]
+
+
+def test_multi_axis_correspondence_roundtrip() -> None:
+    corr = SliceCorrespondence(
+        original_trans=np.eye(4).tolist(),
+        axes={
+            1: [SliceAnchor(10, 11, True), SliceAnchor(30, 31, True)],
+            2: [SliceAnchor(12, 22, True), SliceAnchor(32, 42, True)],
+            3: [SliceAnchor(8, 18, True), SliceAnchor(28, 38, True)],
+        },
+    )
+    assert corr.interpolate_atlas_plane(20, 1, 50) == 21
+    assert corr.interpolate_atlas_plane(20, 2, 60) == 30
+    assert corr.interpolate_atlas_plane(20, 3, 40) == 30
+    assert corr.confirmed_axis_count() == 3
+
+
 def test_apply_slice_correspondence_to_session() -> None:
     chooselist = generate_ap_alignment_list((40, 60, 30), cut_axis=2, n_slices=5)
     session = ControlPointSession.empty(np.eye(4), chooselist.shape[0])
-    corr = SliceCorrespondence(
-        cut_axis=2,
-        original_trans=np.eye(4).tolist(),
-        anchors=[
+    corr = SliceCorrespondence.single_axis(
+        2,
+        np.eye(4).tolist(),
+        [
             SliceAnchor(sample_index=int(row[0]), atlas_plane=10 + i * 5, confirmed=True)
             for i, row in enumerate(chooselist)
         ],
@@ -115,8 +150,10 @@ def test_prepare_align_slices_and_match_points_integration(tmp_path: Path) -> No
     corr_path = prepare_brain_align_slices_session(cfg)
     assert corr_path.is_file()
     corr = SliceCorrespondence.load(corr_path)
-    assert len(corr.anchors) == 20
-    assert all(anchor.confirmed for anchor in corr.anchors)
+    assert set(corr.axes) == set(VOLUME_AXES)
+    for axis in VOLUME_AXES:
+        assert len(corr.axes[axis]) == 20
+        assert all(anchor.confirmed for anchor in corr.axes[axis])
 
     match_data = load_brain_match_points_data(cfg)
     assert match_data.slice_correspondence is not None

@@ -18,6 +18,7 @@ from lightsuite.gui.brain_data import (
     prepare_brain_align_slices_session,
 )
 from lightsuite.gui.match_points_brain import PANEL_GAP_X, _chooselist_slice_label
+from lightsuite.gui.slice_correspondence import VOLUME_AXES
 from lightsuite.gui.slices import volume_index_to_image
 
 console = Console()
@@ -27,24 +28,25 @@ _AXIS_NAMES = {1: "Y", 2: "X", 3: "Z"}
 
 def _align_slices_pair(
     data: BrainAlignSlicesData,
+    cut_axis: int,
     slice_idx: int,
     *,
     atlas_plane: int,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Sample and atlas images for one align-slices chooselist entry."""
-    row = np.asarray(data.chooselist[slice_idx - 1], dtype=int)
+    row = np.asarray(data.chooselist_for_axis(cut_axis)[slice_idx - 1], dtype=int)
     sample = _normalize_display(volume_index_to_image(data.sample_volume, row))
     atlas_row = chooserow_with_atlas_plane(row, atlas_plane)
     atlas = _normalize_display(volume_index_to_image(data.atlas_template, atlas_row))
     return sample, atlas
 
 
-def _current_anchor(data: BrainAlignSlicesData, slice_idx: int):
-    return data.correspondence.anchors[slice_idx - 1]
+def _current_anchor(data: BrainAlignSlicesData, cut_axis: int, slice_idx: int):
+    return data.correspondence.anchors_for_axis(cut_axis)[slice_idx - 1]
 
 
-def _sync_anchor_plane(data: BrainAlignSlicesData, slice_idx: int, plane: int) -> None:
-    anchor = _current_anchor(data, slice_idx)
+def _sync_anchor_plane(data: BrainAlignSlicesData, cut_axis: int, slice_idx: int, plane: int) -> None:
+    anchor = _current_anchor(data, cut_axis, slice_idx)
     anchor.atlas_plane = int(plane)
 
 
@@ -63,13 +65,16 @@ def run_brain_align_slices(config: BrainPipelineConfig, *, headless: bool = Fals
         raise RuntimeError(msg) from exc
 
     data = load_brain_align_slices_data(config)
-    n_slices = int(data.chooselist.shape[0])
     state = {
+        "axis": int(data.axis_order[0]),
         "slice": 1,
         "_nav_syncing": False,
         "_view_shape": None,
         "_atlas_plane": None,
     }
+
+    def _n_slices() -> int:
+        return int(data.chooselist_for_axis(state["axis"]).shape[0])
 
     viewer = napari.Viewer(title=f"LightSuite align-slices — {config.sample.name}")
     viewer.dims.ndisplay = 2
@@ -82,14 +87,15 @@ def run_brain_align_slices(config: BrainPipelineConfig, *, headless: bool = Fals
         atlas_layer.translate = (0.0, float(w + PANEL_GAP_X))
 
     def _atlas_plane_limits() -> tuple[int, int]:
-        row = np.asarray(data.chooselist[state["slice"] - 1], dtype=int)
+        row = np.asarray(data.chooselist_for_axis(state["axis"])[state["slice"] - 1], dtype=int)
         return 1, atlas_cut_axis_size(data.atlas_template.shape, row)
 
     def _default_plane(slice_idx: int) -> int:
-        anchor = _current_anchor(data, slice_idx)
+        axis = state["axis"]
+        anchor = _current_anchor(data, axis, slice_idx)
         if anchor.atlas_plane > 0:
             return int(anchor.atlas_plane)
-        row = np.asarray(data.chooselist[slice_idx - 1], dtype=int)
+        row = np.asarray(data.chooselist_for_axis(axis)[slice_idx - 1], dtype=int)
         return estimate_atlas_plane_index(
             data.sample_volume,
             row,
@@ -107,27 +113,35 @@ def run_brain_align_slices(config: BrainPipelineConfig, *, headless: bool = Fals
     def _set_atlas_plane(plane: int) -> None:
         plane = int(np.clip(plane, *_atlas_plane_limits()))
         state["_atlas_plane"] = plane
-        _sync_anchor_plane(data, state["slice"], plane)
+        _sync_anchor_plane(data, state["axis"], state["slice"], plane)
         _refresh()
 
     def _update_status() -> None:
         idx = state["slice"]
+        axis = state["axis"]
         plane = _current_atlas_plane()
         _pmin, pmax = _atlas_plane_limits()
-        anchor = _current_anchor(data, idx)
-        confirmed = sum(anchor.confirmed for anchor in data.correspondence.anchors)
-        caption = _chooselist_slice_label(data.chooselist, idx)
-        flag = "confirmed" if anchor.confirmed else "pending"
-        axis = _AXIS_NAMES.get(data.cut_axis, str(data.cut_axis))
+        anchors = data.correspondence.anchors_for_axis(axis)
+        confirmed = sum(anchor.confirmed for anchor in anchors)
+        caption = _chooselist_slice_label(data.chooselist_for_axis(axis), idx)
+        flag = "confirmed" if anchors[idx - 1].confirmed else "pending"
+        axis_name = _AXIS_NAMES.get(axis, str(axis))
+        total_confirmed = data.correspondence.confirmed_axis_count()
         viewer.status = (
-            f"Slice {idx}/{n_slices} ({caption}) | {flag} "
-            f"| atlas plane {plane}/{pmax} | confirmed {confirmed}/{n_slices} "
-            f"| AP axis {axis}"
+            f"Axis {axis_name} ({axis}/3) | slice {idx}/{_n_slices()} ({caption}) | {flag} "
+            f"| atlas plane {plane}/{pmax} | axis confirmed {confirmed}/{_n_slices()} "
+            f"| axes done {total_confirmed}/3"
         )
 
     def _refresh() -> None:
         idx = state["slice"]
-        sample, atlas = _align_slices_pair(data, idx, atlas_plane=_current_atlas_plane())
+        axis = state["axis"]
+        sample, atlas = _align_slices_pair(
+            data,
+            axis,
+            idx,
+            atlas_plane=_current_atlas_plane(),
+        )
         sample_layer.data = sample
         atlas_layer.data = atlas
         _layout_panels()
@@ -139,6 +153,8 @@ def run_brain_align_slices(config: BrainPipelineConfig, *, headless: bool = Fals
     def _sync_navigation_widget() -> None:
         state["_nav_syncing"] = True
         try:
+            navigation.cut_axis.value = int(state["axis"])
+            navigation.slice_index.max = _n_slices()
             navigation.slice_index.value = int(state["slice"])
             pmin, pmax = _atlas_plane_limits()
             navigation.atlas_plane.min = pmin
@@ -161,9 +177,17 @@ def run_brain_align_slices(config: BrainPipelineConfig, *, headless: bool = Fals
                 target.setFocus()
                 return
 
-    def _navigate_to(slice_index: int | None = None, *, refocus_canvas: bool = False) -> None:
+    def _navigate_to(
+        slice_index: int | None = None,
+        *,
+        cut_axis: int | None = None,
+        refocus_canvas: bool = False,
+    ) -> None:
+        if cut_axis is not None:
+            state["axis"] = int(cut_axis)
+            state["_atlas_plane"] = None
         if slice_index is not None:
-            state["slice"] = max(1, min(n_slices, int(slice_index)))
+            state["slice"] = max(1, min(_n_slices(), int(slice_index)))
             state["_atlas_plane"] = _default_plane(state["slice"])
         if refocus_canvas:
             _refresh()
@@ -179,22 +203,42 @@ def run_brain_align_slices(config: BrainPipelineConfig, *, headless: bool = Fals
 
     def _confirm_and_advance() -> None:
         idx = state["slice"]
-        anchor = _current_anchor(data, idx)
+        axis = state["axis"]
+        anchor = _current_anchor(data, axis, idx)
         anchor.confirmed = True
-        anchor.sample_index = int(data.chooselist[idx - 1, 0])
+        anchor.sample_index = int(data.chooselist_for_axis(axis)[idx - 1, 0])
         anchor.atlas_plane = _current_atlas_plane()
-        show_info(f"Confirmed slice {idx}: sample {anchor.sample_index} ↔ atlas plane {anchor.atlas_plane}")
-        if idx < n_slices:
+        axis_name = _AXIS_NAMES.get(axis, str(axis))
+        show_info(
+            f"Confirmed {axis_name} slice {idx}: "
+            f"sample {anchor.sample_index} ↔ atlas plane {anchor.atlas_plane}"
+        )
+        if idx < _n_slices():
             _navigate_to(idx + 1, refocus_canvas=True)
         else:
-            _refresh()
+            next_axis = _next_incomplete_axis(axis)
+            if next_axis is not None:
+                show_info(f"Axis {axis_name} complete — switch to axis {_AXIS_NAMES.get(next_axis, next_axis)}")
+                _navigate_to(1, cut_axis=next_axis, refocus_canvas=True)
+            else:
+                _refresh()
+
+    def _next_incomplete_axis(after_axis: int) -> int | None:
+        order = list(data.axis_order)
+        start = order.index(after_axis) + 1 if after_axis in order else 0
+        for axis in order[start:] + order[:start]:
+            anchors = data.correspondence.anchors_for_axis(axis)
+            if anchors and not all(anchor.confirmed for anchor in anchors):
+                return axis
+        return None
 
     @magicgui(
+        cut_axis={"choices": list(VOLUME_AXES), "label": "Volume axis (1=Y, 2=X, 3=Z)"},
         slice_index={
             "min": 1,
-            "max": n_slices,
+            "max": 20,
             "step": 1,
-            "label": "Slice # (AP anchor index)",
+            "label": "Anchor slice #",
         },
         atlas_plane={
             "min": 1,
@@ -204,8 +248,8 @@ def run_brain_align_slices(config: BrainPipelineConfig, *, headless: bool = Fals
         },
         call_button="Show slice",
     )
-    def navigation(slice_index: int = 1, atlas_plane: int = 1) -> None:
-        _navigate_to(slice_index)
+    def navigation(cut_axis: int = 1, slice_index: int = 1, atlas_plane: int = 1) -> None:
+        _navigate_to(slice_index, cut_axis=cut_axis)
         _set_atlas_plane(atlas_plane)
 
     @navigation.atlas_plane.changed.connect
@@ -220,6 +264,12 @@ def run_brain_align_slices(config: BrainPipelineConfig, *, headless: bool = Fals
             return
         _navigate_to(navigation.slice_index.value)
 
+    @navigation.cut_axis.changed.connect
+    def _cut_axis_widget_changed() -> None:
+        if state["_nav_syncing"]:
+            return
+        _navigate_to(1, cut_axis=navigation.cut_axis.value)
+
     @magicgui(call_button="◀  Previous slice")
     def previous_slice() -> None:
         _navigate_to(state["slice"] - 1)
@@ -231,6 +281,13 @@ def run_brain_align_slices(config: BrainPipelineConfig, *, headless: bool = Fals
     @magicgui(call_button="Confirm slice (Enter)")
     def confirm_slice() -> None:
         _confirm_and_advance()
+
+    @magicgui(call_button="Next axis ▶")
+    def next_axis() -> None:
+        order = list(data.axis_order)
+        idx = order.index(state["axis"])
+        next_ax = order[(idx + 1) % len(order)]
+        _navigate_to(1, cut_axis=next_ax, refocus_canvas=True)
 
     @magicgui(call_button="Save && Close")
     def save_controls() -> None:
@@ -288,15 +345,18 @@ def run_brain_align_slices(config: BrainPipelineConfig, *, headless: bool = Fals
     viewer.window.add_dock_widget(previous_slice, area="right", name="Previous slice")
     viewer.window.add_dock_widget(next_slice, area="right", name="Next slice")
     viewer.window.add_dock_widget(confirm_slice, area="right", name="Confirm")
+    viewer.window.add_dock_widget(next_axis, area="right", name="Next axis")
     viewer.window.add_dock_widget(save_controls, area="right", name="Save")
     _refresh()
     _sync_navigation_widget()
 
     console.print(
         "[bold]Napari align-slices GUI[/bold] — sample (left), atlas (right). "
-        "Scroll the atlas plane (PgUp/PgDn or wheel over atlas) until anatomy matches, "
-        "then press [bold]Enter[/bold] or Confirm. "
-        "Shortcuts: [bold]←[/bold]/[bold]→[/bold] change AP anchor slice."
+        "Align all three volume axes (Y, X, Z): ~20 anchors per axis. "
+        "Use the [bold]Volume axis[/bold] control to switch axes. "
+        "Scroll the atlas plane (PgUp/PgDn or wheel over atlas), then "
+        "[bold]Enter[/bold] or Confirm. After the last slice on an axis, "
+        "you are prompted to continue on the next axis."
     )
     napari.run()
     return data.correspondence_path

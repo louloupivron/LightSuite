@@ -545,11 +545,12 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
     _refresh()
     _sync_navigation_widget()
 
-    if data.slice_correspondence is not None and data.slice_correspondence.confirmed_anchors():
+    if data.slice_correspondence is not None and data.slice_correspondence.has_confirmed_anchors():
+        n_axes = data.slice_correspondence.confirmed_axis_count()
         n_conf = len(data.slice_correspondence.confirmed_anchors())
         console.print(
-            f"[green]Loaded slice correspondence[/green] ({n_conf} AP anchors from align-slices). "
-            "Atlas planes are pre-filled; scroll to override per slice if needed."
+            f"[green]Loaded slice correspondence[/green] ({n_conf} anchors on {n_axes}/3 axes). "
+            "Atlas planes are pre-filled per cut axis; scroll to override per slice if needed."
         )
     console.print(
         "[bold]Napari control-point GUI[/bold] — sample (left), atlas (right). "

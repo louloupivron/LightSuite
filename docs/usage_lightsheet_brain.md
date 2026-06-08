@@ -208,7 +208,7 @@ If orientation is wrong, set `registration.orientation` in YAML or edit `brain_o
 
 ### 4. Align slices (optional, recommended)
 
-Opens a Napari dual-pane GUI to match **sample anatomy to the correct atlas plane** along the primary (AP) axis, before placing control points.
+Opens a Napari dual-pane GUI to match **sample anatomy to the correct atlas plane** along **all three volume axes** (Y, X, Z), before placing control points.
 
 ```bash
 uv run lightsuite brain align-slices -c my_mouse.yaml
@@ -218,20 +218,22 @@ Requires `uv sync --extra gui`.
 
 **Workflow:**
 
-1. For each AP anchor slice (~20 evenly spaced positions along the longest volume axis):
+1. Use the **Volume axis** control (1=Y, 2=X, 3=Z) to choose which axis you are aligning.
+2. For each axis, confirm ~20 evenly spaced anchor slices:
    - Sample slice is shown on the **left** (fixed).
    - Scroll the atlas on the **right** with **PgUp** / **PgDn**, the atlas plane spinbox, or **mouse wheel over the atlas panel**.
-2. When anatomy matches, press **Enter** or click **Confirm slice** — advances to the next anchor.
-3. Use **←** / **→** to revisit earlier anchors.
-4. Click **Save && Close** when finished.
+3. When anatomy matches, press **Enter** or click **Confirm slice** — advances to the next anchor.
+4. After the last anchor on an axis, you are prompted to continue on the next axis (or use **Next axis ▶**).
+5. Use **←** / **→** to revisit anchors; switch axes any time with the dropdown.
+6. Click **Save && Close** when finished (all three axes recommended).
 
 **Output:**
 
-- `slice_correspondence.json` — confirmed sample index ↔ atlas plane pairs along the AP cut axis
+- `slice_correspondence.json` (v2) — per-axis sample index ↔ atlas plane maps under `axes.{1,2,3}`
 
-`match-points` reads this file and pre-fills atlas planes for slices on the same cut axis (you can still override by scrolling).
+`match-points` and `refine-auto-points` read this file and pre-fill / filter using the curve for each cut axis. Older v1 files (single AP axis) are still loaded and migrated on save.
 
-For automated tests only:
+**Automated (all three axes, no GUI):**
 
 ```bash
 uv run lightsuite brain align-slices -c my_mouse.yaml --headless
@@ -239,13 +241,13 @@ uv run lightsuite brain align-slices -c my_mouse.yaml --headless
 
 ### 5. Refine auto points (optional)
 
-Filters automatic landmark pairs from **init-registration** using the AP slice map from **align-slices**. Pairs whose atlas position disagrees with `slice_correspondence.json` are dropped. Useful for **auto-only** registration (no manual match-points) on stretched or sparse samples.
+Filters automatic landmark pairs from **init-registration** using the **multi-axis** slice maps from **align-slices**. A pair is removed if its atlas position disagrees with the correspondence curve on **any** confirmed axis. Useful for **auto-only** registration on stretched or sparse samples.
 
 ```bash
 uv run lightsuite brain refine-auto-points -c my_mouse.yaml
 ```
 
-Requires `slice_correspondence.json` (run **align-slices** first). To auto-estimate correspondence without the GUI:
+Requires `slice_correspondence.json` with confirmed anchors (run **align-slices** first). To auto-estimate all three axes without the GUI:
 
 ```bash
 uv run lightsuite brain refine-auto-points -c my_mouse.yaml --bootstrap-correspondence
@@ -256,7 +258,7 @@ Re-run with `--force` after changing correspondence or re-running init-registrat
 **Outputs:**
 
 - Updated `regopts.json` (`autocpsample` / `autocpatlas`, `auto_points_refined`, `auto_points_mode`)
-- `auto_points_refine_stats.json` — pair counts and median AP residual before/after
+- `auto_points_refine_stats.json` — pair counts, active axes, and median max-axis residual before/after
 
 ### 6. Match control points (optional)
 
