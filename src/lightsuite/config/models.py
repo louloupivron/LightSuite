@@ -92,6 +92,16 @@ class RegistrationConfig(BaseModel):
         default=None,
         description="Optional path to bcpd / bcpd.exe. Searched on PATH when unset.",
     )
+    ap_pair_tolerance_vox: float = Field(
+        default=12.0,
+        gt=0,
+        description="AP residual tolerance when refining auto control points (registration voxels).",
+    )
+    ap_pair_min_kept: int = Field(
+        default=24,
+        ge=4,
+        description="Minimum auto pairs to keep after AP filtering (relaxes tolerance if needed).",
+    )
 
 
 class DetectionBackend(str, Enum):

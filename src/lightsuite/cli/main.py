@@ -131,6 +131,39 @@ def brain_register(
     typer.echo(f"Transform parameters: {path}")
 
 
+@brain_app.command("refine-auto-points")
+def brain_refine_auto_points(
+    config: str = typer.Option(..., "--config", "-c", help="Pipeline YAML config."),
+    bootstrap_correspondence: bool = typer.Option(
+        False,
+        "--bootstrap-correspondence",
+        help="Run headless align-slices first if slice_correspondence.json is missing.",
+    ),
+    tolerance_vox: float | None = typer.Option(
+        None,
+        "--tolerance-vox",
+        help="Override registration.ap_pair_tolerance_vox.",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Re-run even if auto points were already refined.",
+    ),
+) -> None:
+    """Filter init-registration auto pairs using AP slice correspondence."""
+    from lightsuite.config.loader import load_config
+    from lightsuite.registration.refine_auto_points import refine_brain_auto_points
+
+    cfg = load_config(config)
+    path = refine_brain_auto_points(
+        cfg,
+        bootstrap_correspondence=bootstrap_correspondence,
+        tolerance_vox=tolerance_vox,
+        force=force,
+    )
+    typer.echo(f"Updated checkpoint: {path}")
+
+
 @brain_app.command("align-slices")
 def brain_align_slices(
     config: str = typer.Option(..., "--config", "-c", help="Pipeline YAML config."),

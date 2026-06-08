@@ -27,9 +27,10 @@ You will need:
 | 2 | `lightsuite brain check-orientation` | **Manual (GUI)** | `getBrainOrientation.m` |
 | 3 | `lightsuite brain init-registration` | Automated | `initializeRegistration.m` |
 | 4 | `lightsuite brain align-slices` | **Manual (GUI)** | *(new — AP slice correspondence)* |
-| 5 | `lightsuite brain match-points` | **Manual (GUI)** | `matchControlPoints_unified.m` |
-| 6 | `lightsuite brain register` | Automated | `multiobjRegistration.m` |
-| 7 | `lightsuite brain export` | Automated | `generateRegisteredBrainVolumes.m` |
+| 5 | `lightsuite brain refine-auto-points` | Automated | *(new — AP-filtered auto landmarks)* |
+| 6 | `lightsuite brain match-points` | **Manual (GUI)** | `matchControlPoints_unified.m` |
+| 7 | `lightsuite brain register` | Automated | `multiobjRegistration.m` |
+| 8 | `lightsuite brain export` | Automated | `generateRegisteredBrainVolumes.m` |
 
 Cell detection and mapping cells to atlas coordinates are **not yet ported**; set `detection.enabled: false` for now.
 
@@ -118,6 +119,8 @@ uv run lightsuite doctor -c my_mouse.yaml
 | `registration.bspline_spatial_scale_mm` | B-spline grid spacing in mm; smaller = finer warping | `0.64` |
 | `registration.control_point_weight` | Landmark weight in Elastix (0–1) | `0.2` |
 | `registration.augment_points` | Add thinned auto-landmarks to user control points | `false` |
+| `registration.ap_pair_tolerance_vox` | AP residual tolerance for `refine-auto-points` (registration voxels) | `12.0` |
+| `registration.ap_pair_min_kept` | Minimum auto pairs kept after AP filtering | `24` |
 | `registration.orientation` | Axis permutation, e.g. `[1, 2, 3]`; flips use negative indices | auto |
 | `registration.cloud_threshold` | Edge threshold for coarse point extraction | `5.0` |
 | `registration.sample_cloud_subsample` | Fraction of gradient points kept (MATLAB `0.1`) | `0.1` |
@@ -234,7 +237,28 @@ For automated tests only:
 uv run lightsuite brain align-slices -c my_mouse.yaml --headless
 ```
 
-### 5. Match control points (optional)
+### 5. Refine auto points (optional)
+
+Filters automatic landmark pairs from **init-registration** using the AP slice map from **align-slices**. Pairs whose atlas position disagrees with `slice_correspondence.json` are dropped. Useful for **auto-only** registration (no manual match-points) on stretched or sparse samples.
+
+```bash
+uv run lightsuite brain refine-auto-points -c my_mouse.yaml
+```
+
+Requires `slice_correspondence.json` (run **align-slices** first). To auto-estimate correspondence without the GUI:
+
+```bash
+uv run lightsuite brain refine-auto-points -c my_mouse.yaml --bootstrap-correspondence
+```
+
+Re-run with `--force` after changing correspondence or re-running init-registration.
+
+**Outputs:**
+
+- Updated `regopts.json` (`autocpsample` / `autocpatlas`, `auto_points_refined`, `auto_points_mode`)
+- `auto_points_refine_stats.json` — pair counts and median AP residual before/after
+
+### 6. Match control points (optional)
 
 Opens a Napari dual-pane GUI: sample on the left, atlas on the right.
 
@@ -277,7 +301,7 @@ For automated tests only:
 uv run lightsuite brain match-points -c my_mouse.yaml --headless
 ```
 
-### 6. Register (Elastix B-spline)
+### 7. Register (Elastix B-spline)
 
 Runs affine + deformable registration using your control points and Elastix.
 
@@ -301,7 +325,7 @@ uv run lightsuite brain register -c my_mouse.yaml --single-step
 - `{name}_dim{1,2,3}_bspline_registration.png` — same layout after B-spline
 - `elastix_temp/` — Elastix working directory (keep until register finishes)
 
-### 7. Export
+### 8. Export
 
 Warps all channels to atlas space and optionally writes parcellation statistics.
 
@@ -335,6 +359,7 @@ uv run lightsuite brain preprocess -c $CONFIG
 uv run lightsuite brain check-orientation -c $CONFIG
 uv run lightsuite brain init-registration -c $CONFIG
 uv run lightsuite brain align-slices -c $CONFIG
+uv run lightsuite brain refine-auto-points -c $CONFIG
 uv run lightsuite brain match-points -c $CONFIG
 uv run lightsuite brain register -c $CONFIG
 uv run lightsuite brain export -c $CONFIG --save-volume --write-csv
@@ -349,6 +374,7 @@ uv run lightsuite brain export -c $CONFIG --save-volume --write-csv
 ├── regopts.json                          # Preprocess + init-registration state
 ├── brain_orientation.txt                 # Axis permutation
 ├── slice_correspondence.json             # AP sample ↔ atlas plane map (align-slices)
+├── auto_points_refine_stats.json         # AP filter stats (refine-auto-points)
 ├── atlas2histology_tform.json            # Manual control points
 ├── transform_params.json                 # Final registration parameters
 ├── bspline_samp_to_atlas_20um.txt

@@ -31,6 +31,10 @@ class RegOptsCheckpoint:
     autocpsample: list[list[float]] | None = None
     autocpatlas: list[list[float]] | None = None
     brain_atlas: str | None = None
+    auto_points_source: str | None = None
+    auto_points_refined: bool = False
+    auto_points_mode: str | None = None
+    auto_points_correspondence_path: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

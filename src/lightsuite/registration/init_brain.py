@@ -174,6 +174,10 @@ def initialize_brain_registration(config: BrainPipelineConfig) -> RegOptsCheckpo
     checkpoint.downfac_reg = downfac
     checkpoint.autocpsample = cpsample.tolist()
     checkpoint.autocpatlas = cpatlas.tolist()
+    checkpoint.auto_points_source = "global_triage"
+    checkpoint.auto_points_refined = False
+    checkpoint.auto_points_mode = None
+    checkpoint.auto_points_correspondence_path = None
     checkpoint.brain_atlas = config.atlas.provider.value
     checkpoint.save(regopts_path)
     console.print(f"Updated checkpoint [bold]{regopts_path}[/bold]")
