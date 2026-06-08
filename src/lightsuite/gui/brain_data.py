@@ -11,9 +11,18 @@ from skimage.exposure import equalize_adapthist
 
 from lightsuite.atlas.registry import resolve_brain_atlas
 from lightsuite.config.models import BrainPipelineConfig
-from lightsuite.gui.chooselist import generate_control_point_list
 from lightsuite.gui.affine import transform_points_inverse
+from lightsuite.gui.chooselist import (
+    default_ap_cut_axis,
+    generate_ap_alignment_list,
+    generate_control_point_list,
+)
 from lightsuite.gui.control_points import ControlPointSession, default_session_path
+from lightsuite.gui.slice_correspondence import (
+    SliceAnchor,
+    SliceCorrespondence,
+    default_correspondence_path,
+)
 from lightsuite.gui.slices import volume_index_to_image
 from lightsuite.preprocess.checkpoint import RegOptsCheckpoint
 from lightsuite.registration.volume import (
@@ -33,6 +42,18 @@ class BrainMatchPointsData:
     session_path: Path
     original_trans: np.ndarray
     auto_alignment: np.ndarray
+    slice_correspondence: SliceCorrespondence | None = None
+
+
+@dataclass
+class BrainAlignSlicesData:
+    sample_volume: np.ndarray
+    atlas_template: np.ndarray
+    chooselist: np.ndarray
+    original_trans: np.ndarray
+    correspondence_path: Path
+    correspondence: SliceCorrespondence
+    cut_axis: int
 
 
 def _normalize_display(image: np.ndarray) -> np.ndarray:
@@ -60,12 +81,14 @@ def _warp_sample_to_atlas_grid(
     return warp_sample_to_atlas(volume, original_trans, target_shape, order=1)
 
 
-def load_brain_match_points_data(config: BrainPipelineConfig) -> BrainMatchPointsData:
+def _load_brain_registration_volumes(
+    config: BrainPipelineConfig,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, float]:
     save_path = config.sample.save_path.expanduser()
     regopts_path = save_path / "regopts.json"
     checkpoint = RegOptsCheckpoint.load(regopts_path)
     if checkpoint.original_trans is None or checkpoint.permute_sample_to_atlas is None:
-        msg = "Run init-registration before match-points."
+        msg = "Run init-registration before slice alignment or match-points."
         raise RuntimeError(msg)
 
     original_trans = np.asarray(checkpoint.original_trans, dtype=float)
@@ -82,7 +105,144 @@ def load_brain_match_points_data(config: BrainPipelineConfig) -> BrainMatchPoint
     avreg = resize_atlas_volume(av, downfac, nearest=True)
 
     sample_warped = _warp_sample_to_atlas_grid(regvol, original_trans, tvreg.shape)
+    return sample_warped, tvreg, avreg, original_trans, downfac
+
+
+def _auto_atlas_plane_for_row(
+    sample_volume: np.ndarray,
+    chooserow: np.ndarray,
+    original_trans: np.ndarray,
+    atlas_shape: tuple[int, int, int],
+) -> int:
+    return estimate_atlas_plane_index(
+        sample_volume,
+        chooserow,
+        original_trans,
+        atlas_shape,
+    )
+
+
+def _build_correspondence_anchors(
+    sample_volume: np.ndarray,
+    chooselist: np.ndarray,
+    original_trans: np.ndarray,
+    atlas_shape: tuple[int, int, int],
+    *,
+    confirmed: bool,
+) -> list[SliceAnchor]:
+    anchors: list[SliceAnchor] = []
+    for row in chooselist:
+        chooserow = np.asarray(row, dtype=int)
+        plane = _auto_atlas_plane_for_row(
+            sample_volume,
+            chooserow,
+            original_trans,
+            atlas_shape,
+        )
+        anchors.append(
+            SliceAnchor(
+                sample_index=int(chooserow[0]),
+                atlas_plane=plane,
+                confirmed=confirmed,
+            )
+        )
+    return anchors
+
+
+def load_slice_correspondence(save_path: Path) -> SliceCorrespondence | None:
+    path = default_correspondence_path(save_path)
+    if not path.is_file():
+        return None
+    return SliceCorrespondence.load(path)
+
+
+def apply_slice_correspondence_to_session(
+    session: ControlPointSession,
+    chooselist: np.ndarray,
+    correspondence: SliceCorrespondence,
+    atlas_shape: tuple[int, int, int],
+) -> None:
+    """Pre-fill atlas_slice_indices from a saved correspondence curve."""
+    n_slices = int(chooselist.shape[0])
+    indices: list[int] = []
+    for row in chooselist:
+        chooserow = np.asarray(row, dtype=int)
+        cut_axis = int(chooserow[1])
+        atlas_size = atlas_cut_axis_size(atlas_shape, chooserow)
+        plane = correspondence.interpolate_atlas_plane(
+            int(chooserow[0]),
+            cut_axis,
+            atlas_size,
+        )
+        if plane is None:
+            plane = 0
+        indices.append(int(plane))
+    session.atlas_slice_indices = indices
+
+
+def load_brain_align_slices_data(config: BrainPipelineConfig) -> BrainAlignSlicesData:
+    sample_warped, tvreg, _avreg, original_trans, _downfac = _load_brain_registration_volumes(
+        config
+    )
+    cut_axis = default_ap_cut_axis(sample_warped.shape)
+    chooselist = generate_ap_alignment_list(sample_warped.shape, cut_axis=cut_axis)
+    correspondence_path = default_correspondence_path(config.sample.save_path)
+
+    if correspondence_path.is_file():
+        correspondence = SliceCorrespondence.load(correspondence_path)
+        if correspondence.cut_axis != cut_axis:
+            correspondence.cut_axis = cut_axis
+    else:
+        correspondence = SliceCorrespondence(
+            cut_axis=cut_axis,
+            original_trans=original_trans.tolist(),
+            anchors=_build_correspondence_anchors(
+                sample_warped,
+                chooselist,
+                original_trans,
+                tvreg.shape,
+                confirmed=False,
+            ),
+            source="auto",
+        )
+
+    if len(correspondence.anchors) != chooselist.shape[0]:
+        correspondence.anchors = _build_correspondence_anchors(
+            sample_warped,
+            chooselist,
+            original_trans,
+            tvreg.shape,
+            confirmed=False,
+        )
+
+    return BrainAlignSlicesData(
+        sample_volume=sample_warped,
+        atlas_template=tvreg,
+        chooselist=chooselist,
+        original_trans=original_trans,
+        correspondence_path=correspondence_path,
+        correspondence=correspondence,
+        cut_axis=cut_axis,
+    )
+
+
+def prepare_brain_align_slices_session(config: BrainPipelineConfig) -> Path:
+    """Auto-estimate and save slice correspondence without opening Napari."""
+    data = load_brain_align_slices_data(config)
+    for anchor in data.correspondence.anchors:
+        anchor.confirmed = True
+    data.correspondence.source = "auto"
+    data.correspondence.save(data.correspondence_path)
+    return data.correspondence_path
+
+
+def load_brain_match_points_data(config: BrainPipelineConfig) -> BrainMatchPointsData:
+    save_path = config.sample.save_path.expanduser()
+    sample_warped, tvreg, avreg, original_trans, _downfac = _load_brain_registration_volumes(
+        config
+    )
     chooselist = generate_control_point_list(sample_warped.shape)
+    slice_correspondence = load_slice_correspondence(save_path)
 
     session_path = default_session_path(save_path)
     if session_path.is_file():
@@ -90,6 +250,19 @@ def load_brain_match_points_data(config: BrainPipelineConfig) -> BrainMatchPoint
     else:
         session = ControlPointSession.empty(original_trans, chooselist.shape[0])
         session.chooselist = chooselist.tolist()
+
+    if slice_correspondence is not None and slice_correspondence.confirmed_anchors():
+        has_manual_planes = (
+            session.atlas_slice_indices is not None
+            and any(int(v) > 0 for v in session.atlas_slice_indices)
+        )
+        if not has_manual_planes:
+            apply_slice_correspondence_to_session(
+                session,
+                chooselist,
+                slice_correspondence,
+                tvreg.shape,
+            )
 
     auto_alignment = np.asarray(session.atlas2histology_tform, dtype=float)
     if np.allclose(auto_alignment, np.eye(4)):
@@ -104,6 +277,7 @@ def load_brain_match_points_data(config: BrainPipelineConfig) -> BrainMatchPoint
         session_path=session_path,
         original_trans=original_trans,
         auto_alignment=auto_alignment,
+        slice_correspondence=slice_correspondence,
     )
 
 
@@ -177,6 +351,16 @@ def resolve_atlas_plane_index(
                 atlas_cut_axis_size(data.atlas_template.shape, chooserow),
             )
         )
+
+    if data.slice_correspondence is not None:
+        atlas_size = atlas_cut_axis_size(data.atlas_template.shape, chooserow)
+        plane = data.slice_correspondence.interpolate_atlas_plane(
+            int(chooserow[0]),
+            int(chooserow[1]),
+            atlas_size,
+        )
+        if plane is not None:
+            return plane
 
     matrix = np.asarray(data.session.atlas2histology_tform, dtype=float)
     return estimate_atlas_plane_index(

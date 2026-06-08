@@ -131,6 +131,24 @@ def brain_register(
     typer.echo(f"Transform parameters: {path}")
 
 
+@brain_app.command("align-slices")
+def brain_align_slices(
+    config: str = typer.Option(..., "--config", "-c", help="Pipeline YAML config."),
+    headless: bool = typer.Option(
+        False,
+        "--headless",
+        help="Auto-estimate slice correspondence without opening Napari (for tests).",
+    ),
+) -> None:
+    """Interactive sample-to-atlas slice alignment before control-point matching."""
+    from lightsuite.config.loader import load_config
+    from lightsuite.gui.align_slices_brain import run_brain_align_slices
+
+    cfg = load_config(config)
+    path = run_brain_align_slices(cfg, headless=headless)
+    typer.echo(f"Slice correspondence: {path}")
+
+
 @brain_app.command("match-points")
 def brain_match_points(
     config: str = typer.Option(..., "--config", "-c", help="Pipeline YAML config."),

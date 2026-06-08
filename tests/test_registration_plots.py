@@ -10,6 +10,7 @@ import numpy as np
 
 from lightsuite.gui.slices import volume_index_to_image
 from lightsuite.registration.plots import (
+    _comparison_axis_limits,
     annotation_boundary_pixels,
     mask_boundary_pixels,
     plot_annotation_comparison,
@@ -52,6 +53,30 @@ def test_annotation_boundary_pixels_ignores_float_interpolation_speckle() -> Non
     annot[5, 5] = 5.3  # speckle inside region
     row, col = annotation_boundary_pixels(annot)
     assert row.size < 80
+
+
+def test_comparison_axis_limits_include_out_of_frame_overlay() -> None:
+    row = np.array([0, 50, 99], dtype=int)
+    col = np.array([0, 40, 79], dtype=int)
+    xlim, ylim = _comparison_axis_limits((20, 30), (1.0, 1.0), row, col)
+    assert xlim[0] < 0
+    assert xlim[1] > 79
+    assert ylim[1] < 0
+    assert ylim[0] > 99
+
+
+def test_plot_annotation_comparison_expands_limits_for_large_overlay() -> None:
+    volume = np.zeros((40, 50, 12), dtype=np.uint8)
+    volume[10:30, 12:38, 4:10] = 200
+    annotation = np.zeros((40, 50, 12), dtype=np.float32)
+    annotation[0:40, 0:50, 4:10] = 5
+    fig = plot_annotation_comparison(volume, annotation, dimplot=3)
+    ax = fig.axes[0]
+    x0, x1 = ax.get_xlim()
+    y0, y1 = ax.get_ylim()
+    assert x1 - x0 > 50
+    assert max(y0, y1) - min(y0, y1) > 40
+    fig.clf()
 
 
 def test_plot_annotation_comparison_layout() -> None:

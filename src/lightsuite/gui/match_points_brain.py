@@ -252,8 +252,17 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
         nmax = atlas_cut_axis_size(data.atlas_template.shape, row)
         return 1, nmax
 
+    def _resolved_atlas_plane(plane: int | None = None) -> int:
+        """Atlas plane for the current chooselist slice, clipped to valid range."""
+        pmin, pmax = _atlas_plane_limits()
+        if plane is None:
+            plane = state.get("_atlas_plane")
+        if plane is None:
+            plane = _current_atlas_plane()
+        return int(np.clip(int(plane), pmin, pmax))
+
     def _set_atlas_plane(plane: int, *, persist: bool = True) -> None:
-        plane = int(np.clip(plane, *_atlas_plane_limits()))
+        plane = _resolved_atlas_plane(plane)
         if persist:
             set_atlas_plane_index(data.session, state["slice"], plane)
         _refresh(atlas_plane=plane)
@@ -267,7 +276,7 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
 
     def _update_status() -> None:
         idx = state["slice"]
-        plane = state.get("_atlas_plane", _current_atlas_plane())
+        plane = _resolved_atlas_plane()
         _pmin, pmax = _atlas_plane_limits()
         n_s = len(data.session.histology_control_points[idx - 1])
         n_a = len(data.session.atlas_control_points[idx - 1])
@@ -284,9 +293,7 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
 
     def _refresh(*, atlas_plane: int | None = None) -> None:
         idx = state["slice"]
-        state["_atlas_plane"] = (
-            int(atlas_plane) if atlas_plane is not None else _current_atlas_plane()
-        )
+        state["_atlas_plane"] = _resolved_atlas_plane(atlas_plane)
         sample, atlas = slice_pair(data, idx, atlas_plane=state["_atlas_plane"])
         sample_layer.data = sample
         atlas_layer.data = atlas
@@ -327,7 +334,7 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
     def _on_panel_points_changed(panel: str) -> None:
         idx = state["slice"]
         layer = sample_pts if panel == "sample" else atlas_pts
-        plane = state.get("_atlas_plane", _current_atlas_plane()) if panel == "atlas" else None
+        plane = _resolved_atlas_plane() if panel == "atlas" else None
         _sync_store_from_layer(
             data.session,
             idx,
@@ -357,7 +364,7 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
             pmin, pmax = _atlas_plane_limits()
             navigation.atlas_plane.min = pmin
             navigation.atlas_plane.max = pmax
-            navigation.atlas_plane.value = int(state.get("_atlas_plane", _current_atlas_plane()))
+            navigation.atlas_plane.value = _resolved_atlas_plane()
         finally:
             state["_nav_syncing"] = False
 
@@ -385,7 +392,10 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
         if show_overlay is not None:
             state["show_overlay"] = bool(show_overlay)
         if slice_index is not None:
-            state["slice"] = max(1, min(n_slices, int(slice_index)))
+            new_slice = max(1, min(n_slices, int(slice_index)))
+            if new_slice != state["slice"]:
+                state["_atlas_plane"] = None
+            state["slice"] = new_slice
         if refocus_canvas:
             # Refresh first; sync the spinbox then return focus to the canvas so
             # repeated ←/→ work without clicking back into the image.
@@ -397,8 +407,8 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
 
             QTimer.singleShot(0, _after_keyboard_nav)
         else:
-            _sync_navigation_widget()
             _refresh()
+            _sync_navigation_widget()
 
     @magicgui(
         slice_index={
@@ -475,7 +485,7 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
         return float(ts)
 
     def _atlas_plane_step(delta: int) -> None:
-        plane = state.get("_atlas_plane", _current_atlas_plane()) + int(delta)
+        plane = _resolved_atlas_plane() + int(delta)
         _set_atlas_plane(plane)
         _sync_navigation_widget()
         _refocus_canvas()
@@ -532,9 +542,15 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
     viewer.window.add_dock_widget(next_slice, area="right", name="Next slice")
     viewer.window.add_dock_widget(save_controls, area="right", name="Save")
     viewer.window.add_dock_widget(clear_slice, area="right", name="Edit")
-    _sync_navigation_widget()
     _refresh()
+    _sync_navigation_widget()
 
+    if data.slice_correspondence is not None and data.slice_correspondence.confirmed_anchors():
+        n_conf = len(data.slice_correspondence.confirmed_anchors())
+        console.print(
+            f"[green]Loaded slice correspondence[/green] ({n_conf} AP anchors from align-slices). "
+            "Atlas planes are pre-filled; scroll to override per slice if needed."
+        )
     console.print(
         "[bold]Napari control-point GUI[/bold] — sample (left), atlas (right). "
         "Numbered markers are matched pairs (1↔1, 2↔2, …). "

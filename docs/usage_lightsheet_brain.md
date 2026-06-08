@@ -26,9 +26,10 @@ You will need:
 | 1 | `lightsuite brain preprocess` | Automated | `preprocessLightSheetVolume.m` |
 | 2 | `lightsuite brain check-orientation` | **Manual (GUI)** | `getBrainOrientation.m` |
 | 3 | `lightsuite brain init-registration` | Automated | `initializeRegistration.m` |
-| 4 | `lightsuite brain match-points` | **Manual (GUI)** | `matchControlPoints_unified.m` |
-| 5 | `lightsuite brain register` | Automated | `multiobjRegistration.m` |
-| 6 | `lightsuite brain export` | Automated | `generateRegisteredBrainVolumes.m` |
+| 4 | `lightsuite brain align-slices` | **Manual (GUI)** | *(new — AP slice correspondence)* |
+| 5 | `lightsuite brain match-points` | **Manual (GUI)** | `matchControlPoints_unified.m` |
+| 6 | `lightsuite brain register` | Automated | `multiobjRegistration.m` |
+| 7 | `lightsuite brain export` | Automated | `generateRegisteredBrainVolumes.m` |
 
 Cell detection and mapping cells to atlas coordinates are **not yet ported**; set `detection.enabled: false` for now.
 
@@ -202,7 +203,38 @@ registration:
 
 If orientation is wrong, set `registration.orientation` in YAML or edit `brain_orientation.txt`, then re-run init-registration.
 
-### 4. Match control points (optional)
+### 4. Align slices (optional, recommended)
+
+Opens a Napari dual-pane GUI to match **sample anatomy to the correct atlas plane** along the primary (AP) axis, before placing control points.
+
+```bash
+uv run lightsuite brain align-slices -c my_mouse.yaml
+```
+
+Requires `uv sync --extra gui`.
+
+**Workflow:**
+
+1. For each AP anchor slice (~20 evenly spaced positions along the longest volume axis):
+   - Sample slice is shown on the **left** (fixed).
+   - Scroll the atlas on the **right** with **PgUp** / **PgDn**, the atlas plane spinbox, or **mouse wheel over the atlas panel**.
+2. When anatomy matches, press **Enter** or click **Confirm slice** — advances to the next anchor.
+3. Use **←** / **→** to revisit earlier anchors.
+4. Click **Save && Close** when finished.
+
+**Output:**
+
+- `slice_correspondence.json` — confirmed sample index ↔ atlas plane pairs along the AP cut axis
+
+`match-points` reads this file and pre-fills atlas planes for slices on the same cut axis (you can still override by scrolling).
+
+For automated tests only:
+
+```bash
+uv run lightsuite brain align-slices -c my_mouse.yaml --headless
+```
+
+### 5. Match control points (optional)
 
 Opens a Napari dual-pane GUI: sample on the left, atlas on the right.
 
@@ -245,7 +277,7 @@ For automated tests only:
 uv run lightsuite brain match-points -c my_mouse.yaml --headless
 ```
 
-### 5. Register (Elastix B-spline)
+### 6. Register (Elastix B-spline)
 
 Runs affine + deformable registration using your control points and Elastix.
 
@@ -269,7 +301,7 @@ uv run lightsuite brain register -c my_mouse.yaml --single-step
 - `{name}_dim{1,2,3}_bspline_registration.png` — same layout after B-spline
 - `elastix_temp/` — Elastix working directory (keep until register finishes)
 
-### 6. Export
+### 7. Export
 
 Warps all channels to atlas space and optionally writes parcellation statistics.
 
@@ -302,6 +334,7 @@ uv run lightsuite brain validate-config -c $CONFIG
 uv run lightsuite brain preprocess -c $CONFIG
 uv run lightsuite brain check-orientation -c $CONFIG
 uv run lightsuite brain init-registration -c $CONFIG
+uv run lightsuite brain align-slices -c $CONFIG
 uv run lightsuite brain match-points -c $CONFIG
 uv run lightsuite brain register -c $CONFIG
 uv run lightsuite brain export -c $CONFIG --save-volume --write-csv
@@ -315,6 +348,7 @@ uv run lightsuite brain export -c $CONFIG --save-volume --write-csv
 <save_path>/
 ├── regopts.json                          # Preprocess + init-registration state
 ├── brain_orientation.txt                 # Axis permutation
+├── slice_correspondence.json             # AP sample ↔ atlas plane map (align-slices)
 ├── atlas2histology_tform.json            # Manual control points
 ├── transform_params.json                 # Final registration parameters
 ├── bspline_samp_to_atlas_20um.txt

@@ -151,6 +151,12 @@ def run_bspline_registration(
         ]
 
     (output_dir / "CMD.txt").write_text(" ".join(cmd), encoding="utf-8")
+    if dual:
+        console.print(
+            "Dual-channel MI: atlas moving vs fixed AF + fixed signal "
+            f"(weights AF={dual_weight_autofluor:g} signal={dual_weight_signal:g} "
+            f"landmarks={control_point_weight:g})."
+        )
     console.print("Running elastix B-spline registration...")
     result = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if result.returncode != 0:

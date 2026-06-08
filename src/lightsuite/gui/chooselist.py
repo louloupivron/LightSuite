@@ -5,6 +5,39 @@ from __future__ import annotations
 import numpy as np
 
 
+def default_ap_cut_axis(volume_shape: tuple[int, int, int]) -> int:
+    """Heuristic AP axis: longest volume extent (1-based axis index)."""
+    return int(np.argmax(volume_shape) + 1)
+
+
+def generate_ap_alignment_list(
+    volume_shape: tuple[int, int, int],
+    *,
+    cut_axis: int | None = None,
+    n_slices: int = 20,
+) -> np.ndarray:
+    """Return chooselist rows for AP-only slice alignment: [index, cut_axis, 1, 1]."""
+    axis = cut_axis if cut_axis is not None else default_ap_cut_axis(volume_shape)
+    if axis not in {1, 2, 3}:
+        msg = f"cut_axis must be 1, 2, or 3, got {axis}"
+        raise ValueError(msg)
+    axis_size = volume_shape[axis - 1]
+    nmin = min(volume_shape)
+    minstart = max(1, int(np.ceil(nmin / 20)))
+    if axis_size <= 2 * minstart:
+        minstart = 1
+    sids = np.round(np.linspace(minstart, axis_size - minstart, n_slices)).astype(int)
+    sids = np.clip(sids, 1, axis_size)
+    return np.column_stack(
+        [
+            sids,
+            np.full(n_slices, axis, dtype=int),
+            np.ones(n_slices, dtype=int),
+            np.ones(n_slices, dtype=int),
+        ]
+    ).astype(int)
+
+
 def generate_control_point_list(volume_shape: tuple[int, int, int]) -> np.ndarray:
     """Return chooselist array with columns [slice_index, axis, flag_a, flag_b]."""
     ny, nx, nz = volume_shape
