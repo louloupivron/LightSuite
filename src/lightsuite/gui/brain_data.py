@@ -283,9 +283,11 @@ def load_brain_match_points_data(config: BrainPipelineConfig) -> BrainMatchPoint
                 tvreg.shape,
             )
 
+    # MATLAB matchControlPoints_unified: manual alignment starts from coarse original_trans.
+    if np.allclose(np.asarray(session.atlas2histology_tform, dtype=float), np.eye(4)):
+        session.atlas2histology_tform = original_trans.tolist()
+
     auto_alignment = np.asarray(session.atlas2histology_tform, dtype=float)
-    if np.allclose(auto_alignment, np.eye(4)):
-        auto_alignment = original_trans.copy()
 
     return BrainMatchPointsData(
         sample_volume=sample_warped,
