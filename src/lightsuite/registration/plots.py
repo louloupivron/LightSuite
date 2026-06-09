@@ -79,7 +79,7 @@ def plot_annotation_comparison(
                 row * pxsize[0],
                 linestyle="none",
                 marker=".",
-                markersize=2.0,
+                markersize=1.0,
                 color=(1.0, 0.8, 0.5),
                 alpha=0.95,
             )

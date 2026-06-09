@@ -102,6 +102,13 @@ class RegistrationConfig(BaseModel):
         ge=4,
         description="Minimum auto pairs to keep after AP filtering (relaxes tolerance if needed).",
     )
+    use_slice_correspondence_affine: bool = Field(
+        default=True,
+        description=(
+            "When slice_correspondence.json has confirmed anchors, compose a "
+            "correspondence-informed affine correction before B-spline registration."
+        ),
+    )
 
 
 class DetectionBackend(str, Enum):

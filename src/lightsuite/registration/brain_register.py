@@ -23,7 +23,7 @@ from lightsuite.gui.affine import (
     transform_points_inverse,
 )
 from lightsuite.registration.points import cloud_xyz_to_volume_indices
-from lightsuite.registration.warp import swap_xy_transform
+from lightsuite.registration.warp import swap_xy_transform, warp_sample_to_atlas
 from lightsuite.gui.control_points import (
     ControlPointSession,
     default_session_path,
@@ -40,6 +40,8 @@ from lightsuite.registration.elastix.runner import (
     run_bspline_registration,
     run_transformix,
 )
+from lightsuite.gui.brain_data import load_slice_correspondence
+from lightsuite.registration.correspondence_affine import apply_slice_correspondence_affine
 from lightsuite.registration.plots import save_registration_stage_previews
 from lightsuite.registration.points_utils import thin_point_list
 from lightsuite.registration.register_diagnostics import (
@@ -47,7 +49,11 @@ from lightsuite.registration.register_diagnostics import (
     classify_registration_status,
     landmark_mm_to_vox,
 )
-from lightsuite.registration.volume import load_registration_volume, permute_brain_volume
+from lightsuite.registration.volume import (
+    load_registration_volume,
+    permute_brain_volume,
+    resize_atlas_volume,
+)
 from lightsuite.registration.warp import warp_volume_affine
 
 console = Console()
@@ -331,6 +337,54 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
     atlas = resolve_brain_atlas(config.atlas.provider.value, config.atlas.atlas_dir)
     tv = np.asanyarray(nib.load(atlas.template_path).dataobj).astype(np.float32)
     av = np.asanyarray(nib.load(atlas.annotation_path).dataobj).astype(np.float32)
+
+    downfac = float(
+        checkpoint.downfac_reg or (config.atlas.resolution_um / checkpoint.registres_um)
+    )
+    tvreg_shape = resize_atlas_volume(tv, downfac, nearest=False).shape
+    original_trans_xyz = np.asarray(
+        session.ori_trans if session.ori_trans is not None else checkpoint.original_trans,
+        dtype=float,
+    )
+    sample_warped = warp_sample_to_atlas(volume, original_trans_xyz, tvreg_shape, order=1)
+    correspondence = load_slice_correspondence(save_path)
+    if (
+        correspondence is not None
+        and correspondence.has_confirmed_anchors()
+        and checkpoint.original_trans is not None
+    ):
+        stored = np.asarray(correspondence.original_trans, dtype=float)
+        current = np.asarray(checkpoint.original_trans, dtype=float)
+        if not np.allclose(stored, current, rtol=0, atol=1e-3):
+            console.print(
+                "[yellow]Warning:[/yellow] slice_correspondence original_trans differs from "
+                "regopts.json — correspondence affine uses current regopts transform."
+            )
+    tform_aff_before_corr = tform_aff.copy()
+    tform_aff, corr_affine_stats = apply_slice_correspondence_affine(
+        tform_aff,
+        correspondence,
+        sample_warped=sample_warped,
+        original_trans=original_trans_xyz,
+        downfac=downfac,
+        enabled=config.registration.use_slice_correspondence_affine,
+    )
+    corr_affine_stats.save(save_path / "correspondence_affine_stats.json")
+    if corr_affine_stats.applied:
+        landmark_atlas = transform_points_inverse(cpaffine, tform_aff_before_corr)
+        cpaffine = transform_points(landmark_atlas, tform_aff)
+        console.print(
+            "[green]Correspondence affine:[/green] "
+            f"{corr_affine_stats.n_anchor_pairs} anchor pairs across "
+            f"{corr_affine_stats.n_axes} axes · "
+            f"median residual {corr_affine_stats.median_residual_before_vox:.2f} → "
+            f"{corr_affine_stats.median_residual_after_vox:.2f} vox"
+        )
+    elif config.registration.use_slice_correspondence_affine and correspondence is not None:
+        console.print(
+            f"[dim]Slice correspondence affine not applied"
+            f" ({corr_affine_stats.skip_reason}).[/dim]"
+        )
 
     # Match multiobjRegistration.m: affine is fit in full-atlas index space (points / downfac_reg)
     # and imwarp uses full-resolution moving volumes, not the downsampled tvreg grid.
