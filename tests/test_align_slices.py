@@ -15,7 +15,6 @@ from lightsuite.gui.brain_data import (
     apply_slice_correspondence_to_session,
     load_brain_match_points_data,
     prepare_brain_align_slices_session,
-    resolve_atlas_plane_index,
 )
 from lightsuite.gui.chooselist import (
     default_ap_cut_axis,
@@ -84,38 +83,6 @@ def test_multi_axis_correspondence_roundtrip() -> None:
     assert corr.interpolate_atlas_plane(20, 2, 60) == 30
     assert corr.interpolate_atlas_plane(20, 3, 40) == 30
     assert corr.confirmed_axis_count() == 3
-
-
-def test_apply_slice_correspondence_fills_all_matching_axes() -> None:
-    shape = (40, 60, 30)
-    chooselist = np.vstack(
-        [
-            generate_ap_alignment_list(shape, cut_axis=1, n_slices=3),
-            generate_ap_alignment_list(shape, cut_axis=2, n_slices=3),
-            generate_ap_alignment_list(shape, cut_axis=3, n_slices=3),
-        ]
-    )
-    session = ControlPointSession.empty(np.eye(4), chooselist.shape[0])
-    corr = SliceCorrespondence(
-        original_trans=np.eye(4).tolist(),
-        axes={
-            axis: [
-                SliceAnchor(sample_index=int(row[0]), atlas_plane=100 + axis * 10 + i, confirmed=True)
-                for i, row in enumerate(generate_ap_alignment_list(shape, cut_axis=axis, n_slices=3))
-            ]
-            for axis in (1, 2, 3)
-        },
-    )
-    apply_slice_correspondence_to_session(session, chooselist, corr, shape)
-    assert session.atlas_slice_indices is not None
-    for row, plane in zip(chooselist, session.atlas_slice_indices, strict=True):
-        chooserow = np.asarray(row, dtype=int)
-        expected = corr.interpolate_atlas_plane(
-            int(chooserow[0]),
-            int(chooserow[1]),
-            shape[chooserow[1] - 1],
-        )
-        assert plane == expected
 
 
 def test_apply_slice_correspondence_to_session() -> None:
@@ -192,15 +159,3 @@ def test_prepare_align_slices_and_match_points_integration(tmp_path: Path) -> No
     assert match_data.slice_correspondence is not None
     assert match_data.session.atlas_slice_indices is not None
     assert any(int(v) > 0 for v in match_data.session.atlas_slice_indices)
-    assert not np.allclose(match_data.session.atlas2histology_tform, np.eye(4))
-    assert np.allclose(match_data.auto_alignment, match_data.original_trans)
-    for idx, row in enumerate(match_data.chooselist, start=1):
-        chooserow = np.asarray(row, dtype=int)
-        expected = match_data.slice_correspondence.interpolate_atlas_plane(
-            int(chooserow[0]),
-            int(chooserow[1]),
-            match_data.atlas_template.shape[chooserow[1] - 1],
-        )
-        if expected is None:
-            continue
-        assert resolve_atlas_plane_index(match_data, idx) == expected

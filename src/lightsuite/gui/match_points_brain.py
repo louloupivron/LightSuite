@@ -218,14 +218,6 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
                     pass
             _configure_point_text(layer)
 
-    def _overlay_alignment_matrix() -> np.ndarray:
-        """Matrix for boundary overlay: manual fit when available, else coarse alignment."""
-        matrix = np.asarray(data.session.atlas2histology_tform, dtype=float)
-        matched, _, _ = data.session.point_counts()
-        if matched >= 4:
-            return matrix
-        return np.asarray(data.auto_alignment, dtype=float)
-
     def _warped_annotation_volume(matrix: np.ndarray) -> np.ndarray:
         """Cache full annotation warp; recomputed when atlas2histology_tform changes."""
         key = np.asarray(matrix, dtype=float).tobytes()
@@ -319,9 +311,10 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
                 atlas_pts,
                 _volume_points_to_layer_xy(data.session.atlas_control_points[idx - 1], chooserow),
             )
+        matrix = np.asarray(data.session.atlas2histology_tform, dtype=float)
         if state["show_overlay"]:
             overlay_layer.data = _boundary_overlay(
-                _warped_annotation_volume(_overlay_alignment_matrix()),
+                _warped_annotation_volume(matrix),
                 np.asarray(data.chooselist[idx - 1], dtype=int),
             )
             overlay_layer.visible = True
