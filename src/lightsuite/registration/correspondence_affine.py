@@ -9,9 +9,12 @@ from typing import Any
 
 import numpy as np
 
+from scipy.spatial.distance import cdist
+
 from lightsuite.gui.affine import fit_affine_transform, transform_points, transform_points_inverse
 from lightsuite.gui.slice_correspondence import VOLUME_AXES, SliceAnchor, SliceCorrespondence
 from lightsuite.gui.slices import volume_index_to_image
+from lightsuite.registration.points_utils import subsample_point_pairs, thin_point_list
 from lightsuite.registration.warp import swap_xy_transform
 
 
@@ -236,3 +239,169 @@ def apply_slice_correspondence_affine(
     )
     stats.n_axes = correspondence.confirmed_axis_count()
     return tform_corrected, stats
+
+
+@dataclass
+class CorrespondenceLandmarkStats:
+    """Diagnostics for slice-correspondence B-spline landmarks in register."""
+
+    enabled: bool
+    n_correspondence_pairs: int
+    n_existing_pairs: int
+    n_added_pairs: int
+    n_merged_pairs: int
+    n_skipped_near_existing: int
+    applied: bool
+    skip_reason: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    def save(self, path: Path) -> None:
+        path = path.expanduser()
+        path.write_text(json.dumps(self.to_dict(), indent=2), encoding="utf-8")
+
+
+def _filter_pairs_far_from_existing(
+    moving_pts: np.ndarray,
+    fixed_pts: np.ndarray,
+    existing_fixed: np.ndarray,
+    min_distance_vox: float,
+) -> tuple[np.ndarray, np.ndarray, int]:
+    """Drop correspondence pairs whose fixed (sample) point is near an existing landmark."""
+    if moving_pts.shape[0] == 0:
+        return moving_pts, fixed_pts, 0
+    if existing_fixed.shape[0] == 0:
+        return moving_pts, fixed_pts, 0
+    distances = cdist(fixed_pts, existing_fixed)
+    keep = np.all(distances >= float(min_distance_vox), axis=1)
+    skipped = int(np.count_nonzero(~keep))
+    return moving_pts[keep], fixed_pts[keep], skipped
+
+
+def append_correspondence_bspline_landmarks(
+    cpaffine: np.ndarray,
+    cptshistology: np.ndarray,
+    correspondence: SliceCorrespondence | None,
+    *,
+    sample_warped: np.ndarray,
+    original_trans: np.ndarray,
+    downfac: float,
+    tform_aff: np.ndarray,
+    min_distance_vox: float,
+    max_landmarks: int = 96,
+    enabled: bool = True,
+) -> tuple[np.ndarray, np.ndarray, CorrespondenceLandmarkStats]:
+    """Add align-slices anchor pairs as extra Elastix B-spline landmarks.
+
+    Moving landmarks are atlas points warped into sample space with ``tform_aff``;
+    fixed landmarks are sample-space tissue centroids at each confirmed anchor.
+    """
+    cpaffine = np.asarray(cpaffine, dtype=float)
+    cptshistology = np.asarray(cptshistology, dtype=float)
+    n_existing = int(cptshistology.shape[0])
+
+    if not enabled:
+        return cpaffine, cptshistology, CorrespondenceLandmarkStats(
+            enabled=False,
+            n_correspondence_pairs=0,
+            n_existing_pairs=n_existing,
+            n_added_pairs=0,
+            n_merged_pairs=n_existing,
+            n_skipped_near_existing=0,
+            applied=False,
+            skip_reason="disabled_in_config",
+        )
+    if correspondence is None or not correspondence.has_confirmed_anchors():
+        return cpaffine, cptshistology, CorrespondenceLandmarkStats(
+            enabled=True,
+            n_correspondence_pairs=0,
+            n_existing_pairs=n_existing,
+            n_added_pairs=0,
+            n_merged_pairs=n_existing,
+            n_skipped_near_existing=0,
+            applied=False,
+            skip_reason="no_confirmed_anchors",
+        )
+
+    original_trans_vol = swap_xy_transform(np.asarray(original_trans, dtype=float))
+    corr_atlas, corr_sample = build_correspondence_anchor_pairs(
+        correspondence,
+        sample_warped=sample_warped,
+        original_trans_vol=original_trans_vol,
+        downfac=downfac,
+    )
+    n_corr = int(corr_atlas.shape[0])
+    if n_corr == 0:
+        return cpaffine, cptshistology, CorrespondenceLandmarkStats(
+            enabled=True,
+            n_correspondence_pairs=0,
+            n_existing_pairs=n_existing,
+            n_added_pairs=0,
+            n_merged_pairs=n_existing,
+            n_skipped_near_existing=0,
+            applied=False,
+            skip_reason="no_confirmed_anchors",
+        )
+
+    corr_moving = transform_points(corr_atlas, tform_aff)
+    corr_fixed = corr_sample
+    corr_moving, corr_fixed, skipped = _filter_pairs_far_from_existing(
+        corr_moving,
+        corr_fixed,
+        cptshistology,
+        min_distance_vox,
+    )
+    if corr_moving.shape[0]:
+        keep = thin_point_list(corr_fixed, float(min_distance_vox))
+        corr_moving = corr_moving[keep]
+        corr_fixed = corr_fixed[keep]
+
+    n_added = int(corr_moving.shape[0])
+    if n_added == 0:
+        return cpaffine, cptshistology, CorrespondenceLandmarkStats(
+            enabled=True,
+            n_correspondence_pairs=n_corr,
+            n_existing_pairs=n_existing,
+            n_added_pairs=0,
+            n_merged_pairs=n_existing,
+            n_skipped_near_existing=skipped,
+            applied=False,
+            skip_reason="all_pairs_near_existing_landmarks",
+        )
+
+    merged_moving = np.vstack([cpaffine, corr_moving]) if cpaffine.size else corr_moving
+    merged_fixed = np.vstack([cptshistology, corr_fixed]) if cptshistology.size else corr_fixed
+    if merged_moving.shape[0] > max_landmarks:
+        # Keep all existing landmarks; subsample only the correspondence additions.
+        if n_existing >= max_landmarks:
+            merged_moving = cpaffine
+            merged_fixed = cptshistology
+            n_added = 0
+        else:
+            room = max_landmarks - n_existing
+            corr_moving, corr_fixed = subsample_point_pairs(
+                corr_moving,
+                corr_fixed,
+                max_points=room,
+            )
+            merged_moving = (
+                np.vstack([cpaffine, corr_moving]) if cpaffine.size else corr_moving
+            )
+            merged_fixed = (
+                np.vstack([cptshistology, corr_fixed]) if cptshistology.size else corr_fixed
+            )
+            n_added = int(corr_moving.shape[0])
+
+    stats = CorrespondenceLandmarkStats(
+        enabled=True,
+        n_correspondence_pairs=n_corr,
+        n_existing_pairs=n_existing,
+        n_added_pairs=n_added,
+        n_merged_pairs=int(merged_fixed.shape[0]),
+        n_skipped_near_existing=skipped,
+        applied=n_added > 0,
+    )
+    if not stats.applied:
+        stats.skip_reason = "subsample_left_no_correspondence_pairs"
+    return merged_moving, merged_fixed, stats

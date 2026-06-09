@@ -41,7 +41,10 @@ from lightsuite.registration.elastix.runner import (
     run_transformix,
 )
 from lightsuite.gui.brain_data import load_slice_correspondence
-from lightsuite.registration.correspondence_affine import apply_slice_correspondence_affine
+from lightsuite.registration.correspondence_affine import (
+    append_correspondence_bspline_landmarks,
+    apply_slice_correspondence_affine,
+)
 from lightsuite.registration.plots import save_registration_stage_previews
 from lightsuite.registration.points_utils import thin_point_list
 from lightsuite.registration.register_diagnostics import (
@@ -384,6 +387,36 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
         console.print(
             f"[dim]Slice correspondence affine not applied"
             f" ({corr_affine_stats.skip_reason}).[/dim]"
+        )
+
+    landmark_thin_vox = 1000.0 / config.atlas.resolution_um
+    cpaffine, cptshistology, corr_landmark_stats = append_correspondence_bspline_landmarks(
+        cpaffine,
+        cptshistology,
+        correspondence,
+        sample_warped=sample_warped,
+        original_trans=original_trans_xyz,
+        downfac=downfac,
+        tform_aff=tform_aff,
+        min_distance_vox=landmark_thin_vox,
+        max_landmarks=config.registration.correspondence_landmark_max_count,
+        enabled=config.registration.use_slice_correspondence_landmarks,
+    )
+    corr_landmark_stats.save(save_path / "correspondence_landmark_stats.json")
+    if corr_landmark_stats.applied:
+        cpwt = max(cpwt, config.registration.correspondence_landmark_weight)
+        console.print(
+            "[green]Correspondence landmarks:[/green] "
+            f"+{corr_landmark_stats.n_added_pairs} B-spline pairs "
+            f"({corr_landmark_stats.n_merged_pairs} total, cpwt={cpwt:g})"
+        )
+    elif (
+        config.registration.use_slice_correspondence_landmarks
+        and correspondence is not None
+    ):
+        console.print(
+            f"[dim]Slice correspondence landmarks not added"
+            f" ({corr_landmark_stats.skip_reason}).[/dim]"
         )
 
     # Match multiobjRegistration.m: affine is fit in full-atlas index space (points / downfac_reg)

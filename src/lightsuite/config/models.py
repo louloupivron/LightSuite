@@ -109,6 +109,25 @@ class RegistrationConfig(BaseModel):
             "correspondence-informed affine correction before B-spline registration."
         ),
     )
+    use_slice_correspondence_landmarks: bool = Field(
+        default=True,
+        description=(
+            "Add align-slices anchor pairs as extra B-spline landmarks in register."
+        ),
+    )
+    correspondence_landmark_weight: float = Field(
+        default=0.2,
+        ge=0,
+        le=1,
+        description=(
+            "Minimum landmark metric weight when correspondence B-spline landmarks are added."
+        ),
+    )
+    correspondence_landmark_max_count: int = Field(
+        default=96,
+        ge=4,
+        description="Maximum total B-spline landmark pairs after merging correspondence anchors.",
+    )
 
 
 class DetectionBackend(str, Enum):

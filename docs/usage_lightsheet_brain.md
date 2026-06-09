@@ -121,6 +121,9 @@ uv run lightsuite doctor -c my_mouse.yaml
 | `registration.augment_points` | Add thinned auto-landmarks to user control points | `false` |
 | `registration.ap_pair_tolerance_vox` | AP residual tolerance for `refine-auto-points` (registration voxels) | `12.0` |
 | `registration.use_slice_correspondence_affine` | Compose align-slices correspondence into the affine pre-warp before B-spline | `true` |
+| `registration.use_slice_correspondence_landmarks` | Add align-slices anchors as extra B-spline landmarks in register | `true` |
+| `registration.correspondence_landmark_weight` | Minimum landmark metric weight when correspondence landmarks are merged | `0.2` |
+| `registration.correspondence_landmark_max_count` | Cap on total B-spline landmark pairs after merging correspondence anchors | `96` |
 | `registration.ap_pair_min_kept` | Minimum auto pairs kept after AP filtering | `24` |
 | `registration.orientation` | Axis permutation, e.g. `[1, 2, 3]`; flips use negative indices | auto |
 | `registration.cloud_threshold` | Edge threshold for coarse point extraction | `5.0` |
@@ -308,7 +311,12 @@ uv run lightsuite brain match-points -c my_mouse.yaml --headless
 
 Runs affine + deformable registration using your control points and Elastix.
 
-When `slice_correspondence.json` exists with confirmed anchors (from **align-slices**), **register** composes a correspondence-informed affine correction before warping the atlas and running B-spline. This applies the axis-wise slice-index maps as geometry initialization rather than hard-filtering auto control points. Disable with `registration.use_slice_correspondence_affine: false`.
+When `slice_correspondence.json` exists with confirmed anchors (from **align-slices**), **register**:
+
+1. Composes a correspondence-informed affine correction before warping the atlas (step 1).
+2. Adds anchor tissue centroids as extra B-spline landmarks, constraining through-plane alignment during Elastix (step 2).
+
+This applies the axis-wise slice-index maps as geometry initialization rather than hard-filtering auto control points. Disable either step with `registration.use_slice_correspondence_affine: false` or `registration.use_slice_correspondence_landmarks: false`.
 
 ```bash
 uv run lightsuite brain register -c my_mouse.yaml
@@ -328,6 +336,7 @@ uv run lightsuite brain register -c my_mouse.yaml --single-step
 - `registration_diagnostics.json` — registration checkpoint: affine/B-spline residuals, annotation overlap, GOOD/MODERATE/POOR status
 - `affine_fit_stats.json` — affine landmark residuals (voxels): median/p95/max, auto vs manual, coarse baseline
 - `correspondence_affine_stats.json` — slice-correspondence affine correction (anchor count, residual before/after)
+- `correspondence_landmark_stats.json` — correspondence B-spline landmarks merged into Elastix
 - `{name}_dim{1,2,3}_affine_registration.png` — eight sample slices per axis with warped atlas region outlines overlaid (same style as `dim*_initial_registration.png`)
 - `{name}_dim{1,2,3}_bspline_registration.png` — same layout after B-spline
 - `elastix_temp/` — Elastix working directory (keep until register finishes)
@@ -383,6 +392,7 @@ uv run lightsuite brain export -c $CONFIG --save-volume --write-csv
 ├── slice_correspondence.json             # AP sample ↔ atlas plane map (align-slices)
 ├── auto_points_refine_stats.json         # AP filter stats (refine-auto-points)
 ├── correspondence_affine_stats.json      # Correspondence affine in register
+├── correspondence_landmark_stats.json    # Correspondence B-spline landmarks
 ├── atlas2histology_tform.json            # Manual control points
 ├── transform_params.json                 # Final registration parameters
 ├── bspline_samp_to_atlas_20um.txt
