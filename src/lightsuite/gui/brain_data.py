@@ -24,7 +24,7 @@ from lightsuite.gui.slice_correspondence import (
     SliceCorrespondence,
     default_correspondence_path,
 )
-from lightsuite.gui.slices import volume_index_to_image
+from lightsuite.gui.slices import prepare_display_slice, volume_index_to_image
 from lightsuite.preprocess.checkpoint import RegOptsCheckpoint
 from lightsuite.registration.volume import (
     load_registration_volume,
@@ -43,6 +43,7 @@ class BrainMatchPointsData:
     session_path: Path
     original_trans: np.ndarray
     auto_alignment: np.ndarray
+    permvec: list[int]
     slice_correspondence: SliceCorrespondence | None = None
 
 
@@ -54,6 +55,7 @@ class BrainAlignSlicesData:
     original_trans: np.ndarray
     correspondence_path: Path
     correspondence: SliceCorrespondence
+    permvec: list[int]
     axis_order: tuple[int, ...] = VOLUME_AXES
 
     def chooselist_for_axis(self, cut_axis: int) -> np.ndarray:
@@ -208,6 +210,8 @@ def load_brain_align_slices_data(config: BrainPipelineConfig) -> BrainAlignSlice
     sample_warped, tvreg, _avreg, original_trans, _downfac = _load_brain_registration_volumes(
         config
     )
+    checkpoint = RegOptsCheckpoint.load(config.sample.save_path.expanduser() / "regopts.json")
+    permvec = list(checkpoint.permute_sample_to_atlas or [1, 2, 3])
     chooselist_by_axis = {
         axis: generate_ap_alignment_list(sample_warped.shape, cut_axis=axis)
         for axis in VOLUME_AXES
@@ -241,6 +245,7 @@ def load_brain_align_slices_data(config: BrainPipelineConfig) -> BrainAlignSlice
         original_trans=original_trans,
         correspondence_path=correspondence_path,
         correspondence=correspondence,
+        permvec=list(permvec),
     )
 
 
@@ -287,6 +292,9 @@ def load_brain_match_points_data(config: BrainPipelineConfig) -> BrainMatchPoint
     if np.allclose(auto_alignment, np.eye(4)):
         auto_alignment = original_trans.copy()
 
+    checkpoint = RegOptsCheckpoint.load(save_path / "regopts.json")
+    permvec = list(checkpoint.permute_sample_to_atlas or [1, 2, 3])
+
     return BrainMatchPointsData(
         sample_volume=sample_warped,
         atlas_template=tvreg,
@@ -296,6 +304,7 @@ def load_brain_match_points_data(config: BrainPipelineConfig) -> BrainMatchPoint
         session_path=session_path,
         original_trans=original_trans,
         auto_alignment=auto_alignment,
+        permvec=permvec,
         slice_correspondence=slice_correspondence,
     )
 
@@ -404,10 +413,23 @@ def slice_pair(
     atlas_plane: int | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     row = np.asarray(data.chooselist[slice_idx - 1], dtype=int)
-    sample = _normalize_display(volume_index_to_image(data.sample_volume, row))
+    cut_axis = int(row[1])
+    sample = _normalize_display(
+        prepare_display_slice(
+            volume_index_to_image(data.sample_volume, row),
+            cut_axis,
+            data.permvec,
+        )
+    )
     plane = atlas_plane if atlas_plane is not None else resolve_atlas_plane_index(data, slice_idx)
     atlas_row = chooserow_with_atlas_plane(row, plane)
-    atlas = _normalize_display(volume_index_to_image(data.atlas_template, atlas_row))
+    atlas = _normalize_display(
+        prepare_display_slice(
+            volume_index_to_image(data.atlas_template, atlas_row),
+            cut_axis,
+            data.permvec,
+        )
+    )
     return sample, atlas
 
 

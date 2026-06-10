@@ -21,6 +21,7 @@ def transform_volume_to_atlas(
     permute: list[int],
     spacing_mm: float,
     temp_dir: Path | None = None,
+    nearest: bool = False,
 ) -> np.ndarray:
     """Warp a registration-resolution channel volume into atlas voxel space."""
     vol = permute_brain_volume(volume.astype(np.float32), permute)
@@ -41,7 +42,7 @@ def transform_volume_to_atlas(
             transform_path=bspline_path,
             output_dir=temp_dir / "bspline",
             spacing_mm=spacing_mm,
-            nearest=False,
+            nearest=nearest,
         )
     finally:
         if owned:
@@ -50,5 +51,27 @@ def transform_volume_to_atlas(
     volumereg = np.abs(volumereg)
     affine = np.asarray(transform_params.tform_affine_samp20um_to_atlas_10um_px, dtype=float)
     atlas_shape = tuple(int(v) for v in transform_params.atlassize)
-    registered = warp_volume_affine(volumereg, affine, atlas_shape, order=1)
+    interp_order = 0 if nearest else 1
+    registered = warp_volume_affine(volumereg, affine, atlas_shape, order=interp_order)
+    if nearest:
+        return (registered > 0).astype(np.uint8)
     return np.clip(registered, 0, np.iinfo(np.uint16).max).astype(np.uint16)
+
+
+def transform_mask_to_atlas(
+    mask: np.ndarray,
+    transform_params: TransformParamsCheckpoint,
+    *,
+    permute: list[int],
+    spacing_mm: float,
+    temp_dir: Path | None = None,
+) -> np.ndarray:
+    """Warp a registration-resolution binary mask into atlas space (nearest-neighbor)."""
+    return transform_volume_to_atlas(
+        (np.asarray(mask) > 0).astype(np.float32),
+        transform_params,
+        permute=permute,
+        spacing_mm=spacing_mm,
+        temp_dir=temp_dir,
+        nearest=True,
+    )

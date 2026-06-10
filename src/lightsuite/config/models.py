@@ -6,7 +6,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Annotated
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class SourceFormat(str, Enum):
@@ -175,8 +175,69 @@ class ExportConfig(BaseModel):
     save_registered_volume: bool = False
 
 
+class AnnotationFormat(str, Enum):
+    LCT_ZARR = "lct_zarr"
+    LCT_JSON_COORDS = "lct_json_coords"
+    ARIVIS_CSV = "arivis_csv"
+    TIFF_MASK = "tiff_mask"
+
+
+class AnnotationRole(str, Enum):
+    POINTS = "points"
+    MASK = "mask"
+
+
+class AnnotationImportConfig(BaseModel):
+    """External segmentation or cell coordinates to register after brain register."""
+
+    format: AnnotationFormat
+    path: Path
+    label: str = ""
+    role: AnnotationRole = AnnotationRole.POINTS
+    level: str = Field(
+        default="level_01",
+        description="Zarr pyramid level for lct_zarr (e.g. level_01).",
+    )
+    index_base: int = Field(
+        default=0,
+        description="Coordinate index origin (0 for Arivis/LCT, 1 for LightSuite native).",
+    )
+    axis_order: str = Field(
+        default="zyx",
+        description="Axis order of coordinate columns: zyx (LCT JSON) or xyz (Arivis).",
+    )
+    voxel_um: Annotated[list[float], Field(min_length=3, max_length=3)] | None = Field(
+        default=None,
+        description=(
+            "Voxel size [x, y, z] in µm for the external mask grid. "
+            "Inferred from LCT zarr metadata when unset; defaults to sample.voxel_um for tiff_mask."
+        ),
+    )
+
+    @field_validator("path")
+    @classmethod
+    def expand_import_path(cls, value: Path) -> Path:
+        return value.expanduser()
+
+    @field_validator("axis_order")
+    @classmethod
+    def normalize_axis_order(cls, value: str) -> str:
+        key = value.strip().lower()
+        if key not in {"zyx", "xyz"}:
+            msg = f"axis_order must be 'zyx' or 'xyz', got {value!r}"
+            raise ValueError(msg)
+        return key
+
+
+class ImportConfig(BaseModel):
+    annotations: list[AnnotationImportConfig] = Field(default_factory=list)
+    write_csv: bool = True
+
+
 class BrainPipelineConfig(BaseModel):
     """Top-level brain lightsheet pipeline configuration."""
+
+    model_config = ConfigDict(populate_by_name=True)
 
     sample: SampleConfig
     atlas: AtlasConfig = Field(default_factory=AtlasConfig)
@@ -184,6 +245,7 @@ class BrainPipelineConfig(BaseModel):
     detection: DetectionConfig = Field(default_factory=DetectionConfig)
     compute: ComputeConfig = Field(default_factory=ComputeConfig)
     export: ExportConfig = Field(default_factory=ExportConfig)
+    import_config: ImportConfig | None = Field(default=None, alias="import")
 
     @model_validator(mode="after")
     def perens_atlas_resolution(self) -> BrainPipelineConfig:

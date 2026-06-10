@@ -19,7 +19,7 @@ from lightsuite.gui.brain_data import (
 )
 from lightsuite.gui.match_points_brain import PANEL_GAP_X, _chooselist_slice_label
 from lightsuite.gui.slice_correspondence import VOLUME_AXES
-from lightsuite.gui.slices import volume_index_to_image
+from lightsuite.gui.slices import prepare_display_slice, volume_index_to_image
 
 console = Console()
 
@@ -35,9 +35,21 @@ def _align_slices_pair(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Sample and atlas images for one align-slices chooselist entry."""
     row = np.asarray(data.chooselist_for_axis(cut_axis)[slice_idx - 1], dtype=int)
-    sample = _normalize_display(volume_index_to_image(data.sample_volume, row))
+    sample = _normalize_display(
+        prepare_display_slice(
+            volume_index_to_image(data.sample_volume, row),
+            cut_axis,
+            data.permvec,
+        )
+    )
     atlas_row = chooserow_with_atlas_plane(row, atlas_plane)
-    atlas = _normalize_display(volume_index_to_image(data.atlas_template, atlas_row))
+    atlas = _normalize_display(
+        prepare_display_slice(
+            volume_index_to_image(data.atlas_template, atlas_row),
+            cut_axis,
+            data.permvec,
+        )
+    )
     return sample, atlas
 
 

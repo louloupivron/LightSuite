@@ -13,7 +13,9 @@ from lightsuite.registration.plots import (
     _comparison_axis_limits,
     annotation_boundary_pixels,
     mask_boundary_pixels,
+    needs_allen_display_reorientation,
     plot_annotation_comparison,
+    prepare_registration_slice,
     save_initial_registration_previews,
     save_registration_stage_previews,
 )
@@ -63,6 +65,38 @@ def test_comparison_axis_limits_include_out_of_frame_overlay() -> None:
     assert xlim[1] > 79
     assert ylim[1] < 0
     assert ylim[0] > 99
+
+
+def test_needs_allen_display_reorientation_when_z_flipped() -> None:
+    assert needs_allen_display_reorientation([2, 1, -3])
+    assert not needs_allen_display_reorientation([-1, 3, 2])
+    assert not needs_allen_display_reorientation([1, 2, 3])
+    assert not needs_allen_display_reorientation(None)
+
+
+def test_prepare_registration_slice_rotates_when_z_flipped() -> None:
+    sl = np.arange(12, dtype=np.uint8).reshape(3, 4)
+    # axes 1 & 2: 90° CCW; axis 3: 90° CW + horizontal flip
+    assert np.array_equal(prepare_registration_slice(sl, 1, [2, 1, -3]), np.rot90(sl, k=1))
+    assert np.array_equal(prepare_registration_slice(sl, 2, [2, 1, -3]), np.rot90(sl, k=1))
+    assert np.array_equal(
+        prepare_registration_slice(sl, 3, [2, 1, -3]), np.fliplr(np.rot90(sl, k=3))
+    )
+    assert np.array_equal(prepare_registration_slice(sl, 3, [1, 2, 3]), sl)
+
+
+def test_plot_annotation_comparison_respects_orientation() -> None:
+    volume = np.zeros((24, 32, 20), dtype=np.uint8)
+    volume[4:20, 6:26, 4:16] = 200
+    annotation = np.zeros((24, 32, 20), dtype=np.float32)
+    annotation[4:20, 6:26, 4:16] = 5
+    fig_plain = plot_annotation_comparison(volume, annotation, dimplot=1, permvec=[1, 2, 3])
+    fig_oriented = plot_annotation_comparison(volume, annotation, dimplot=1, permvec=[2, 1, -3])
+    plain_shape = fig_plain.axes[0].images[0].get_array().shape
+    oriented_shape = fig_oriented.axes[0].images[0].get_array().shape
+    assert plain_shape != oriented_shape
+    fig_plain.clf()
+    fig_oriented.clf()
 
 
 def test_plot_annotation_comparison_expands_limits_for_large_overlay() -> None:

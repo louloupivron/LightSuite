@@ -83,6 +83,25 @@ def brain_check_orientation(
     typer.echo(f"Brain orientation: {path}")
 
 
+@brain_app.command("import-annotations")
+def brain_import_annotations(
+    config: str = typer.Option(..., "--config", "-c", help="Pipeline YAML config."),
+    write_csv: bool = typer.Option(
+        None,
+        "--write-csv/--no-write-csv",
+        help="Write atlas coordinate CSVs for point imports.",
+    ),
+) -> None:
+    """Register external LCT / Arivis annotations (transformPointsToAtlas.m)."""
+    from lightsuite.config.loader import load_config
+    from lightsuite.import_.brain_import import run_brain_import_annotations
+
+    cfg = load_config(config)
+    results = run_brain_import_annotations(cfg, write_csv=write_csv)
+    for item in results:
+        typer.echo(f"{item.label}: {item.kind} — {item.n_atlas} atlas features")
+
+
 @brain_app.command("export")
 def brain_export(
     config: str = typer.Option(..., "--config", "-c", help="Pipeline YAML config."),

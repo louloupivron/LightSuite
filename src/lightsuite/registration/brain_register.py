@@ -429,7 +429,12 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
     hi = float(np.quantile(volume, 0.999))
     voltoshow = np.clip(volume / max(hi, 1e-6) * 255.0, 0, 255).astype(np.uint8)
     save_registration_stage_previews(
-        save_path, config.sample.name, voltoshow, avaffine, "affine_registration"
+        save_path,
+        config.sample.name,
+        voltoshow,
+        avaffine,
+        "affine_registration",
+        permvec=list(perm),
     )
 
     elastix_temp = save_path / "elastix_temp"
@@ -473,7 +478,12 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
     )
 
     save_registration_stage_previews(
-        save_path, config.sample.name, voltoshow, avreg, "bspline_registration"
+        save_path,
+        config.sample.name,
+        voltoshow,
+        avreg,
+        "bspline_registration",
+        permvec=list(perm),
     )
 
     inverse_dir = save_path / "elastix_inverse_temp"

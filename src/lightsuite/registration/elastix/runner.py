@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -10,6 +11,7 @@ from pathlib import Path
 import numpy as np
 
 from lightsuite.registration.elastix.mhd import (
+    _mhd_element_dtype,
     read_mhd_volume,
     scale_volume_for_elastix_mi,
     write_mhd,
@@ -289,6 +291,92 @@ def _transformix_failure_message(output_dir: Path, proc: subprocess.CompletedPro
         f"transformix stderr (tail): {stderr_tail or '(empty)'} "
         f"stdout (tail): {stdout_tail or '(empty)'}"
     )
+
+
+def run_transformix_deformation_field(
+    *,
+    transform_path: Path,
+    output_dir: Path,
+) -> np.ndarray:
+    """Load B-spline deformation field via ``transformix -def all`` (transformPointsToAtlas.m).
+
+    Returns an array with shape (Y, X, Z, 3) in physical mm displacement components
+    matching elastix / MetaImage vector layout.
+    """
+    if shutil.which("transformix") is None:
+        msg = "transformix not found on PATH"
+        raise RuntimeError(msg)
+
+    output_dir = output_dir.expanduser()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    for pattern in ("deformationField*", "transformix_params.txt"):
+        for path in output_dir.glob(pattern):
+            if path.is_file():
+                path.unlink()
+
+    raw_params = transform_path.read_text(encoding="utf-8")
+    params = _upsert_elastix_param(raw_params, "WriteDeformationField", "true")
+    params = _upsert_elastix_param(params, "WriteResultImage", "false")
+    temp_param = output_dir / "transformix_def_params.txt"
+    temp_param.write_text(params, encoding="utf-8")
+
+    cmd = [
+        "transformix",
+        "-def",
+        "all",
+        "-out",
+        str(output_dir),
+        "-tp",
+        str(temp_param),
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if proc.returncode != 0:
+        msg = f"transformix -def all failed (exit {proc.returncode}):\n{proc.stdout}\n{proc.stderr}"
+        raise RuntimeError(msg)
+
+    field_path = output_dir / "deformationField.mhd"
+    if not field_path.is_file():
+        hits = sorted(output_dir.glob("deformationField*.mhd"))
+        if not hits:
+            listing = ", ".join(sorted(p.name for p in output_dir.iterdir())) or "(empty)"
+            msg = f"No deformationField.mhd in {output_dir} (listing: {listing})"
+            raise FileNotFoundError(msg)
+        field_path = hits[0]
+
+    return _read_mhd_vector_field(field_path)
+
+
+def _read_mhd_vector_field(mhd_path: Path) -> np.ndarray:
+    """Read elastix vector deformation field into (Y, X, Z, 3) float32."""
+    text = mhd_path.expanduser().read_text(encoding="utf-8")
+    dim_field = re.search(r"(?im)^DimSize\s*=\s*([^\r\n#]+)", text)
+    if dim_field is None:
+        msg = f"DimSize missing in {mhd_path}"
+        raise ValueError(msg)
+    parts = [int(v) for v in dim_field.group(1).split()]
+    if len(parts) != 4:
+        msg = f"Expected 4D vector DimSize in {mhd_path}, got {parts}"
+        raise ValueError(msg)
+    nx, ny, nz, nc = parts
+    if nc != 3:
+        msg = f"Expected 3-vector deformation field, got {nc} components"
+        raise ValueError(msg)
+
+    raw_name = re.search(r"(?im)^ElementDataFile\s*=\s*([^\r\n#]+)", text)
+    if raw_name is None:
+        msg = f"ElementDataFile missing in {mhd_path}"
+        raise ValueError(msg)
+    element_type = re.search(r"(?im)^ElementType\s*=\s*([^\r\n#]+)", text)
+    dtype = _mhd_element_dtype((element_type.group(1) if element_type else "MET_FLOAT").strip())
+    raw_path = mhd_path.parent / raw_name.group(1).strip()
+    flat = np.fromfile(raw_path, dtype=dtype)
+    expected = nx * ny * nz * nc
+    if flat.size != expected:
+        msg = f"RAW size mismatch for vector field {raw_path}: {flat.size} vs {expected}"
+        raise ValueError(msg)
+    # MetaIO vector image: components vary fastest, then X, Y, Z.
+    vol = flat.reshape((nz, ny, nx, nc), order="C")
+    return np.transpose(vol, (1, 2, 0, 3)).astype(np.float32, copy=False)
 
 
 def run_transformix(

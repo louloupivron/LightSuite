@@ -31,8 +31,9 @@ You will need:
 | 6 | `lightsuite brain match-points` | **Manual (GUI)** | `matchControlPoints_unified.m` |
 | 7 | `lightsuite brain register` | Automated | `multiobjRegistration.m` |
 | 8 | `lightsuite brain export` | Automated | `generateRegisteredBrainVolumes.m` |
+| 9 | `lightsuite brain import-annotations` | Automated | `transformPointsToAtlas.m` |
 
-Cell detection and mapping cells to atlas coordinates are **not yet ported**; set `detection.enabled: false` for now.
+Built-in cell detection is **not yet ported**; set `detection.enabled: false` and use `import-annotations` for LCT / Arivis exports.
 
 ---
 
@@ -77,6 +78,30 @@ detection:
 export:
   save_registered_volume: false
   write_cells_csv: true
+
+import:
+  write_csv: true
+  annotations:
+    - format: arivis_csv
+      path: /data/features.csv
+      axis_order: xyz
+      index_base: 0
+      label: arivis_cells
+    - format: lct_json_coords
+      path: /data/cells_sensitive.json
+      axis_order: zyx
+      index_base: 0
+      label: lct_cells
+    - format: lct_zarr
+      path: /data/mask.zarr
+      level: level_05
+      role: mask
+      label: lct_mask
+    - format: tiff_mask
+      path: /data/segmentation_mask.tif
+      role: mask
+      label: my_mask
+      # voxel_um: [5.26, 5.26, 5.0]   # optional if same as sample.voxel_um
 ```
 
 Validate before running:
@@ -379,6 +404,7 @@ uv run lightsuite brain refine-auto-points -c $CONFIG
 uv run lightsuite brain match-points -c $CONFIG
 uv run lightsuite brain register -c $CONFIG
 uv run lightsuite brain export -c $CONFIG --save-volume --write-csv
+uv run lightsuite brain import-annotations -c $CONFIG
 ```
 
 ---
@@ -444,9 +470,31 @@ Both channels are preprocessed in step 1; register uses dual fixed-image mutual 
 
 ---
 
+## Import external annotations
+
+After `register`, map LCT or Arivis exports into atlas space:
+
+```bash
+uv run lightsuite brain import-annotations -c my_mouse.yaml
+```
+
+Supported formats (YAML `import.annotations`):
+
+| `format` | Input | Notes |
+|----------|-------|-------|
+| `arivis_csv` | Blob Finder features CSV | Uses intensity COM columns; `index_base: 0` |
+| `lct_json_coords` | `[[z,y,x], …]` JSON list | Set `axis_order: zyx` |
+| `lct_zarr` | OME-NGFF mask pyramid | `role: mask`; use a coarse `level` (e.g. `level_05`) for large brains |
+| `tiff_mask` | 3D TIFF label/binary mask | `role: mask`; same Y,X,Z layout as registration TIFFs; `voxel_um` defaults to `sample.voxel_um` |
+
+Outputs land in `volume_registered/` (`*_atlas_coords.npz`, optional CSV, mask TIFF).
+
+---
+
 ## Known limitations
 
 - **Cell detection** — not implemented; preprocessing warns if `detection.enabled: true`
+- **Allen cell-count parcellation** — import writes atlas coordinates; region counts not yet joined in Python
 - **Orientation GUI** — `lightsuite brain check-orientation` (Napari); or set `registration.orientation` in YAML
 - **OME-Zarr / Imaris** — planned; TIFF only today
 - **Parcellation names** — CSV includes numeric region IDs; Allen name/structure/division columns from MATLAB are not yet joined in Python export

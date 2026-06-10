@@ -179,9 +179,41 @@ For Allen parcellation tables:
 export LIGHTSUITE_ALLEN_PARCELLATION_CSV=/path/to/parcellation_to_parcellation_term_membership.csv
 ```
 
-### Perens LSFM atlas
+### Perens LSFM atlas (20 µm)
 
-Set `atlas.provider: perens` and `resolution_um: 20`. Place `gubra_template_olf.nii.gz`, `gubra_ano_olf.nii.gz`, and optionally `ARA2_annotation_info_avail_regions.csv` in `atlas_dir`.
+The [Perens et al. LSFM mouse brain atlas](https://github.com/Gubra-ApS/LSFM-mouse-brain-atlas) (Gubra) is distributed at **20 µm** isotropic resolution — the same layout used by [BrainGlobe’s `perens_lsfm_mouse` packager](https://github.com/brainglobe/brainglobe-atlasapi).
+
+**Download** the repository archive:
+
+- [LSFM-mouse-brain-atlas `master.tar.gz`](https://github.com/Gubra-ApS/LSFM-mouse-brain-atlas/archive/master.tar.gz)
+
+Unpack and use the NIfTIs under `LSFM-mouse-brain-atlas-master/LSFM_atlas_files/`:
+
+| File | Role |
+|------|------|
+| `gubra_template_olf.nii.gz` | Template (reference) volume |
+| `gubra_ano_olf.nii.gz` | Annotation / parcellation volume |
+| `ARA2_annotation_info_avail_regions.csv` | Optional — region names for parcellation CSV export |
+
+Some downloads place the template only under `LSFM_atlas_files/perens/` while the annotation stays in `LSFM_atlas_files/`. LightSuite searches both layouts when `atlas_dir` points at either folder.
+
+Point LightSuite at the atlas in either way:
+
+```yaml
+# In your config YAML
+atlas:
+  provider: perens
+  resolution_um: 20
+  atlas_dir: /path/to/LSFM-mouse-brain-atlas-master/LSFM_atlas_files
+```
+
+or:
+
+```bash
+export LIGHTSUITE_ATLAS_PATH=/path/to/LSFM-mouse-brain-atlas-master/LSFM_atlas_files
+```
+
+**Citation:** Perens et al. 2021 — [doi:10.1007/s12021-020-09490-8](https://doi.org/10.1007/s12021-020-09490-8)
 
 ---
 

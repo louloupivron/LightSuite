@@ -82,12 +82,23 @@ class ControlPointSession:
             return np.zeros((0, 3)), np.zeros((0, 3))
         return np.vstack(atlas_pts), np.vstack(sample_pts)
 
-    def update_manual_alignment(self, min_pairs: int = 16) -> float | None:
-        """Recompute manual alignment from paired slices; return MSE if fit."""
+    def update_manual_alignment(
+        self,
+        min_pairs: int = 16,
+        *,
+        fallback_tform: np.ndarray | list[list[float]] | None = None,
+    ) -> float | None:
+        """Recompute manual alignment from paired slices; return MSE if fit.
+
+        Below ``min_pairs`` (MATLAB ``Nmin``), keeps or restores ``fallback_tform``
+        instead of fitting an under-constrained affine.
+        """
         from lightsuite.gui.affine import fit_affine_transform
 
         atlas_pts, sample_pts = self.paired_points_xyz()
         if atlas_pts.shape[0] < min_pairs:
+            if fallback_tform is not None:
+                self.atlas2histology_tform = np.asarray(fallback_tform, dtype=float).tolist()
             return None
         matrix, mse = fit_affine_transform(atlas_pts, sample_pts)
         self.atlas2histology_tform = matrix.tolist()

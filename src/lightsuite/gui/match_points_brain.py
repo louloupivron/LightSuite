@@ -21,12 +21,21 @@ from lightsuite.gui.brain_data import (
     slice_pair,
 )
 from lightsuite.gui.control_points import ControlPointSession
-from lightsuite.gui.slices import volume_index_to_image
+from lightsuite.gui.slices import (
+    layer_xy_from_slice_pixels,
+    prepare_display_slice,
+    slice_pixels_from_layer_xy,
+    volume_index_to_image,
+)
 
 console = Console()
 
 # Horizontal gap between sample+overlay (left) and atlas (right), in pixels (dim 1 / X).
 PANEL_GAP_X = 24
+# Minimum matched pairs before fitting the full 3D affine (MATLAB Nmin in
+# matchControlPoints_unified.m). Below this the coarse alignment is kept, since a
+# 12-DOF affine fit from few/coplanar points overfits and diverges.
+MIN_AFFINE_PAIRS = 16
 # Pair number labels: white text, nudged right of each marker (row, col) in layer data coords.
 TEXT_LABEL_COLOR = "white"
 TEXT_LABEL_OFFSET = (0.0, 8.0)
@@ -38,28 +47,53 @@ def _plot_axes_for_row(chooserow: np.ndarray) -> list[int]:
     return [d for d in range(3) if d != cut_axis]
 
 
-def _volume_points_to_layer_xy(points: list[list[float]], chooserow: np.ndarray) -> np.ndarray:
+def _raw_slice_shape(volume: np.ndarray, chooserow: np.ndarray) -> tuple[int, int]:
+    return tuple(int(v) for v in volume_index_to_image(volume, chooserow).shape)
+
+
+def _volume_points_to_layer_xy(
+    points: list[list[float]],
+    chooserow: np.ndarray,
+    *,
+    slice_shape: tuple[int, int],
+    permvec: list[int],
+) -> np.ndarray:
     """Map stored 4-column points to napari layer (row, col) coordinates."""
     if not points:
         return np.zeros((0, 2))
     pts = np.asarray(points, dtype=float)
     plot_axes = _plot_axes_for_row(chooserow)
-    return pts[:, [plot_axes[1], plot_axes[0]]]
+    cut_axis = int(chooserow[1])
+    return layer_xy_from_slice_pixels(
+        pts[:, plot_axes[0]],
+        pts[:, plot_axes[1]],
+        slice_shape,
+        cut_axis,
+        permvec,
+    )
 
 
 def _layer_xy_to_volume_point(
     xy: tuple[float, float],
     chooserow: np.ndarray,
     *,
+    slice_shape: tuple[int, int],
+    permvec: list[int],
     timestamp: float,
     plane_along_cut_axis: int | None = None,
 ) -> list[float]:
     """Map a 2D layer click/drag position back to MATLAB-style [x, y, z, t] storage."""
     plot_axes = _plot_axes_for_row(chooserow)
     cut_axis = int(chooserow[1]) - 1
+    row, col = slice_pixels_from_layer_xy(
+        np.asarray([xy], dtype=float),
+        slice_shape,
+        int(chooserow[1]),
+        permvec,
+    )
     point = np.zeros(4, dtype=float)
-    point[plot_axes[1]] = xy[0]
-    point[plot_axes[0]] = xy[1]
+    point[plot_axes[0]] = row[0]
+    point[plot_axes[1]] = col[0]
     point[cut_axis] = float(
         plane_along_cut_axis if plane_along_cut_axis is not None else int(chooserow[0])
     )
@@ -98,6 +132,8 @@ def _sync_store_from_layer(
     panel: str,
     layer_xy: np.ndarray,
     *,
+    slice_shape: tuple[int, int],
+    permvec: list[int],
     atlas_plane: int | None = None,
 ) -> None:
     """Persist napari layer coordinates; preserve timestamps when dragging existing points."""
@@ -112,6 +148,8 @@ def _sync_store_from_layer(
             _layer_xy_to_volume_point(
                 (float(pt[0]), float(pt[1])),
                 chooserow,
+                slice_shape=slice_shape,
+                permvec=permvec,
                 timestamp=ts,
                 plane_along_cut_axis=plane,
             )
@@ -128,7 +166,12 @@ def _pair_status(n_sample: int, n_atlas: int) -> str:
     return f"pairs={n_pairs} | place sample point #{n_sample + 1}"
 
 
-def _boundary_overlay(warped_annotation: np.ndarray, chooserow: np.ndarray) -> np.ndarray:
+def _boundary_overlay(
+    warped_annotation: np.ndarray,
+    chooserow: np.ndarray,
+    *,
+    permvec: list[int],
+) -> np.ndarray:
     """Extract boundary mask from annotation already warped into sample space."""
     from scipy.ndimage import convolve
 
@@ -136,7 +179,8 @@ def _boundary_overlay(warped_annotation: np.ndarray, chooserow: np.ndarray) -> n
     edges = ann_slice.astype(float)
     kernel = np.ones((3, 3)) / 9.0
     blurred = convolve(edges, kernel, mode="constant")
-    return (np.round(blurred) != edges).astype(float)
+    overlay = (np.round(blurred) != edges).astype(float)
+    return prepare_display_slice(overlay, int(chooserow[1]), permvec)
 
 
 def _chooselist_slice_label(chooselist: np.ndarray, slice_idx: int) -> str:
@@ -285,10 +329,15 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
         overlay_flag = "on" if state["show_overlay"] else "off"
         pair_info = _pair_status(n_s, n_a)
         _update_point_count_display()
+        fit_state = (
+            "affine fit active"
+            if matched >= MIN_AFFINE_PAIRS
+            else f"coarse align (need {MIN_AFFINE_PAIRS} pairs for affine, have {matched})"
+        )
         viewer.status = (
             f"Slice {idx}/{n_slices} ({caption}) | {pair_info} "
             f"| all slices: {matched} pairs ({total_sample} sample / {total_atlas} atlas) "
-            f"| atlas plane {plane}/{pmax} | overlay {overlay_flag} (O)"
+            f"| {fit_state} | atlas plane {plane}/{pmax} | overlay {overlay_flag} (O)"
         )
 
     def _refresh(*, atlas_plane: int | None = None) -> None:
@@ -302,20 +351,32 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
         # change handlers (_sample_changed / _atlas_changed), which call _try_align
         # and would otherwise recurse until vispy transform updates overflow.
         chooserow = np.asarray(data.chooselist[idx - 1], dtype=int)
+        slice_shape = _raw_slice_shape(data.sample_volume, chooserow)
         with sample_pts.events.data.blocker(), atlas_pts.events.data.blocker():
             _apply_layer_points(
                 sample_pts,
-                _volume_points_to_layer_xy(data.session.histology_control_points[idx - 1], chooserow),
+                _volume_points_to_layer_xy(
+                    data.session.histology_control_points[idx - 1],
+                    chooserow,
+                    slice_shape=slice_shape,
+                    permvec=data.permvec,
+                ),
             )
             _apply_layer_points(
                 atlas_pts,
-                _volume_points_to_layer_xy(data.session.atlas_control_points[idx - 1], chooserow),
+                _volume_points_to_layer_xy(
+                    data.session.atlas_control_points[idx - 1],
+                    chooserow,
+                    slice_shape=slice_shape,
+                    permvec=data.permvec,
+                ),
             )
         matrix = np.asarray(data.session.atlas2histology_tform, dtype=float)
         if state["show_overlay"]:
             overlay_layer.data = _boundary_overlay(
                 _warped_annotation_volume(matrix),
-                np.asarray(data.chooselist[idx - 1], dtype=int),
+                chooserow,
+                permvec=data.permvec,
             )
             overlay_layer.visible = True
         else:
@@ -326,20 +387,31 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
             state["_view_shape"] = sample.shape
 
     def _try_align() -> None:
-        mse = data.session.update_manual_alignment(min_pairs=4)
+        mse = data.session.update_manual_alignment(min_pairs=MIN_AFFINE_PAIRS)
         if mse is not None:
             show_info(f"Updated alignment fit (MSE={mse:.2f})")
+        else:
+            matched, _total_s, _total_a = data.session.point_counts()
+            remaining = MIN_AFFINE_PAIRS - matched
+            if remaining > 0:
+                show_info(
+                    f"{matched}/{MIN_AFFINE_PAIRS} matched pairs — "
+                    f"add {remaining} more (across slices) before the affine fit runs"
+                )
         _refresh()
 
     def _on_panel_points_changed(panel: str) -> None:
         idx = state["slice"]
         layer = sample_pts if panel == "sample" else atlas_pts
         plane = _resolved_atlas_plane() if panel == "atlas" else None
+        chooserow = np.asarray(data.chooselist[idx - 1], dtype=int)
         _sync_store_from_layer(
             data.session,
             idx,
             panel,
             np.asarray(layer.data, dtype=float),
+            slice_shape=_raw_slice_shape(data.sample_volume, chooserow),
+            permvec=data.permvec,
             atlas_plane=plane,
         )
         n_s = len(data.session.histology_control_points[idx - 1])
