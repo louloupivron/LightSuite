@@ -35,11 +35,11 @@ def test_permute_for_atlas_flip() -> None:
     assert np.allclose(out[1, :, :], vol[0, :, :])
 
 
-def test_atlas_for_display_matches_sample_shape() -> None:
-    atlas = np.ones((4, 8, 6), dtype=np.float32)
-    sample_shape = (8, 16, 10)
-    out = _atlas_for_display(atlas, sample_shape)
-    assert out.shape == sample_shape
+def test_atlas_for_display_preserves_native_shape() -> None:
+    atlas = np.ones((4, 8, 6), dtype=np.int16)
+    out = _atlas_for_display(atlas)
+    assert out.shape == atlas.shape
+    assert out.dtype == np.float32
 
 
 def test_save_orientation(tmp_path: Path) -> None:
@@ -90,5 +90,8 @@ def test_prepare_orientation_session(tmp_path: Path) -> None:
     config_path.write_text(yaml.dump(config_data), encoding="utf-8")
     cfg = load_config(config_path)
     preprocess_lightsheet_volume(cfg)
-    path = prepare_orientation_session(cfg)
-    assert path.is_file()
+    path = prepare_orientation_session(cfg, config_path)
+    assert path == config_path
+    updated = load_config(config_path)
+    assert updated.registration.orientation == DEFAULT_PERMVEC
+    assert not (save / "brain_orientation.txt").is_file()

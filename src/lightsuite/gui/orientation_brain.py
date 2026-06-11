@@ -8,9 +8,9 @@ from pathlib import Path
 import nibabel as nib
 import numpy as np
 from rich.console import Console
-from skimage.transform import resize
 
 from lightsuite.atlas.registry import resolve_brain_atlas
+from lightsuite.config.loader import save_orientation_to_config
 from lightsuite.config.models import BrainPipelineConfig
 from lightsuite.gui.brain_data import _normalize_display
 from lightsuite.preprocess.checkpoint import RegOptsCheckpoint
@@ -22,7 +22,6 @@ from lightsuite.registration.orientation import (
     orientation_path,
     permute_for_atlas,
     permvec_from_indices,
-    save_orientation,
     validate_permvec,
 )
 from lightsuite.registration.volume import load_registration_volume, resize_atlas_volume
@@ -37,19 +36,18 @@ class OrientationCheckData:
     sample_volume: np.ndarray
     atlas_volume: np.ndarray
     permvec: list[int]
-    orientation_file: Path
 
 
-def _atlas_for_display(atlas: np.ndarray, sample_shape: tuple[int, ...]) -> np.ndarray:
-    if atlas.shape == sample_shape:
-        return atlas.astype(np.float32)
-    return resize(
-        atlas,
-        sample_shape,
-        order=1,
-        preserve_range=True,
-        anti_aliasing=True,
-    ).astype(np.float32)
+def _atlas_for_display(atlas: np.ndarray) -> np.ndarray:
+    """Return the atlas in its native voxel order for display.
+
+    The atlas is the fixed reference: init-registration and match-points consume it
+    in native NIfTI axis order, and the saved ``permvec`` maps the *sample* onto that
+    order. Resizing the atlas to the permuted sample shape (as a previous version did)
+    stretched it to a wrong aspect ratio and broke the orientation comparison badly for
+    atlases whose native shape differs from the sample (e.g. Perens/gubra ``L,P,S``).
+    """
+    return atlas.astype(np.float32)
 
 
 def load_orientation_check_data(config: BrainPipelineConfig) -> OrientationCheckData:
@@ -80,21 +78,26 @@ def load_orientation_check_data(config: BrainPipelineConfig) -> OrientationCheck
         sample_volume=sample,
         atlas_volume=atlas_reg,
         permvec=permvec,
-        orientation_file=orient_file,
     )
 
 
-def prepare_orientation_session(config: BrainPipelineConfig) -> Path:
-    """Ensure brain_orientation.txt exists without opening Napari (for tests)."""
+def prepare_orientation_session(config: BrainPipelineConfig, config_path: Path) -> Path:
+    """Write orientation to the pipeline YAML without opening Napari (for tests)."""
     data = load_orientation_check_data(config)
-    return save_orientation(config.sample.save_path, data.permvec)
+    return save_orientation_to_config(config_path, data.permvec)
 
 
-def run_brain_orientation_check(config: BrainPipelineConfig, *, headless: bool = False) -> Path:
-    """Open Napari orientation checker or write orientation file in headless mode."""
+def run_brain_orientation_check(
+    config: BrainPipelineConfig,
+    config_path: Path,
+    *,
+    headless: bool = False,
+) -> Path:
+    """Open Napari orientation checker or update config YAML in headless mode."""
     data = load_orientation_check_data(config)
+    config_path = config_path.expanduser().resolve()
     if headless:
-        return save_orientation(config.sample.save_path, data.permvec)
+        return save_orientation_to_config(config_path, data.permvec)
 
     try:
         import napari
@@ -123,14 +126,13 @@ def run_brain_orientation_check(config: BrainPipelineConfig, *, headless: bool =
         blending="opaque",
     )
 
+    atlas_display = _normalize_display(_atlas_for_display(data.atlas_volume))
+    atlas_layer.data = atlas_display
+
     def _update_preview(permvec: list[int]) -> None:
         sample_oriented = permute_for_atlas(data.sample_volume, permvec)
-        atlas_display = _normalize_display(
-            _atlas_for_display(data.atlas_volume, sample_oriented.shape)
-        )
         sample_display = _normalize_display(sample_oriented)
 
-        atlas_layer.data = atlas_display
         sample_layer.data = sample_display
         sample_layer.translate = (0.0, float(atlas_display.shape[1] + PANEL_GAP_X), 0.0)
         sample_layer.scale = (1.0, 1.0, 1.0)
@@ -171,8 +173,8 @@ def run_brain_orientation_check(config: BrainPipelineConfig, *, headless: bool =
         except ValueError as exc:
             show_info(str(exc))
             return
-        path = save_orientation(config.sample.save_path, data.permvec)
-        show_info(f"Saved {path}")
+        path = save_orientation_to_config(config_path, data.permvec)
+        show_info(f"Saved orientation to {path}")
         # Defer close so magicgui can re-enable its call button before widgets are destroyed.
         QTimer.singleShot(0, viewer.close)
 
@@ -189,4 +191,4 @@ def run_brain_orientation_check(config: BrainPipelineConfig, *, headless: bool =
         "Adjust dropdowns and click Update preview."
     )
     napari.run()
-    return data.orientation_file
+    return config_path

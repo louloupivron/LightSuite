@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import typer
 
 from lightsuite import __version__
@@ -71,16 +73,17 @@ def brain_check_orientation(
     headless: bool = typer.Option(
         False,
         "--headless",
-        help="Write orientation file without opening Napari (for tests).",
+        help="Update registration.orientation in the config YAML without opening Napari.",
     ),
 ) -> None:
     """Interactive brain axis/orientation checker (getBrainOrientation.m)."""
     from lightsuite.config.loader import load_config
     from lightsuite.gui.orientation_brain import run_brain_orientation_check
 
-    cfg = load_config(config)
-    path = run_brain_orientation_check(cfg, headless=headless)
-    typer.echo(f"Brain orientation: {path}")
+    config_path = Path(config).expanduser().resolve()
+    cfg = load_config(config_path)
+    path = run_brain_orientation_check(cfg, config_path, headless=headless)
+    typer.echo(f"Brain orientation saved to {path}")
 
 
 @brain_app.command("import-annotations")
