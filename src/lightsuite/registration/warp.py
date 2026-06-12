@@ -72,6 +72,7 @@ def imwarp_volume(
     order: int = 1,
     cval: float = 0.0,
     point_coords: str = "array",
+    output_origin: tuple[int, int, int] | None = None,
 ) -> np.ndarray:
     """Warp like MATLAB imwarp(volume, ref_in, tform, OutputView=ref_out).
 
@@ -79,6 +80,9 @@ def imwarp_volume(
     when resampling. Use ``point_coords='xyz'`` for transforms fit on [X, Y, Z]
     point clouds (original_trans), and ``point_coords='array'`` for transforms
     already in volume axis order (affine control-point fits after [2,1,3] swap).
+
+    When ``output_origin`` is set (typically ``WarpCanvasPadding.pad_before``), the
+    original sample grid is embedded at that offset inside the larger ``output_shape``.
     """
     tform = np.asarray(tform, dtype=float)
     effective = np.linalg.inv(tform)
@@ -89,10 +93,14 @@ def imwarp_volume(
         raise ValueError(msg)
 
     matrix_0 = pixel_affine_for_volume(effective)
+    offset = matrix_0[:3, 3]
+    if output_origin is not None:
+        origin = np.asarray(output_origin, dtype=float)
+        offset = offset - matrix_0[:3, :3] @ origin
     return affine_transform(
         volume,
         matrix_0[:3, :3],
-        offset=matrix_0[:3, 3],
+        offset=offset,
         output_shape=output_shape,
         order=order,
         mode="constant",
@@ -142,6 +150,7 @@ def warp_volume_affine(
     order: int = 1,
     cval: float = 0.0,
     point_coords: str = "array",
+    output_origin: tuple[int, int, int] | None = None,
 ) -> np.ndarray:
     """Backward-compatible alias for atlas-to-sample warps used after affine registration."""
     return imwarp_volume(
@@ -151,4 +160,5 @@ def warp_volume_affine(
         order=order,
         cval=cval,
         point_coords=point_coords,
+        output_origin=output_origin,
     )

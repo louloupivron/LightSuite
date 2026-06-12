@@ -120,6 +120,13 @@ def transform_points_to_atlas(
         transform_params,
         registres_um=registres_um,
     )
+    pad = transform_params.warp_canvas_pad_before
+    if pad is not None and any(int(p) for p in pad):
+        reg_pts = reg_pts.copy()
+        # B-spline displacement field is sampled on the padded registration grid.
+        reg_pts[:, 0] += pad[1]
+        reg_pts[:, 1] += pad[0]
+        reg_pts[:, 2] += pad[2]
     displacement = _displacement_field_registration_voxels(
         transform_params,
         cache_dir=temp_dir / "deformation_field",
