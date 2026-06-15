@@ -22,5 +22,6 @@ nav:
   - Installation: installation.md
   - Usage:
       - Brain lightsheet (Python): usage_lightsheet_brain.md
+      - Annotation import: annotation_import.md
       - Spinal cord (MATLAB): usage_spinal_cord.md
       - Slices (MATLAB): usage_slice.md

@@ -219,57 +219,26 @@ class ExportConfig(BaseModel):
 
 
 class AnnotationFormat(str, Enum):
-    LCT_ZARR = "lct_zarr"
-    LCT_JSON_COORDS = "lct_json_coords"
-    ARIVIS_CSV = "arivis_csv"
-    TIFF_MASK = "tiff_mask"
+    """LightSuite Sample Space v1 — native-resolution exports only."""
 
-
-class AnnotationRole(str, Enum):
-    POINTS = "points"
-    MASK = "mask"
+    POINTS_CSV = "points_csv"
+    MASK_TIFF = "mask_tiff"
 
 
 class AnnotationImportConfig(BaseModel):
-    """External segmentation or cell coordinates to register after brain register."""
+    """Native sample-space annotation to register after brain register."""
 
     format: AnnotationFormat
     path: Path
-    label: str = ""
-    role: AnnotationRole = AnnotationRole.POINTS
-    level: str = Field(
-        default="level_01",
-        description="Zarr pyramid level for lct_zarr (e.g. level_01).",
-    )
-    index_base: int = Field(
-        default=0,
-        description="Coordinate index origin (0 for Arivis/LCT, 1 for LightSuite native).",
-    )
-    axis_order: str = Field(
-        default="zyx",
-        description="Axis order of coordinate columns: zyx (LCT JSON) or xyz (Arivis).",
-    )
-    voxel_um: Annotated[list[float], Field(min_length=3, max_length=3)] | None = Field(
-        default=None,
-        description=(
-            "Voxel size [x, y, z] in µm for the external mask grid. "
-            "Inferred from LCT zarr metadata when unset; defaults to sample.voxel_um for tiff_mask."
-        ),
+    label: str = Field(
+        default="",
+        description="Output filename stem; defaults to the input file stem.",
     )
 
     @field_validator("path")
     @classmethod
     def expand_import_path(cls, value: Path) -> Path:
         return value.expanduser()
-
-    @field_validator("axis_order")
-    @classmethod
-    def normalize_axis_order(cls, value: str) -> str:
-        key = value.strip().lower()
-        if key not in {"zyx", "xyz"}:
-            msg = f"axis_order must be 'zyx' or 'xyz', got {value!r}"
-            raise ValueError(msg)
-        return key
 
 
 class ImportConfig(BaseModel):

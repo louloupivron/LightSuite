@@ -15,38 +15,20 @@ from skimage.transform import resize as sk_resize
 from lightsuite.config.models import (
     AnnotationFormat,
     AnnotationImportConfig,
-    AnnotationRole,
     BrainPipelineConfig,
 )
 from lightsuite.export.atlas_space import transform_mask_to_atlas
 from lightsuite.export.brain_export import _load_transform_params
 from lightsuite.import_.adapters import load_annotation, prepare_points_for_sample
 from lightsuite.import_.models import AnnotationImportResult, ImportedMask, ImportedPoints
+from lightsuite.import_.sample_reference import (
+    load_sample_reference,
+    validate_mask_against_reference,
+)
 from lightsuite.import_.transform import transform_points_to_atlas
 from lightsuite.preprocess.checkpoint import RegOptsCheckpoint
 
 console = Console()
-
-
-def _mask_voxel_um(
-    mask: ImportedMask,
-    spec: AnnotationImportConfig,
-    checkpoint: RegOptsCheckpoint,
-) -> ImportedMask:
-    """Resolve mask voxel size from import spec or the preprocessed sample."""
-    if spec.voxel_um is not None:
-        voxel_um = [float(v) for v in spec.voxel_um]
-    elif mask.metadata.get("voxel_um_from_sample"):
-        voxel_um = [float(v) for v in checkpoint.voxel_um]
-    else:
-        voxel_um = list(mask.voxel_um)
-    return ImportedMask(
-        label=mask.label,
-        volume=mask.volume,
-        voxel_um=voxel_um,
-        source_path=mask.source_path,
-        metadata=mask.metadata,
-    )
 
 
 def _slug(label: str) -> str:
@@ -54,33 +36,20 @@ def _slug(label: str) -> str:
     return cleaned or "annotation"
 
 
-def _resample_mask_to_registration(
-    mask: ImportedMask,
+def _resample_mask_native_to_registration(
+    mask: np.ndarray,
     *,
     target_shape_yxz: tuple[int, int, int],
     native_voxel_um: list[float],
     registres_um: float,
 ) -> np.ndarray:
-    """Resample an external mask onto the registration-resolution Y,X,Z grid."""
-    vol = np.asarray(mask.volume)
-    src_um = np.asarray(mask.voxel_um, dtype=np.float64)
+    """Downsample a native-resolution mask onto the registration-resolution grid."""
+    vol = np.asarray(mask)
     native_um = np.asarray(native_voxel_um, dtype=np.float64)
     reg_um = np.full(3, float(registres_um), dtype=np.float64)
 
-    native_shape = tuple(
-        max(1, int(round(vol.shape[i] * src_um[i] / native_um[i]))) for i in range(3)
-    )
-    if native_shape != vol.shape:
-        vol = sk_resize(
-            vol,
-            native_shape,
-            order=0,
-            preserve_range=True,
-            anti_aliasing=False,
-        )
-
     reg_shape = tuple(
-        max(1, int(round(native_shape[i] * native_um[i] / reg_um[i]))) for i in range(3)
+        max(1, int(round(vol.shape[i] * native_um[i] / reg_um[i]))) for i in range(3)
     )
     if reg_shape != vol.shape:
         vol = sk_resize(
@@ -104,10 +73,10 @@ def _resample_mask_to_registration(
 
 def _import_points(
     spec: AnnotationImportConfig,
-    config: BrainPipelineConfig,
     *,
     transform_params,
     checkpoint: RegOptsCheckpoint,
+    reference,
     output_dir: Path,
     temp_dir: Path,
     write_csv: bool,
@@ -117,13 +86,7 @@ def _import_points(
         msg = f"Expected point annotation for {spec.path}"
         raise TypeError(msg)
 
-    target_size = (checkpoint.ny, checkpoint.nx, checkpoint.nz)
-    prepared = prepare_points_for_sample(
-        loaded,
-        spec,
-        target_voxel_um=checkpoint.voxel_um,
-        target_size_yxz=target_size,
-    )
+    prepared = prepare_points_for_sample(loaded, reference=reference)
     if prepared.coordinates.size == 0:
         console.print(f"[yellow]No in-bounds points for {prepared.label}[/yellow]")
         return AnnotationImportResult(
@@ -176,10 +139,10 @@ def _import_points(
 
 def _import_mask(
     spec: AnnotationImportConfig,
-    config: BrainPipelineConfig,
     *,
     transform_params,
     checkpoint: RegOptsCheckpoint,
+    reference,
     output_dir: Path,
     temp_dir: Path,
 ) -> AnnotationImportResult:
@@ -187,13 +150,22 @@ def _import_mask(
     if not isinstance(loaded, ImportedMask):
         msg = f"Expected mask annotation for {spec.path}"
         raise TypeError(msg)
-    loaded = _mask_voxel_um(loaded, spec, checkpoint)
+
+    voxel_um = [float(v) for v in checkpoint.voxel_um]
+    validate_mask_against_reference(loaded.volume.shape, voxel_um, reference)
+    loaded = ImportedMask(
+        label=loaded.label,
+        volume=loaded.volume,
+        voxel_um=voxel_um,
+        source_path=loaded.source_path,
+        metadata=loaded.metadata,
+    )
 
     reg_shape = tuple(int(v) for v in transform_params.regvolsize)
-    mask_reg = _resample_mask_to_registration(
-        loaded,
+    mask_reg = _resample_mask_native_to_registration(
+        loaded.volume,
         target_shape_yxz=reg_shape,
-        native_voxel_um=checkpoint.voxel_um,
+        native_voxel_um=voxel_um,
         registres_um=checkpoint.registres_um,
     )
     atlas_mask = transform_mask_to_atlas(
@@ -229,7 +201,7 @@ def run_brain_import_annotations(
     annotations: list[AnnotationImportConfig] | None = None,
     write_csv: bool | None = None,
 ) -> list[AnnotationImportResult]:
-    """Import external LCT / Arivis annotations into atlas space."""
+    """Import native sample-space annotations into atlas space."""
     if shutil.which("transformix") is None:
         msg = "transformix must be on PATH for annotation import."
         raise RuntimeError(msg)
@@ -254,26 +226,27 @@ def run_brain_import_annotations(
         raise FileNotFoundError(msg)
 
     checkpoint = RegOptsCheckpoint.load(regopts_path)
+    reference = load_sample_reference(save_path)
     transform_params = _load_transform_params(save_path)
     output_dir = save_path / "volume_registered"
     output_dir.mkdir(parents=True, exist_ok=True)
     temp_root = save_path / "import_annotations_temp"
     temp_root.mkdir(parents=True, exist_ok=True)
 
-    console.print(f"Importing {len(specs)} annotation source(s)...")
+    console.print(
+        f"Importing {len(specs)} annotation source(s) "
+        f"(native grid {reference.shape_yxz}, voxel_um={reference.voxel_um})..."
+    )
     t0 = time.perf_counter()
     results: list[AnnotationImportResult] = []
     for spec in specs:
-        if (
-            spec.role == AnnotationRole.MASK
-            or spec.format in (AnnotationFormat.LCT_ZARR, AnnotationFormat.TIFF_MASK)
-        ):
+        if spec.format == AnnotationFormat.MASK_TIFF:
             results.append(
                 _import_mask(
                     spec,
-                    config,
                     transform_params=transform_params,
                     checkpoint=checkpoint,
+                    reference=reference,
                     output_dir=output_dir,
                     temp_dir=temp_root,
                 )
@@ -282,9 +255,9 @@ def run_brain_import_annotations(
             results.append(
                 _import_points(
                     spec,
-                    config,
                     transform_params=transform_params,
                     checkpoint=checkpoint,
+                    reference=reference,
                     output_dir=output_dir,
                     temp_dir=temp_root,
                     write_csv=write_csv,

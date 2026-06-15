@@ -33,7 +33,7 @@ You will need:
 | 8 | `lightsuite brain export` | Automated | `generateRegisteredBrainVolumes.m` |
 | 9 | `lightsuite brain import-annotations` | Automated | `transformPointsToAtlas.m` |
 
-Built-in cell detection is **not yet ported**; set `detection.enabled: false` and use `import-annotations` for LCT / Arivis exports.
+Built-in cell detection is **not yet ported**; set `detection.enabled: false` and use `import-annotations` with native `points.csv` / `mask.tif` exports (see [Annotation import](annotation_import.md)).
 
 ---
 
@@ -82,27 +82,15 @@ export:
 import:
   write_csv: true
   annotations:
-    - format: arivis_csv
-      path: /data/features.csv
-      axis_order: xyz
-      index_base: 0
-      label: arivis_cells
-    - format: lct_json_coords
-      path: /data/cells_sensitive.json
-      axis_order: zyx
-      index_base: 0
-      label: lct_cells
-    - format: lct_zarr
-      path: /data/mask.zarr
-      level: level_05
-      role: mask
-      label: lct_mask
-    - format: tiff_mask
-      path: /data/segmentation_mask.tif
-      role: mask
-      label: my_mask
-      # voxel_um: [5.26, 5.26, 5.0]   # optional if same as sample.voxel_um
+    - format: points_csv
+      path: /data/annotations/cfos_cells.csv
+      label: cfos_cells
+    - format: mask_tiff
+      path: /data/annotations/region_mask.tif
+      label: hippocampus
 ```
+
+See [Annotation import](annotation_import.md) for the native sample-space convention and tool conversion notes.
 
 Validate before running:
 
@@ -188,6 +176,7 @@ uv run lightsuite brain preprocess -c my_mouse.yaml
 
 - `chan_{N}_sample_register_{20}um.tif` — one multi-page TIFF per channel
 - `regopts.json` — volume metadata and paths (replaces `regopts.mat`)
+- `sample_reference.json` — native sample-space grid for external segmentation exports
 
 ### 2. Check orientation (manual)
 
@@ -415,6 +404,7 @@ uv run lightsuite brain import-annotations -c $CONFIG
 ```
 <save_path>/
 ├── regopts.json                          # Preprocess + init-registration state
+├── sample_reference.json                 # Native grid for external segmentation
 ├── brain_orientation.txt                 # Axis permutation
 ├── slice_correspondence.json             # AP sample ↔ atlas plane map (align-slices)
 ├── auto_points_refine_stats.json         # AP filter stats (refine-auto-points)
@@ -493,7 +483,9 @@ All channel folders must have the same `(ny, nx, nz)` and matching slice orderin
 
 ## Import external annotations
 
-After `register`, map LCT or Arivis exports into atlas space:
+After `register`, warp native sample-space coordinates or masks into atlas space.
+
+Full specification: **[Annotation import](annotation_import.md)**.
 
 ```bash
 uv run lightsuite brain import-annotations -c my_mouse.yaml
@@ -503,10 +495,8 @@ Supported formats (YAML `import.annotations`):
 
 | `format` | Input | Notes |
 |----------|-------|-------|
-| `arivis_csv` | Blob Finder features CSV | Uses intensity COM columns; `index_base: 0` |
-| `lct_json_coords` | `[[z,y,x], …]` JSON list | Set `axis_order: zyx` |
-| `lct_zarr` | OME-NGFF mask pyramid | `role: mask`; use a coarse `level` (e.g. `level_05`) for large brains |
-| `tiff_mask` | 3D TIFF label/binary mask | `role: mask`; same Y,X,Z layout as registration TIFFs; `voxel_um` defaults to `sample.voxel_um` |
+| `points_csv` | CSV with `x,y,z` columns | 1-based native voxel indices; see `sample_reference.json` |
+| `mask_tiff` | 3D binary TIFF | Shape `(Y,X,Z)` at native resolution; matches `sample_reference.json` |
 
 Outputs land in `volume_registered/` (`*_atlas_coords.npz`, optional CSV, mask TIFF).
 

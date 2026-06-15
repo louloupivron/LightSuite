@@ -339,4 +339,19 @@ def preprocess_lightsheet_volume(config: BrainPipelineConfig) -> PreprocessResul
     checkpoint.save(regopts_path)
     console.print(f"Wrote checkpoint [bold]{regopts_path}[/bold]")
 
+    from lightsuite.import_.sample_reference import write_sample_reference
+
+    ref_path = write_sample_reference(
+        config.sample.save_path,
+        sample_name=config.sample.name,
+        ny=ny,
+        nx=nx,
+        nz=nz,
+        voxel_um=[vx, vy, vz],
+    )
+    console.print(
+        f"Wrote native sample-space reference [bold]{ref_path}[/bold] "
+        "(use for external segmentation exports)"
+    )
+
     return PreprocessResult(checkpoint=checkpoint, regvolpaths=regvolpaths)

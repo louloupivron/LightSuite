@@ -40,3 +40,14 @@ compute:
 export:
   registered_volume_format: ome_zarr
   write_pyramid: true
+
+# Optional: import native sample-space annotations after register (see docs/annotation_import.md)
+# import:
+#   write_csv: true
+#   annotations:
+#     - format: points_csv
+#       path: /path/to/cells.csv
+#       label: cells
+#     - format: mask_tiff
+#       path: /path/to/mask.tif
+#       label: region_mask

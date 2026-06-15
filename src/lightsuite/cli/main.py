@@ -95,7 +95,7 @@ def brain_import_annotations(
         help="Write atlas coordinate CSVs for point imports.",
     ),
 ) -> None:
-    """Register external LCT / Arivis annotations (transformPointsToAtlas.m)."""
+    """Register native sample-space annotations into atlas space."""
     from lightsuite.config.loader import load_config
     from lightsuite.import_.brain_import import run_brain_import_annotations
 
