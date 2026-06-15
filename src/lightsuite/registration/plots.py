@@ -8,16 +8,27 @@ import matplotlib.pyplot as plt
 import numpy as np
 from skimage.segmentation import find_boundaries
 
-from lightsuite.gui.slices import (
-    needs_allen_display_reorientation,
-    prepare_display_slice,
-    volume_index_to_image,
+from lightsuite.atlas.display import (
+    canonical_view_name,
+    canonical_view_slice,
+    cut_axis_for_plot_dim,
 )
+from lightsuite.gui.slices import volume_index_to_image
 from lightsuite.registration.warp import warp_atlas_to_sample
 
 # Re-export for tests and callers that imported from plots historically.
-reorient_registration_slice = prepare_display_slice
-prepare_registration_slice = prepare_display_slice
+reorient_registration_slice = canonical_view_slice
+prepare_registration_slice = canonical_view_slice
+
+__all__ = [
+    "boundary_volume_from_annotation",
+    "canonical_view_slice",
+    "plot_annotation_comparison",
+    "prepare_registration_slice",
+    "reorient_registration_slice",
+    "save_initial_registration_previews",
+    "save_registration_stage_previews",
+]
 
 
 def boundary_volume_from_annotation(annotation: np.ndarray) -> np.ndarray:
@@ -78,14 +89,15 @@ def plot_annotation_comparison(
     *,
     n_show: int = 8,
     pxsize: tuple[float, float] = (1.0, 1.0),
-    permvec: list[int] | None = None,
+    atlas_provider: str = "allen",
 ) -> plt.Figure:
     """Plot sample slices with warped atlas boundary mask overlaid (sample only)."""
     if dimplot not in {1, 2, 3}:
         msg = f"dimplot must be 1, 2, or 3, got {dimplot}"
         raise ValueError(msg)
 
-    ny = volume.shape[dimplot - 1]
+    cut_axis = cut_axis_for_plot_dim(atlas_provider, dimplot)
+    ny = volume.shape[cut_axis - 1]
     ishow = np.round(np.linspace(0.15 * ny, 0.85 * ny, n_show)).astype(int)
     ishow = np.clip(ishow, 1, ny)
 
@@ -94,16 +106,16 @@ def plot_annotation_comparison(
 
     for ii, islice in enumerate(ishow):
         ax = axes[ii]
-        chooserow = np.array([islice, dimplot], dtype=int)
-        histim = prepare_display_slice(
+        chooserow = np.array([islice, cut_axis], dtype=int)
+        histim = canonical_view_slice(
             volume_index_to_image(volume, chooserow),
-            dimplot,
-            permvec,
+            atlas_provider=atlas_provider,
+            cut_axis=cut_axis,
         )
-        annotim = prepare_display_slice(
+        annotim = canonical_view_slice(
             volume_index_to_image(boundary, chooserow),
-            dimplot,
-            permvec,
+            atlas_provider=atlas_provider,
+            cut_axis=cut_axis,
         )
         if np.issubdtype(np.asarray(annotim).dtype, np.integer):
             row, col = annotation_boundary_pixels(annotim.astype(np.float32))
@@ -127,7 +139,8 @@ def plot_annotation_comparison(
         xlim, ylim = _comparison_axis_limits(histim.shape, pxsize, row, col)
         ax.set_xlim(xlim)
         ax.set_ylim(ylim)
-        ax.set_title(str(islice))
+        view = canonical_view_name(dimplot)
+        ax.set_title(f"{islice} · {view}")
         ax.axis("off")
 
     fig.subplots_adjust(left=0.01, right=0.99, top=0.95, bottom=0.02, wspace=0.05, hspace=0.08)
@@ -141,7 +154,7 @@ def save_initial_registration_previews(
     transform: np.ndarray,
     *,
     boundary_atlas: np.ndarray | None = None,
-    permvec: list[int] | None = None,
+    atlas_provider: str = "allen",
 ) -> int:
     """Write dim{1,2,3}_initial_registration.png using the coarse similarity transform.
 
@@ -173,7 +186,7 @@ def save_initial_registration_previews(
             sample_u8,
             annotation_warped,
             idim,
-            permvec=permvec,
+            atlas_provider=atlas_provider,
         )
         out = save_path / f"dim{idim}_initial_registration.png"
         fig.savefig(out, dpi=120, bbox_inches="tight")
@@ -189,7 +202,7 @@ def save_registration_stage_previews(
     annotation_in_sample_space: np.ndarray,
     stage: str,
     *,
-    permvec: list[int] | None = None,
+    atlas_provider: str = "allen",
 ) -> None:
     """Write ``{name}_dim{1,2,3}_{stage}.png`` (MATLAB ``plotAnnotationComparison`` style).
 
@@ -199,7 +212,9 @@ def save_registration_stage_previews(
     save_path = Path(save_path)
     ann = np.asarray(annotation_in_sample_space, dtype=np.float32)
     for dimplot in range(1, 4):
-        fig = plot_annotation_comparison(sample_u8, ann, dimplot, permvec=permvec)
+        fig = plot_annotation_comparison(
+            sample_u8, ann, dimplot, atlas_provider=atlas_provider
+        )
         out = save_path / f"{sample_name}_dim{dimplot}_{stage}.png"
         fig.savefig(out, dpi=120, bbox_inches="tight")
         plt.close(fig)

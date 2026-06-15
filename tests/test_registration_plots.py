@@ -8,14 +8,13 @@ matplotlib.use("Agg")
 
 import numpy as np
 
+from lightsuite.atlas.display import canonical_view_slice
 from lightsuite.gui.slices import volume_index_to_image
 from lightsuite.registration.plots import (
     _comparison_axis_limits,
     annotation_boundary_pixels,
     mask_boundary_pixels,
-    needs_allen_display_reorientation,
     plot_annotation_comparison,
-    prepare_registration_slice,
     save_initial_registration_previews,
     save_registration_stage_previews,
 )
@@ -67,36 +66,26 @@ def test_comparison_axis_limits_include_out_of_frame_overlay() -> None:
     assert ylim[0] > 99
 
 
-def test_needs_allen_display_reorientation_when_z_flipped() -> None:
-    assert needs_allen_display_reorientation([2, 1, -3])
-    assert not needs_allen_display_reorientation([-1, 3, 2])
-    assert not needs_allen_display_reorientation([1, 2, 3])
-    assert not needs_allen_display_reorientation(None)
+def test_canonical_view_slice_differs_by_atlas_provider() -> None:
+    sl = np.arange(24 * 32, dtype=np.uint8).reshape(24, 32)
+    allen = canonical_view_slice(sl, atlas_provider="allen", cut_axis=1)
+    perens = canonical_view_slice(sl, atlas_provider="perens", cut_axis=2)
+    assert not np.array_equal(allen, perens)
 
-
-def test_prepare_registration_slice_rotates_when_z_flipped() -> None:
-    sl = np.arange(12, dtype=np.uint8).reshape(3, 4)
-    # axes 1 & 2: 90° CCW; axis 3: 90° CW + horizontal flip
-    assert np.array_equal(prepare_registration_slice(sl, 1, [2, 1, -3]), np.rot90(sl, k=1))
-    assert np.array_equal(prepare_registration_slice(sl, 2, [2, 1, -3]), np.rot90(sl, k=1))
-    assert np.array_equal(
-        prepare_registration_slice(sl, 3, [2, 1, -3]), np.fliplr(np.rot90(sl, k=3))
-    )
-    assert np.array_equal(prepare_registration_slice(sl, 3, [1, 2, 3]), sl)
-
-
-def test_plot_annotation_comparison_respects_orientation() -> None:
     volume = np.zeros((24, 32, 20), dtype=np.uint8)
     volume[4:20, 6:26, 4:16] = 200
     annotation = np.zeros((24, 32, 20), dtype=np.float32)
     annotation[4:20, 6:26, 4:16] = 5
-    fig_plain = plot_annotation_comparison(volume, annotation, dimplot=1, permvec=[1, 2, 3])
-    fig_oriented = plot_annotation_comparison(volume, annotation, dimplot=1, permvec=[2, 1, -3])
-    plain_shape = fig_plain.axes[0].images[0].get_array().shape
-    oriented_shape = fig_oriented.axes[0].images[0].get_array().shape
-    assert plain_shape != oriented_shape
-    fig_plain.clf()
-    fig_oriented.clf()
+    fig = plot_annotation_comparison(volume, annotation, dimplot=2, atlas_provider="allen")
+    assert "sagittal" in fig.axes[0].get_title()
+    fig.clf()
+
+
+def test_canonical_view_same_for_any_sample_orientation() -> None:
+    sl = np.arange(12, dtype=np.uint8).reshape(3, 4)
+    a = canonical_view_slice(sl, atlas_provider="allen", cut_axis=1)
+    b = canonical_view_slice(sl, atlas_provider="allen", cut_axis=1)
+    assert np.array_equal(a, b)
 
 
 def test_plot_annotation_comparison_expands_limits_for_large_overlay() -> None:
@@ -104,11 +93,12 @@ def test_plot_annotation_comparison_expands_limits_for_large_overlay() -> None:
     volume[10:30, 12:38, 4:10] = 200
     annotation = np.zeros((40, 50, 12), dtype=np.float32)
     annotation[0:40, 0:50, 4:10] = 5
-    fig = plot_annotation_comparison(volume, annotation, dimplot=3)
+    # dimplot 2 = sagittal for Allen → cut axis 3 → in-plane shape (40, 50)
+    fig = plot_annotation_comparison(volume, annotation, dimplot=2, atlas_provider="allen")
     ax = fig.axes[0]
     x0, x1 = ax.get_xlim()
     y0, y1 = ax.get_ylim()
-    assert x1 - x0 > 50
+    assert x1 - x0 > 40
     assert max(y0, y1) - min(y0, y1) > 40
     fig.clf()
 

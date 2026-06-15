@@ -469,7 +469,7 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
         voltoshow_padded,
         avaffine,
         "affine_registration",
-        permvec=list(perm),
+        atlas_provider=config.atlas.provider.value,
     )
 
     elastix_temp = save_path / "elastix_temp"
@@ -520,7 +520,7 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
         voltoshow_padded,
         avreg_padded,
         "bspline_registration",
-        permvec=list(perm),
+        atlas_provider=config.atlas.provider.value,
     )
 
     inverse_dir = save_path / "elastix_inverse_temp"

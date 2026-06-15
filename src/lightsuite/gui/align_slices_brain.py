@@ -39,7 +39,7 @@ def _align_slices_pair(
         prepare_display_slice(
             volume_index_to_image(data.sample_volume, row),
             cut_axis,
-            data.permvec,
+            data.atlas_provider,
         )
     )
     atlas_row = chooserow_with_atlas_plane(row, atlas_plane)
@@ -47,7 +47,7 @@ def _align_slices_pair(
         prepare_display_slice(
             volume_index_to_image(data.atlas_template, atlas_row),
             cut_axis,
-            data.permvec,
+            data.atlas_provider,
         )
     )
     return sample, atlas

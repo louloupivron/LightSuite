@@ -125,7 +125,7 @@ def initialize_brain_registration(config: BrainPipelineConfig) -> RegOptsCheckpo
         avreg,
         transform_matlab,
         boundary_atlas=boundary_reg,
-        permvec=list(permvec),
+        atlas_provider=config.atlas.provider.value,
     )
     preview_elapsed = time.perf_counter() - t0
 

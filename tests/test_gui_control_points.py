@@ -21,8 +21,8 @@ from lightsuite.gui.match_points_brain import (
 from lightsuite.registration.warp import warp_volume_affine
 from lightsuite.gui.chooselist import generate_control_point_list
 from lightsuite.gui.control_points import ControlPointSession, load_registration_control_point_session
+from lightsuite.atlas.display import canonical_view_transform
 from lightsuite.gui.slices import (
-    allen_display_transform,
     layer_xy_from_slice_pixels,
     map_display_pixels_to_slice,
     map_slice_pixels_to_display,
@@ -51,8 +51,8 @@ def test_boundary_overlay_follows_affine_warp() -> None:
     shifted[0, 3] = 6.0
     warped_id = warp_volume_affine(ann, identity, shape, order=0, point_coords="array")
     warped_shift = warp_volume_affine(ann, shifted, shape, order=0, point_coords="array")
-    overlay_id = _boundary_overlay(warped_id, row, permvec=[1, 2, 3])
-    overlay_shift = _boundary_overlay(warped_shift, row, permvec=[1, 2, 3])
+    overlay_id = _boundary_overlay(warped_id, row, atlas_provider="allen")
+    overlay_shift = _boundary_overlay(warped_shift, row, atlas_provider="allen")
     assert overlay_id.shape == overlay_shift.shape
     assert overlay_id.sum() > 0
     assert overlay_shift.sum() > 0
@@ -63,18 +63,18 @@ def test_control_point_layer_xy_roundtrip() -> None:
     vol = np.zeros((24, 24, 24), dtype=np.float32)
     chooserow = np.array([12, 2, 1, 1], dtype=int)  # cut along axis 2 (X)
     slice_shape = tuple(volume_index_to_image(vol, chooserow).shape)
-    permvec = [1, 2, 3]
+    atlas_provider = "allen"
     stored = [
         _layer_xy_to_volume_point(
             (4.0, 7.0),
             chooserow,
             slice_shape=slice_shape,
-            permvec=permvec,
+            atlas_provider=atlas_provider,
             timestamp=1.0,
         )
     ]
     xy = _volume_points_to_layer_xy(
-        stored, chooserow, slice_shape=slice_shape, permvec=permvec
+        stored, chooserow, slice_shape=slice_shape, atlas_provider=atlas_provider
     )
     assert xy.shape == (1, 2)
     assert np.allclose(xy[0], [4.0, 7.0])
@@ -82,7 +82,7 @@ def test_control_point_layer_xy_roundtrip() -> None:
         (float(xy[0, 0]), float(xy[0, 1])),
         chooserow,
         slice_shape=slice_shape,
-        permvec=permvec,
+        atlas_provider=atlas_provider,
         timestamp=2.0,
     )
     assert again[0] == stored[0][0]
@@ -90,23 +90,25 @@ def test_control_point_layer_xy_roundtrip() -> None:
     assert again[2] == stored[0][2]
 
 
-def test_display_slice_coordinate_roundtrip_when_z_flipped() -> None:
+def test_display_slice_coordinate_roundtrip_per_atlas() -> None:
     vol = np.zeros((24, 32, 20), dtype=np.float32)
-    permvec = [2, 1, -3]
     for cut_axis in (1, 2, 3):
         chooserow = np.array([12, cut_axis, 1, 1], dtype=int)
         slice_shape = tuple(volume_index_to_image(vol, chooserow).shape)
         row, col = 5.0, 9.0
-        layer_xy = layer_xy_from_slice_pixels(row, col, slice_shape, cut_axis, permvec)
-        back_row, back_col = slice_pixels_from_layer_xy(layer_xy, slice_shape, cut_axis, permvec)
-        assert np.allclose(back_row, row)
-        assert np.allclose(back_col, col)
+        for provider in ("allen", "perens"):
+            layer_xy = layer_xy_from_slice_pixels(row, col, slice_shape, cut_axis, provider)
+            back_row, back_col = slice_pixels_from_layer_xy(
+                layer_xy, slice_shape, cut_axis, provider
+            )
+            assert np.allclose(back_row, row)
+            assert np.allclose(back_col, col)
 
 
 def test_display_transform_pixel_roundtrip_with_flip() -> None:
     slice_shape = (24, 32)
-    transform = allen_display_transform(3)
-    assert transform.flip_lr
+    transform = canonical_view_transform("allen", 3)
+    assert transform.rot90_k == 1
     row, col = 7.0, 11.0
     disp_row, disp_col = map_slice_pixels_to_display(row, col, slice_shape, transform)
     back_row, back_col = map_display_pixels_to_slice(disp_row, disp_col, slice_shape, transform)

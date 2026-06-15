@@ -56,7 +56,7 @@ def _volume_points_to_layer_xy(
     chooserow: np.ndarray,
     *,
     slice_shape: tuple[int, int],
-    permvec: list[int],
+    atlas_provider: str,
 ) -> np.ndarray:
     """Map stored 4-column points to napari layer (row, col) coordinates."""
     if not points:
@@ -69,7 +69,7 @@ def _volume_points_to_layer_xy(
         pts[:, plot_axes[1]],
         slice_shape,
         cut_axis,
-        permvec,
+        atlas_provider,
     )
 
 
@@ -78,7 +78,7 @@ def _layer_xy_to_volume_point(
     chooserow: np.ndarray,
     *,
     slice_shape: tuple[int, int],
-    permvec: list[int],
+    atlas_provider: str,
     timestamp: float,
     plane_along_cut_axis: int | None = None,
 ) -> list[float]:
@@ -89,7 +89,7 @@ def _layer_xy_to_volume_point(
         np.asarray([xy], dtype=float),
         slice_shape,
         int(chooserow[1]),
-        permvec,
+        atlas_provider,
     )
     point = np.zeros(4, dtype=float)
     point[plot_axes[0]] = row[0]
@@ -133,7 +133,7 @@ def _sync_store_from_layer(
     layer_xy: np.ndarray,
     *,
     slice_shape: tuple[int, int],
-    permvec: list[int],
+    atlas_provider: str,
     atlas_plane: int | None = None,
 ) -> None:
     """Persist napari layer coordinates; preserve timestamps when dragging existing points."""
@@ -149,7 +149,7 @@ def _sync_store_from_layer(
                 (float(pt[0]), float(pt[1])),
                 chooserow,
                 slice_shape=slice_shape,
-                permvec=permvec,
+                atlas_provider=atlas_provider,
                 timestamp=ts,
                 plane_along_cut_axis=plane,
             )
@@ -170,7 +170,7 @@ def _boundary_overlay(
     warped_annotation: np.ndarray,
     chooserow: np.ndarray,
     *,
-    permvec: list[int],
+    atlas_provider: str,
 ) -> np.ndarray:
     """Extract boundary mask from annotation already warped into sample space."""
     from scipy.ndimage import convolve
@@ -180,7 +180,7 @@ def _boundary_overlay(
     kernel = np.ones((3, 3)) / 9.0
     blurred = convolve(edges, kernel, mode="constant")
     overlay = (np.round(blurred) != edges).astype(float)
-    return prepare_display_slice(overlay, int(chooserow[1]), permvec)
+    return prepare_display_slice(overlay, int(chooserow[1]), atlas_provider)
 
 
 def _chooselist_slice_label(chooselist: np.ndarray, slice_idx: int) -> str:
@@ -359,7 +359,7 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
                     data.session.histology_control_points[idx - 1],
                     chooserow,
                     slice_shape=slice_shape,
-                    permvec=data.permvec,
+                    atlas_provider=data.atlas_provider,
                 ),
             )
             _apply_layer_points(
@@ -368,7 +368,7 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
                     data.session.atlas_control_points[idx - 1],
                     chooserow,
                     slice_shape=slice_shape,
-                    permvec=data.permvec,
+                    atlas_provider=data.atlas_provider,
                 ),
             )
         matrix = np.asarray(data.session.atlas2histology_tform, dtype=float)
@@ -376,7 +376,7 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
             overlay_layer.data = _boundary_overlay(
                 _warped_annotation_volume(matrix),
                 chooserow,
-                permvec=data.permvec,
+                atlas_provider=data.atlas_provider,
             )
             overlay_layer.visible = True
         else:
@@ -411,7 +411,7 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
             panel,
             np.asarray(layer.data, dtype=float),
             slice_shape=_raw_slice_shape(data.sample_volume, chooserow),
-            permvec=data.permvec,
+            atlas_provider=data.atlas_provider,
             atlas_plane=plane,
         )
         n_s = len(data.session.histology_control_points[idx - 1])

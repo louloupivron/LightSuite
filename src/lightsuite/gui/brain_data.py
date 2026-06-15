@@ -44,6 +44,7 @@ class BrainMatchPointsData:
     original_trans: np.ndarray
     auto_alignment: np.ndarray
     permvec: list[int]
+    atlas_provider: str
     slice_correspondence: SliceCorrespondence | None = None
 
 
@@ -56,6 +57,7 @@ class BrainAlignSlicesData:
     correspondence_path: Path
     correspondence: SliceCorrespondence
     permvec: list[int]
+    atlas_provider: str
     axis_order: tuple[int, ...] = VOLUME_AXES
 
     def chooselist_for_axis(self, cut_axis: int) -> np.ndarray:
@@ -246,6 +248,7 @@ def load_brain_align_slices_data(config: BrainPipelineConfig) -> BrainAlignSlice
         correspondence_path=correspondence_path,
         correspondence=correspondence,
         permvec=list(permvec),
+        atlas_provider=config.atlas.provider.value,
     )
 
 
@@ -305,6 +308,7 @@ def load_brain_match_points_data(config: BrainPipelineConfig) -> BrainMatchPoint
         original_trans=original_trans,
         auto_alignment=auto_alignment,
         permvec=permvec,
+        atlas_provider=config.atlas.provider.value,
         slice_correspondence=slice_correspondence,
     )
 
@@ -418,7 +422,7 @@ def slice_pair(
         prepare_display_slice(
             volume_index_to_image(data.sample_volume, row),
             cut_axis,
-            data.permvec,
+            data.atlas_provider,
         )
     )
     plane = atlas_plane if atlas_plane is not None else resolve_atlas_plane_index(data, slice_idx)
@@ -427,7 +431,7 @@ def slice_pair(
         prepare_display_slice(
             volume_index_to_image(data.atlas_template, atlas_row),
             cut_axis,
-            data.permvec,
+            data.atlas_provider,
         )
     )
     return sample, atlas
