@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -25,6 +26,7 @@ class TiffStackDiscovery:
     planes_in_time: bool
     use_native_tiff_pages: bool
     stack_read_mode: str = "pages"
+    channel_plane_files: tuple[tuple[Path, ...], ...] | None = None
 
 
 def _list_tiffs(folder: Path) -> list[Path]:
@@ -98,9 +100,39 @@ def _tiff_channel_stack_dims(path: Path) -> tuple[int, int, int, bool, bool, str
     return ny, nx, nz, planes_in_time, use_native, mode
 
 
+def _discover_planeperfile_folder(folder: Path) -> tuple[tuple[Path, ...], int, int, int]:
+    """Return sorted plane TIFFs and ny, nx, nz for one planeperfile root."""
+    tfiles = _list_tiffs(folder)
+    if not tfiles:
+        msg = f"No TIFF files found in {folder}"
+        raise FileNotFoundError(msg)
+
+    nz = len(tfiles)
+    with tifffile.TiffFile(tfiles[0]) as tif:
+        ny, nx = tif.pages[0].shape[:2]
+        n_pages = len(tif.pages)
+    if nz == 1 and n_pages > 1:
+        msg = (
+            f"planeperfile found one TIFF with {n_pages} pages in {folder}. "
+            "Use tiff_type: channelperfile for a multi-page stack, or point "
+            "source.path at a folder with one TIFF file per Z plane."
+        )
+        raise ValueError(msg)
+    if nz == 1:
+        msg = (
+            f"planeperfile found only one TIFF in {folder}. "
+            "Expected many plane files (e.g. z_0001.tif, z_0002.tif, ...). "
+            "Check source.path, or use channelperfile for a single stack file."
+        )
+        raise ValueError(msg)
+    return tuple(tfiles), ny, nx, nz
+
+
 def discover_tiff_stack(
     data_folder: Path,
     tiff_type: TiffLayout = TiffLayout.CHANNEL_PER_FILE,
+    *,
+    channel_folders: Sequence[Path] | None = None,
 ) -> TiffStackDiscovery:
     """Discover TIFF files and volume dimensions under data_folder."""
     folder = data_folder.expanduser().resolve()
@@ -108,33 +140,49 @@ def discover_tiff_stack(
         msg = f"Data folder not found: {folder}"
         raise FileNotFoundError(msg)
 
+    if tiff_type == TiffLayout.PLANE_PER_FILE and channel_folders:
+        roots = tuple(p.expanduser().resolve() for p in channel_folders)
+        channel_planes: list[tuple[Path, ...]] = []
+        ny = nx = nz = 0
+        for i, root in enumerate(roots):
+            if not root.is_dir():
+                msg = f"Channel folder not found: {root}"
+                raise FileNotFoundError(msg)
+            planes, cny, cnx, cnz = _discover_planeperfile_folder(root)
+            channel_planes.append(planes)
+            if i == 0:
+                ny, nx, nz = cny, cnx, cnz
+            elif (cny, cnx, cnz) != (ny, nx, nz):
+                msg = (
+                    f"Channel folders have mismatched dimensions: {root} is "
+                    f"{cny}x{cnx}x{cnz}, expected {ny}x{nx}x{nz}."
+                )
+                raise ValueError(msg)
+        first_planes = channel_planes[0]
+        return TiffStackDiscovery(
+            tiff_type=tiff_type,
+            tfiles=first_planes,
+            ny=ny,
+            nx=nx,
+            nz=nz,
+            nchans=len(channel_planes),
+            multitiffs=False,
+            planes_in_time=False,
+            use_native_tiff_pages=True,
+            stack_read_mode="pages",
+            channel_plane_files=tuple(channel_planes),
+        )
+
     tfiles = _list_tiffs(folder)
     if not tfiles:
         msg = f"No TIFF files found in {folder}"
         raise FileNotFoundError(msg)
 
     if tiff_type == TiffLayout.PLANE_PER_FILE:
-        nz = len(tfiles)
-        with tifffile.TiffFile(tfiles[0]) as tif:
-            ny, nx = tif.pages[0].shape[:2]
-            n_pages = len(tif.pages)
-        if nz == 1 and n_pages > 1:
-            msg = (
-                f"planeperfile found one TIFF with {n_pages} pages in {folder}. "
-                "Use tiff_type: channelperfile for a multi-page stack, or point "
-                "source.path at a folder with one TIFF file per Z plane."
-            )
-            raise ValueError(msg)
-        if nz == 1:
-            msg = (
-                f"planeperfile found only one TIFF in {folder}. "
-                "Expected many plane files (e.g. z_0001.tif, z_0002.tif, ...). "
-                "Check source.path, or use channelperfile for a single stack file."
-            )
-            raise ValueError(msg)
+        plane_files, ny, nx, nz = _discover_planeperfile_folder(folder)
         return TiffStackDiscovery(
             tiff_type=tiff_type,
-            tfiles=tuple(tfiles),
+            tfiles=plane_files,
             ny=ny,
             nx=nx,
             nz=nz,

@@ -61,3 +61,51 @@ def test_preprocess_channel_per_file(tmp_path: Path) -> None:
 
     regopts = save / "regopts.json"
     assert regopts.is_file()
+
+
+def test_preprocess_planeperfile_multi_channel(tmp_path: Path) -> None:
+    ch1 = tmp_path / "channel_488"
+    ch2 = tmp_path / "channel_561"
+    ch1.mkdir()
+    ch2.mkdir()
+    scratch = tmp_path / "scratch"
+    save = tmp_path / "results"
+    save.mkdir()
+
+    for z in range(3):
+        plane = (np.arange(12, dtype=np.uint16).reshape(3, 4) + z * 10)
+        tifffile.imwrite(ch1 / f"plane_{z:03d}.tif", plane)
+        tifffile.imwrite(ch2 / f"plane_{z:03d}.tif", plane + 50)
+
+    config_data = {
+        "sample": {
+            "name": "test",
+            "source": {
+                "format": "tiff_stack",
+                "tiff_type": "planeperfile",
+                "channels": [str(ch1), str(ch2)],
+            },
+            "scratch": str(scratch),
+            "save_path": str(save),
+            "voxel_um": [10.0, 10.0, 10.0],
+        },
+        "registration": {
+            "resolution_um": 20,
+            "channel_primary": 1,
+            "channel_secondary": 2,
+        },
+        "detection": {"enabled": False},
+        "compute": {"workers": 2},
+    }
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.dump(config_data), encoding="utf-8")
+
+    cfg = load_config(config_path)
+    assert cfg.sample.source.path == ch1.resolve()
+    result = preprocess_lightsheet_volume(cfg)
+
+    assert result.checkpoint.nchans == 2
+    assert result.checkpoint.nz == 3
+    assert result.checkpoint.regvolpath_secondary is not None
+    assert (save / "chan_1_sample_register_20um.tif").is_file()
+    assert (save / "chan_2_sample_register_20um.tif").is_file()

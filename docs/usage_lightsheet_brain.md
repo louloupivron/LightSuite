@@ -118,8 +118,9 @@ uv run lightsuite doctor -c my_mouse.yaml
 | Field | Description |
 |-------|-------------|
 | `sample.name` | Short sample identifier (used in output filenames) |
-| `sample.source.path` | Folder containing TIFF files |
+| `sample.source.path` | Folder containing TIFF files (optional when `source.channels` is set; defaults to first channel folder) |
 | `sample.source.tiff_type` | `channelperfile` (BigStitcher-style) or `planeperfile` (Terastitcher-style) |
+| `sample.source.channels` | Optional list of planeperfile roots (one folder per channel). Channel index follows list order. Requires `tiff_type: planeperfile`. |
 | `sample.scratch` | Fast temp directory; **required disk space** for `planeperfile` XY-downsampled memmap (~`2 × ny × nx × nz × (vx/registres)²` bytes) plus detection scratch |
 | `compute.workers` | Parallel slice workers for `channelperfile` stacks (default `4`). **`planeperfile` always uses 1 worker** — many TIFFs are faster read sequentially |
 | `compute.max_in_memory_scratch_gb` | XY-downsampled scratch kept in RAM up to this size (default `24`); larger stacks use `sample.scratch` memmap |
@@ -467,6 +468,26 @@ registration:
 ```
 
 Both channels are preprocessed in step 1; register uses dual fixed-image mutual information in Elastix.
+
+### Multi-channel planeperfile (Terastitcher)
+
+When each channel lives in its own folder of Z-plane TIFFs (e.g. `channel_488/RES(...)/`, `channel_561/RES(...)/`), list the roots under `source.channels` instead of running one config per channel:
+
+```yaml
+sample:
+  source:
+    tiff_type: planeperfile
+    channels:
+      - /data/Gilda/output/channel_488/RES(5690x5834x2052)
+      - /data/Gilda/output/channel_561/RES(5690x5834x2052)
+  save_path: /data/Gilda/output/registered_perens   # shared across channels
+
+registration:
+  channel_primary: 1
+  channel_secondary: 2
+```
+
+All channel folders must have the same `(ny, nx, nz)` and matching slice ordering (files sorted by name). Export applies the same transform to every preprocessed channel.
 
 ---
 

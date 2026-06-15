@@ -29,16 +29,59 @@ class BrainAtlasId(str, Enum):
 
 class SampleSourceConfig(BaseModel):
     format: SourceFormat = SourceFormat.AUTO
-    path: Path
+    path: Path | None = None
     tiff_type: TiffLayout = TiffLayout.CHANNEL_PER_FILE
+    channels: Annotated[list[Path], Field(min_length=1)] | None = Field(
+        default=None,
+        description=(
+            "Optional list of planeperfile roots (one folder per channel, Terastitcher-style). "
+            "Channel index follows list order. Requires tiff_type: planeperfile."
+        ),
+    )
 
     @field_validator("path")
     @classmethod
-    def path_must_exist(cls, value: Path) -> Path:
+    def path_must_exist(cls, value: Path | None) -> Path | None:
+        if value is None:
+            return None
         if not value.expanduser().exists():
             msg = f"Sample source path does not exist: {value}"
             raise ValueError(msg)
         return value.expanduser().resolve()
+
+    @field_validator("channels")
+    @classmethod
+    def channels_must_exist(cls, value: list[Path] | None) -> list[Path] | None:
+        if value is None:
+            return None
+        resolved: list[Path] = []
+        for item in value:
+            expanded = item.expanduser().resolve()
+            if not expanded.is_dir():
+                msg = f"Channel folder not found: {expanded}"
+                raise ValueError(msg)
+            resolved.append(expanded)
+        return resolved
+
+    @model_validator(mode="after")
+    def validate_source_paths(self) -> SampleSourceConfig:
+        if self.channels is not None:
+            if self.tiff_type != TiffLayout.PLANE_PER_FILE:
+                msg = "source.channels is only supported with tiff_type: planeperfile"
+                raise ValueError(msg)
+            if self.path is None:
+                self.path = self.channels[0]
+            return self
+        if self.path is None:
+            msg = "sample.source.path is required when source.channels is not set"
+            raise ValueError(msg)
+        return self
+
+    @property
+    def channel_roots(self) -> tuple[Path, ...] | None:
+        if self.channels is None:
+            return None
+        return tuple(self.channels)
 
 
 class SampleConfig(BaseModel):

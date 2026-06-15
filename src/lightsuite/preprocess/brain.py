@@ -56,7 +56,11 @@ def _slice_jobs_for_channel(
 ) -> list[SliceLoadJob]:
     jobs: list[SliceLoadJob] = []
     if discovery.tiff_type == TiffLayout.PLANE_PER_FILE:
-        for path in discovery.tfiles:
+        if discovery.channel_plane_files is not None:
+            plane_paths = discovery.channel_plane_files[chan0]
+        else:
+            plane_paths = discovery.tfiles
+        for path in plane_paths:
             jobs.append(
                 SliceLoadJob(
                     source_path=str(path),
@@ -235,6 +239,7 @@ def preprocess_lightsheet_volume(config: BrainPipelineConfig) -> PreprocessResul
     discovery = discover_tiff_stack(
         config.sample.source.path,
         tiff_type=config.sample.source.tiff_type,
+        channel_folders=config.sample.source.channel_roots,
     )
     reader = TiffStackReader(discovery, voxel_um=(vx, vy, vz))
     workers = _effective_preprocess_workers(discovery, requested_workers)
@@ -252,11 +257,12 @@ def preprocess_lightsheet_volume(config: BrainPipelineConfig) -> PreprocessResul
             f"Single-file volumetric TIFF: {nz} Z planes "
             f"({discovery.stack_read_mode}, channelperfile)."
         )
-    elif discovery.tiff_type == TiffLayout.PLANE_PER_FILE and nchans == 1:
+    elif discovery.tiff_type == TiffLayout.PLANE_PER_FILE and nchans >= 1:
         est_xy_gb = scratch_bytes / (1024**3)
         where = "RAM" if scratch_in_ram else f"disk memmap on {config.sample.scratch}"
+        channel_note = f", {nchans} channels" if nchans > 1 else ""
         console.print(
-            f"planeperfile: {nz} planes, XY scratch ~{est_xy_gb:.1f} GB in {where} "
+            f"planeperfile: {nz} planes{channel_note}, XY scratch ~{est_xy_gb:.1f} GB in {where} "
             f"(workers={workers})."
         )
 

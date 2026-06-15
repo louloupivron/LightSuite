@@ -72,6 +72,53 @@ def test_planeperfile_rejects_multipage_stack(tmp_path: Path) -> None:
         discover_tiff_stack(folder, tiff_type=TiffLayout.PLANE_PER_FILE)
 
 
+def test_discover_planeperfile_multi_channel(tmp_path: Path) -> None:
+    ch1 = tmp_path / "channel_488"
+    ch2 = tmp_path / "channel_561"
+    ch1.mkdir()
+    ch2.mkdir()
+    for z in range(3):
+        plane = (np.arange(12, dtype=np.uint16).reshape(3, 4) + z * 10)
+        tifffile.imwrite(ch1 / f"plane_{z:03d}.tif", plane)
+        tifffile.imwrite(ch2 / f"plane_{z:03d}.tif", plane + 100)
+
+    discovery = discover_tiff_stack(
+        ch1,
+        tiff_type=TiffLayout.PLANE_PER_FILE,
+        channel_folders=(ch1, ch2),
+    )
+    assert discovery.nchans == 2
+    assert discovery.nz == 3
+    assert discovery.channel_plane_files is not None
+    assert len(discovery.channel_plane_files) == 2
+
+    reader = TiffStackReader(discovery)
+    sl0 = reader.get_slice(2, channel=0)
+    sl1 = reader.get_slice(2, channel=1)
+    assert sl0[0, 0] == 10
+    assert sl1[0, 0] == 110
+    reader.close()
+
+
+def test_discover_planeperfile_multi_channel_mismatched_nz(tmp_path: Path) -> None:
+    ch1 = tmp_path / "ch1"
+    ch2 = tmp_path / "ch2"
+    ch1.mkdir()
+    ch2.mkdir()
+    tifffile.imwrite(ch1 / "z0.tif", np.zeros((4, 5), dtype=np.uint16))
+    tifffile.imwrite(ch1 / "z1.tif", np.zeros((4, 5), dtype=np.uint16))
+    tifffile.imwrite(ch2 / "z0.tif", np.zeros((4, 5), dtype=np.uint16))
+    tifffile.imwrite(ch2 / "z1.tif", np.zeros((4, 5), dtype=np.uint16))
+    tifffile.imwrite(ch2 / "z2.tif", np.zeros((4, 5), dtype=np.uint16))
+
+    with pytest.raises(ValueError, match="mismatched dimensions"):
+        discover_tiff_stack(
+            ch1,
+            tiff_type=TiffLayout.PLANE_PER_FILE,
+            channel_folders=(ch1, ch2),
+        )
+
+
 def test_tiff_reader_get_slice(tmp_path: Path) -> None:
     folder = tmp_path / "sample"
     folder.mkdir()

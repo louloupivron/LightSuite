@@ -1,0 +1,53 @@
+# Example brain lightsheet config (Terastitcher planeperfile, multi-channel).
+# Copy and edit paths for your sample before running:
+#   uv run lightsuite doctor -c examples/Gilda.yaml
+#   uv run lightsuite brain validate-config -c examples/Gilda.yaml
+
+sample:
+  name: Gilda
+  source:
+    format: tiff_stack
+    tiff_type: planeperfile
+    channels:
+      - /media/gbm/NVME2/ALICe-pipelines-data/Gilda/output/channel_488/RES(5690x5834x2052)
+      # - /media/gbm/NVME2/ALICe-pipelines-data/Gilda/output/channel_561/RES(5690x5834x2052)
+  scratch: /media/gbm/NVME2/lightsuite_scratch
+  save_path: /media/gbm/NVME2/ALICe-pipelines-data/Gilda/output/registered_perens
+
+  voxel_um: [2.03, 2.03, 3]
+
+atlas:
+  provider: perens
+  resolution_um: 20
+  atlas_dir: /home/gbm/ALICe-pipelines/LightSuite/atlas/perens_20um
+
+registration:
+  channel_primary: 1
+  channel_secondary: null  # set to 2 when channel_561 is listed above
+  resolution_um: 20
+  cloud_threshold: 3
+  sample_cloud_subsample: 0.25
+  bspline_spatial_scale_mm: 0.64
+  augment_points: true
+  control_point_weight: 0.2
+  orientation: [2, 1, 3]
+  bcpd_path: /home/gbm/ALICe-pipelines/LightSuite/softwares/bcpd-master/
+
+
+detection:
+  enabled: false
+  backend: classical
+  cell_diameter_um: 14
+  thresholds: [0.5, 0.4]
+  channel: null
+  debug: false
+
+compute:
+  use_gpu: false
+  workers: 8
+
+export:
+  save_registered_volume: true
+  write_cells_csv: true
+  registered_volume_format: tiff
+  write_pyramid: true

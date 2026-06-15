@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 
 import numpy as np
@@ -36,9 +37,15 @@ class TiffStackReader:
         path: Path,
         tiff_type: TiffLayout = TiffLayout.CHANNEL_PER_FILE,
         voxel_um: tuple[float, float, float] | None = None,
+        *,
+        channel_folders: Sequence[Path] | None = None,
     ) -> TiffStackReader:
         folder = path if path.is_dir() else path.parent
-        discovery = discover_tiff_stack(folder, tiff_type=tiff_type)
+        discovery = discover_tiff_stack(
+            folder,
+            tiff_type=tiff_type,
+            channel_folders=channel_folders,
+        )
         return cls(discovery, voxel_um=voxel_um)
 
     @property
@@ -61,13 +68,20 @@ class TiffStackReader:
         return handle
 
     def _read_planeperfile(self, z: int, channel: int) -> np.ndarray:
-        if channel != 0:
-            msg = "planeperfile layout has a single channel."
-            raise IndexError(msg)
+        d = self._discovery
+        if d.channel_plane_files is not None:
+            if channel < 0 or channel >= d.nchans:
+                raise IndexError(f"Channel {channel} out of range 0..{d.nchans - 1}")
+            tfiles = d.channel_plane_files[channel]
+        else:
+            if channel != 0:
+                msg = "planeperfile layout has a single channel."
+                raise IndexError(msg)
+            tfiles = d.tfiles
         index = z - 1
-        if index < 0 or index >= len(self._discovery.tfiles):
-            raise IndexError(f"Slice index {z} out of range 1..{self._discovery.nz}")
-        path = self._discovery.tfiles[index]
+        if index < 0 or index >= len(tfiles):
+            raise IndexError(f"Slice index {z} out of range 1..{len(tfiles)}")
+        path = tfiles[index]
         with tifffile.TiffFile(path) as tif:
             return tif.pages[0].asarray()
 

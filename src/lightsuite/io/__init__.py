@@ -26,6 +26,7 @@ def open_sample_reader(config) -> TiffStackReader:
         config.sample.source.path,
         tiff_type=config.sample.source.tiff_type,
         voxel_um=voxel,
+        channel_folders=config.sample.source.channel_roots,
     )
 
 
