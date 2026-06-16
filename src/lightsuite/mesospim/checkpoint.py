@@ -23,6 +23,8 @@ class MesospimRegOptsCheckpoint:
     transform_paths: list[str] | None = None
     cropped_overview_path: str | None = None
     registered_roi_path: str | None = None
+    registered_roi_full_overview_path: str | None = None
+    crop_start_index: list[int] | None = None
     geometry_report_paths: dict[str, str] | None = None
 
     def to_dict(self) -> dict[str, Any]:

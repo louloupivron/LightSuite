@@ -85,7 +85,7 @@ def check_mesospim_geometry(cfg: MesospimPipelineConfig) -> MesospimRegOptsCheck
         remap=meso.tiff_remap,
     )
     apply_image_geometry(overview_pixels, meta_overview, meso.geometry)
-    cropped_pixels = crop_to_physical_box(overview_pixels, overlap_min, overlap_max)
+    cropped_pixels, _crop_start = crop_to_physical_box(overview_pixels, overlap_min, overlap_max)
     write_sitk_hyperstack_tiff(cropped_path, cropped_pixels)
 
     title = f"{overview_stem} vs {_volume_stem(roi_path)} — stage frame (µm)"
@@ -161,6 +161,7 @@ def run_mesospim_registration(cfg: MesospimPipelineConfig) -> MesospimRegOptsChe
         overlap_margin_um=meso.registration.overlap_margin_um,
         registration_bin=meso.registration.registration_bin,
         elastix_stages=meso.registration.elastix_stages,
+        write_full_overview_canvas=meso.registration.write_full_overview_canvas,
     )
 
     checkpoint = MesospimRegOptsCheckpoint(
@@ -175,8 +176,16 @@ def run_mesospim_registration(cfg: MesospimPipelineConfig) -> MesospimRegOptsChe
         transform_paths=[str(p) for p in result.transform_paths],
         cropped_overview_path=str(result.cropped_overview_path),
         registered_roi_path=str(result.registered_roi_path),
+        registered_roi_full_overview_path=(
+            str(result.registered_roi_full_overview_path)
+            if result.registered_roi_full_overview_path is not None
+            else None
+        ),
+        crop_start_index=result.crop_start_index,
     )
     checkpoint.save(mesospim_checkpoint_path(cfg.sample.save_path))
+    if result.registered_roi_full_overview_path is not None:
+        _status(f"Full overview canvas: {result.registered_roi_full_overview_path}")
     _status(f"Registered ROI: {result.registered_roi_path}")
     return checkpoint
 

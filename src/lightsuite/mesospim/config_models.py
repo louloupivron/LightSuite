@@ -93,6 +93,7 @@ class MesospimRegistrationSettings(BaseModel):
     registration_bin: int = Field(default=1, ge=1)
     experiment_name: str = "default"
     elastix_stages: Annotated[list[str], Field(min_length=1)] = ["translation", "rigid"]
+    write_full_overview_canvas: bool = True
 
 
 class MesospimConfig(BaseModel):

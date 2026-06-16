@@ -252,6 +252,33 @@ def read_tiff_as_float(
     return image
 
 
+def load_tiff_zyx_memmap(
+    path: Path,
+    *,
+    overview_path: Path,
+    roi_path: Path,
+    remap: MesospimTiffRemapConfig,
+) -> np.ndarray:
+    """Memory-map a mesoSPIM stack and apply configured axis remapping."""
+    path = path.expanduser().resolve()
+    vol = np.asarray(tifffile.memmap(str(path)))
+    vol = _normalize_tiff_array(vol, path)
+    vol = remap_tiff_array_zyx(
+        vol,
+        path,
+        overview_path=overview_path,
+        roi_path=roi_path,
+        remap=remap,
+    )
+    return _apply_path_extra_flips(
+        vol,
+        path,
+        overview_path=overview_path,
+        roi_path=roi_path,
+        remap=remap,
+    )
+
+
 def write_sitk_hyperstack_tiff(path: Path, image: sitk.Image) -> None:
     """Write Z,Y,X float volume as ImageJ-style hyperstack."""
     path = path.expanduser()

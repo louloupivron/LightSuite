@@ -88,7 +88,7 @@ def crop_to_physical_box(
     image: sitk.Image,
     phys_min: np.ndarray,
     phys_max: np.ndarray,
-) -> sitk.Image:
+) -> tuple[sitk.Image, list[int]]:
     """Extract the index region that covers an axis-aligned physical box."""
     corners = []
     for x in (phys_min[0], phys_max[0]):
@@ -105,7 +105,25 @@ def crop_to_physical_box(
     idx_hi = np.clip(idx_hi, 0, size_img - 1)
     start = idx_lo.tolist()
     crop_size = (idx_hi - idx_lo + 1).tolist()
-    return sitk.RegionOfInterest(image, crop_size, start)
+    cropped = sitk.RegionOfInterest(image, crop_size, start)
+    return cropped, start
+
+
+def embed_crop_in_full_overview(
+    full_overview: sitk.Image,
+    crop: sitk.Image,
+    crop_start_index: list[int],
+) -> sitk.Image:
+    """Place a cropped overlap volume into a zero-filled full overview canvas."""
+    canvas = sitk.Image(full_overview.GetSize(), sitk.sitkFloat32)
+    canvas.CopyInformation(full_overview)
+    return sitk.Paste(
+        canvas,
+        crop,
+        crop.GetSize(),
+        [0, 0, 0],
+        crop_start_index,
+    )
 
 
 def resample_to_reference_grid(moving: sitk.Image, reference: sitk.Image) -> sitk.Image:
@@ -125,12 +143,12 @@ def prepare_registration_pair(
     roi_full: sitk.Image,
     *,
     margin_um: float = 0.0,
-) -> tuple[sitk.Image, sitk.Image, tuple[np.ndarray, np.ndarray]]:
+) -> tuple[sitk.Image, sitk.Image, tuple[np.ndarray, np.ndarray], list[int]]:
     """Crop fixed to shared FOV and resample ROI onto that grid."""
     overlap_box = overlap_physical_bounds(fixed, roi_full, margin_um=margin_um)
-    fixed_cropped = crop_to_physical_box(fixed, *overlap_box)
+    fixed_cropped, crop_start_index = crop_to_physical_box(fixed, *overlap_box)
     moving = resample_to_reference_grid(roi_full, fixed_cropped)
-    return fixed_cropped, moving, overlap_box
+    return fixed_cropped, moving, overlap_box, crop_start_index
 
 
 def geometry_report(

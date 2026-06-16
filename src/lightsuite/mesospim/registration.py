@@ -8,7 +8,12 @@ from pathlib import Path
 
 import SimpleITK as sitk
 
-from lightsuite.mesospim.geometry import prepare_registration_pair, voxel_count_gb
+from lightsuite.mesospim.geometry import (
+    embed_crop_in_full_overview,
+    prepare_registration_pair,
+    resample_to_reference_grid,
+    voxel_count_gb,
+)
 from lightsuite.mesospim.io import read_tiff_as_float, sitk_to_itk
 
 
@@ -43,7 +48,9 @@ class MesospimRegistrationResult:
     transform_paths: list[Path]
     cropped_overview_path: Path
     registered_roi_path: Path
+    registered_roi_full_overview_path: Path | None
     overlap_box_um: tuple[list[float], list[float]]
+    crop_start_index: list[int]
     fixed_voxel_gb: float
     moving_voxel_gb: float
 
@@ -63,6 +70,7 @@ def register_roi_to_overview(
     overlap_margin_um: float,
     registration_bin: int,
     elastix_stages: list[str],
+    write_full_overview_canvas: bool = True,
 ) -> MesospimRegistrationResult:
     """Load stacks, prepare pair, run itk-elastix, and write outputs."""
     import itk
@@ -90,38 +98,52 @@ def register_roi_to_overview(
     apply_image_geometry(fixed, overview_meta, geometry)
     apply_image_geometry(roi_full, roi_meta, geometry)
 
-    fixed, moving, overlap_box = prepare_registration_pair(
+    fixed_cropped, moving, overlap_box, crop_start_index = prepare_registration_pair(
         fixed,
         roi_full,
         margin_um=overlap_margin_um,
     )
+    del roi_full
 
+    fixed_for_elastix = fixed_cropped
+    moving_for_elastix = moving
     if registration_bin > 1:
         shrink = (registration_bin, registration_bin, registration_bin)
-        fixed = sitk.Shrink(fixed, shrink)
-        moving = sitk.Shrink(moving, shrink)
+        fixed_for_elastix = sitk.Shrink(fixed_cropped, shrink)
+        moving_for_elastix = sitk.Shrink(moving, shrink)
 
-    fixed_gb = voxel_count_gb(fixed)
-    moving_gb = voxel_count_gb(moving)
+    fixed_gb = voxel_count_gb(fixed_for_elastix)
+    moving_gb = voxel_count_gb(moving_for_elastix)
 
     parameter_object = build_elastix_parameter_object(elastix_stages)
     result_itk, _ = itk.elastix_registration_method(
-        sitk_to_itk(fixed),
-        sitk_to_itk(moving),
+        sitk_to_itk(fixed_for_elastix),
+        sitk_to_itk(moving_for_elastix),
         parameter_object=parameter_object,
         output_directory=str(output_dir),
         log_to_console=False,
     )
 
     result_sitk = sitk.GetImageFromArray(itk.GetArrayFromImage(result_itk))
-    result_sitk.CopyInformation(fixed)
+    result_sitk.CopyInformation(fixed_for_elastix)
+    if registration_bin > 1:
+        result_sitk = resample_to_reference_grid(result_sitk, fixed_cropped)
 
     cropped_overview_path = output_dir / f"{experiment_slug}_{overview_stem}_cropped_overlap.tif"
     registered_roi_path = (
         output_dir / f"{experiment_slug}_{roi_stem}_registered_to_{overview_stem}.tif"
     )
-    sitk.WriteImage(fixed, str(cropped_overview_path), useCompression=True)
+    sitk.WriteImage(fixed_cropped, str(cropped_overview_path), useCompression=True)
     sitk.WriteImage(result_sitk, str(registered_roi_path), useCompression=True)
+
+    registered_roi_full_overview_path: Path | None = None
+    if write_full_overview_canvas:
+        full_canvas = embed_crop_in_full_overview(fixed, result_sitk, crop_start_index)
+        registered_roi_full_overview_path = (
+            output_dir
+            / f"{experiment_slug}_{roi_stem}_registered_to_{overview_stem}_in_full_overview.tif"
+        )
+        sitk.WriteImage(full_canvas, str(registered_roi_full_overview_path), useCompression=True)
 
     transform_paths = sorted(output_dir.glob("TransformParameters.*.txt"))
     if not transform_paths:
@@ -134,7 +156,9 @@ def register_roi_to_overview(
         transform_paths=transform_paths,
         cropped_overview_path=cropped_overview_path,
         registered_roi_path=registered_roi_path,
+        registered_roi_full_overview_path=registered_roi_full_overview_path,
         overlap_box_um=(overlap_min.tolist(), overlap_max.tolist()),
+        crop_start_index=crop_start_index,
         fixed_voxel_gb=fixed_gb,
         moving_voxel_gb=moving_gb,
     )

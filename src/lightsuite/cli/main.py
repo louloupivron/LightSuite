@@ -289,6 +289,25 @@ def mesospim_register(
     run_mesospim_registration(load_mesospim_config(config))
 
 
+@mesospim_app.command("inspect")
+def mesospim_inspect(
+    config: str = typer.Option(..., "--config", "-c", help="mesoSPIM pipeline YAML config."),
+    headless: bool = typer.Option(
+        False,
+        "--headless",
+        help="Validate inspect inputs without opening Napari.",
+    ),
+) -> None:
+    """Compare the 1× overview and registered ROI embedded in the full overview canvas."""
+    from lightsuite.config.loader import load_mesospim_config
+    from lightsuite.gui.inspect_mesospim import run_mesospim_inspect
+
+    cfg = load_mesospim_config(config)
+    paths = run_mesospim_inspect(cfg, headless=headless)
+    typer.echo(f"Overview: {paths.overview_path}")
+    typer.echo(f"Registered canvas: {paths.registered_full_overview_path}")
+
+
 def run() -> None:
     app()
 

@@ -48,10 +48,29 @@ def test_overlap_and_prepare_pair() -> None:
     assert overlap_min[0] < overlap_max[0]
     assert overlap_min[1] <= overlap_max[1]
 
-    fixed_crop, moving_resampled, box = prepare_registration_pair(fixed, moving, margin_um=0.0)
+    fixed_crop, moving_resampled, box, crop_start = prepare_registration_pair(
+        fixed, moving, margin_um=0.0
+    )
     assert fixed_crop.GetSize() == moving_resampled.GetSize()
     assert box[0].shape == (3,)
     assert box[1].shape == (3,)
+    assert len(crop_start) == 3
 
     pmin, pmax = physical_bounds(fixed_crop)
     assert np.all(pmin <= pmax)
+
+
+def test_embed_crop_in_full_overview() -> None:
+    from lightsuite.mesospim.geometry import embed_crop_in_full_overview
+
+    full_arr = np.zeros((10, 20, 20), dtype=np.float32)
+    crop_arr = np.ones((4, 6, 8), dtype=np.float32)
+    full = sitk.GetImageFromArray(full_arr)
+    crop = sitk.GetImageFromArray(crop_arr)
+    crop_start = [5, 7, 3]
+
+    embedded = embed_crop_in_full_overview(full, crop, crop_start)
+    out = sitk.GetArrayFromImage(embedded)
+    assert out.shape == full_arr.shape
+    assert np.count_nonzero(out) == crop_arr.size
+    assert out[3:7, 7:13, 5:13].sum() == crop_arr.sum()

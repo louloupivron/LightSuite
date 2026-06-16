@@ -3,6 +3,8 @@
 #   uv run lightsuite mesospim validate-config -c examples/JulieBuron_multires.yaml
 #   uv run lightsuite mesospim check-geometry      -c examples/JulieBuron_multires.yaml
 #   uv run lightsuite mesospim register            -c examples/JulieBuron_multires.yaml
+#   uv sync --extra gui
+#   uv run lightsuite mesospim inspect             -c examples/JulieBuron_multires.yaml
 
 sample:
   name: JulieBuron
@@ -34,3 +36,4 @@ mesospim:
     registration_bin: 1     # use 2 for a faster smoke test
     experiment_name: baseline_561_TC
     elastix_stages: [translation, rigid]
+    write_full_overview_canvas: true
