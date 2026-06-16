@@ -50,6 +50,29 @@ def test_discover_imagej_hyperstack_metadata(tmp_path: Path) -> None:
     assert sl[0, 0] == 20
 
 
+def test_discover_compressed_multipage_uses_pages(tmp_path: Path) -> None:
+    folder = tmp_path / "sample"
+    folder.mkdir()
+    slices = [np.full((10, 12), i, dtype=np.uint16) for i in range(3)]
+    tifffile.imwrite(
+        folder / "stack.tif",
+        np.stack(slices, axis=0),
+        photometric="minisblack",
+        compression="lzw",
+        bigtiff=True,
+    )
+
+    discovery = discover_tiff_stack(folder, tiff_type=TiffLayout.CHANNEL_PER_FILE)
+    assert discovery.nz == 3
+    assert discovery.stack_read_mode == "pages"
+    assert discovery.use_native_tiff_pages is True
+
+    reader = TiffStackReader.open(folder, tiff_type=TiffLayout.CHANNEL_PER_FILE)
+    sl = reader.get_slice(3, channel=0)
+    assert sl.shape == (10, 12)
+    assert sl[0, 0] == 2
+
+
 def test_discover_single_ifd_volumetric(tmp_path: Path) -> None:
     folder = tmp_path / "sample"
     folder.mkdir()

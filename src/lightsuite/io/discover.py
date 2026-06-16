@@ -63,20 +63,24 @@ def _single_tiff_stack_info(path: Path) -> tuple[int, int, int, bool, str]:
         page0 = tif.pages[0]
         arr0 = page0.asarray()
 
+        # Prefer native TIFF pages when each IFD is one 2D plane (e.g. compressed
+        # BigTIFF stacks). tifffile series may still report a 3D shape, but
+        # memmap only works on uncompressed contiguous IFDs.
+        if n_pages > 1 and arr0.ndim == 2:
+            ny, nx = int(arr0.shape[0]), int(arr0.shape[1])
+            return ny, nx, n_pages, True, "pages"
+
+        if arr0.ndim == 3:
+            ny, nx, nz, mode = _volume_layout_from_shape(arr0.shape)
+            return ny, nx, nz, False, mode
+
         if tif.series:
             shape = tif.series[0].shape
             if len(shape) == 3:
                 ny, nx, nz, mode = _volume_layout_from_shape(shape)
                 return ny, nx, nz, False, mode
 
-        if arr0.ndim == 3:
-            ny, nx, nz, mode = _volume_layout_from_shape(arr0.shape)
-            return ny, nx, nz, False, mode
-
         ny, nx = int(arr0.shape[0]), int(arr0.shape[1])
-
-        if n_pages > 1:
-            return ny, nx, n_pages, True, "pages"
 
         ij = tif.imagej_metadata or {}
         for key in ("images", "slices"):
