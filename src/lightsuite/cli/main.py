@@ -15,7 +15,9 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 brain_app = typer.Typer(help="Brain lightsheet pipeline stages.")
+mesospim_app = typer.Typer(help="mesoSPIM overview ↔ ROI registration.")
 app.add_typer(brain_app, name="brain")
+app.add_typer(mesospim_app, name="mesospim")
 
 
 def _version_callback(value: bool) -> None:
@@ -249,6 +251,42 @@ def brain_preprocess(
     cfg = load_config(config)
     result = preprocess_lightsheet_volume(cfg, force=force)
     typer.echo(f"Primary registration volume: {result.checkpoint.regvolpath}")
+
+
+@mesospim_app.command("validate-config")
+def mesospim_validate_config(
+    config: str = typer.Option(..., "--config", "-c", help="mesoSPIM pipeline YAML config."),
+) -> None:
+    """Load and validate a mesoSPIM overview / ROI YAML config."""
+    from lightsuite.config.loader import load_mesospim_config
+
+    cfg = load_mesospim_config(config)
+    typer.echo(
+        f"Config valid: {cfg.sample.name} "
+        f"({cfg.mesospim.overview.path.name} → {cfg.mesospim.roi.path.name})"
+    )
+
+
+@mesospim_app.command("check-geometry")
+def mesospim_check_geometry(
+    config: str = typer.Option(..., "--config", "-c", help="mesoSPIM pipeline YAML config."),
+) -> None:
+    """Validate FOV overlap and write geometry QA artifacts."""
+    from lightsuite.config.loader import load_mesospim_config
+    from lightsuite.mesospim.runner import check_mesospim_geometry
+
+    check_mesospim_geometry(load_mesospim_config(config))
+
+
+@mesospim_app.command("register")
+def mesospim_register(
+    config: str = typer.Option(..., "--config", "-c", help="mesoSPIM pipeline YAML config."),
+) -> None:
+    """Register ROI stack to overview using metadata geometry and elastix."""
+    from lightsuite.config.loader import load_mesospim_config
+    from lightsuite.mesospim.runner import run_mesospim_registration
+
+    run_mesospim_registration(load_mesospim_config(config))
 
 
 def run() -> None:

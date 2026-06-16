@@ -1848,6 +1848,7 @@ gui = [
 registration = [
     { name = "itk-elastix" },
     { name = "open3d" },
+    { name = "simpleitk" },
 ]
 
 [package.metadata]
@@ -1878,6 +1879,7 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4" },
     { name = "scikit-image", specifier = ">=0.22" },
     { name = "scipy", specifier = ">=1.11" },
+    { name = "simpleitk", marker = "extra == 'registration'", specifier = ">=2.5" },
     { name = "tifffile", specifier = ">=2024.2.12" },
     { name = "typer", specifier = ">=0.12" },
     { name = "zarr", specifier = ">=2.16" },
@@ -4030,6 +4032,19 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/58/15/8b3609fd3830ef7b27b655beb4b4e9c62313a4e8da8c676e142cc210d58e/shellingham-1.5.4.tar.gz", hash = "sha256:8dbca0739d487e5bd35ab3ca4b36e11c4078f3a234bfce294b0a0291363404de", size = 10310, upload-time = "2023-10-24T04:13:40.426Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e0/f9/0595336914c5619e5f28a1fb793285925a8cd4b432c9da0a987836c7f822/shellingham-1.5.4-py2.py3-none-any.whl", hash = "sha256:7ecfff8f2fd72616f7481040475a65b2bf8af90a56c89140852d1120324e8686", size = 9755, upload-time = "2023-10-24T04:13:38.866Z" },
+]
+
+[[package]]
+name = "simpleitk"
+version = "2.5.5"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/28/8f/c21ee6dc4dbede4fc385b5d70703d45f749db2738c7b0c175546f43c9f86/simpleitk-2.5.5.tar.gz", hash = "sha256:254f70febed55868801c89f310e650eb1b87148d82b1d4e3628d8f0181a7f529", size = 2112106, upload-time = "2026-05-13T20:28:15.503Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/79/39/b494f7c90a2739369ef04f7f09c67d29a8dd3150fff51b0c2f89111b7f81/simpleitk-2.5.5-cp311-abi3-macosx_10_9_x86_64.whl", hash = "sha256:e831d15f5ea5b0e02ed3a6ac5f2dd34ba0a0eeaa4ebacfb1d970999836b19ee0", size = 42679794, upload-time = "2026-05-13T20:24:49.959Z" },
+    { url = "https://files.pythonhosted.org/packages/6e/34/4b3208b35dea488263a5c9f4a464ef20316f663e9e90d5de61349c31b327/simpleitk-2.5.5-cp311-abi3-macosx_11_0_arm64.whl", hash = "sha256:ee87416622cec6ed6b96747a0648c82c6e88f10b6553668ce90736f09ab5a994", size = 38646487, upload-time = "2026-05-13T20:25:09.636Z" },
+    { url = "https://files.pythonhosted.org/packages/14/e5/6a77865140278c86a392a85bd2317a1097bd891f54955ebe5db623e4b37c/simpleitk-2.5.5-cp311-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:847f42057d7bf01b5721b107dd3e00d4ee8d514f6f1ff85794ffedacaf4afc53", size = 48082097, upload-time = "2026-05-13T20:25:26.946Z" },
+    { url = "https://files.pythonhosted.org/packages/9f/68/ed67a355a62848ee04bb4f01e89d3be871052c2c3ae6d5fc0fb2f6010979/simpleitk-2.5.5-cp311-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:8ace5e392be00d5bec28c87ef1d73016f8ebe671dafffe9e9d045f20b0968033", size = 52778654, upload-time = "2026-05-13T20:25:41.737Z" },
+    { url = "https://files.pythonhosted.org/packages/42/ab/3a03de43173749171340ad974636105cb02c780f76055551c874c3df7fff/simpleitk-2.5.5-cp311-abi3-win_amd64.whl", hash = "sha256:a5fcfcfe9242d3d509b254b3213ca0f5db2c15903f2fc375d9ac5d38e57d415d", size = 18920455, upload-time = "2026-05-13T20:25:48.765Z" },
 ]
 
 [[package]]

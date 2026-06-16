@@ -1,0 +1,36 @@
+# mesoSPIM 1× overview ↔ 3.2× ROI — Julie Buron sample
+#   uv sync --extra registration
+#   uv run lightsuite mesospim validate-config -c examples/JulieBuron_multires.yaml
+#   uv run lightsuite mesospim check-geometry      -c examples/JulieBuron_multires.yaml
+#   uv run lightsuite mesospim register            -c examples/JulieBuron_multires.yaml
+
+sample:
+  name: JulieBuron
+  save_path: /media/gbm/NVME2/ALICe-pipelines-data/JulieBuron/multiresolution_results
+  scratch: /media/gbm/NVME2/lightsuite_scratch
+
+mesospim:
+  overview:
+    path: /media/gbm/NVME2/ALICe-pipelines-data/JulieBuron/1X/1-561-1x.tif
+  roi:
+    path: /media/gbm/NVME2/ALICe-pipelines-data/JulieBuron/3.2X/1-561-3.2x_TC.tif
+
+  geometry:
+    stage_xy_is_center: true
+    itk_lateral_dim0_motor: x
+    lateral_flip: [1, -1]
+
+  tiff_remap:
+    reverse_z: false
+    rot90_k_overview: 0
+    rot90_k_roi: 0          # try 1 or 3 if slices are rotated 90°
+    flip_row: false
+    flip_col: false
+    swap_xy: false
+    extra_flip_row_roi: false   # toggle if ROI is mirrored vs overview
+
+  registration:
+    overlap_margin_um: 0.0
+    registration_bin: 1     # use 2 for a faster smoke test
+    experiment_name: baseline_561_TC
+    elastix_stages: [translation, rigid]

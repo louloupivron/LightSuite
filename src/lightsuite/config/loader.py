@@ -9,7 +9,21 @@ from typing import Any
 import yaml
 
 from lightsuite.config.models import BrainPipelineConfig
+from lightsuite.mesospim.config_models import MesospimPipelineConfig
 from lightsuite.registration.orientation import validate_permvec
+
+
+def load_mesospim_config(path: str | Path) -> MesospimPipelineConfig:
+    """Load and validate a mesoSPIM overview / ROI YAML config."""
+    config_path = Path(path).expanduser().resolve()
+    if not config_path.is_file():
+        msg = f"Config file not found: {config_path}"
+        raise FileNotFoundError(msg)
+
+    with config_path.open(encoding="utf-8") as handle:
+        raw: dict[str, Any] = yaml.safe_load(handle) or {}
+
+    return MesospimPipelineConfig.model_validate(raw)
 
 
 def load_config(path: str | Path) -> BrainPipelineConfig:

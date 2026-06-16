@@ -31,7 +31,7 @@ formats = [
 ]
 gpu = ["cupy-cuda12x"]
 gui = ["napari[all]>=0.5", "qtpy", "magicgui", "ome-zarrpari>=1.0"]
-registration = ["itk-elastix>=0.25", "open3d>=0.18"]
+registration = ["itk-elastix>=0.25", "simpleitk>=2.5", "open3d>=0.18"]
 dev = ["pytest>=8.0", "pytest-regressions>=2.0", "ruff>=0.4", "mypy>=1.8"]
 
 [project.scripts]
