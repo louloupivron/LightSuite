@@ -236,13 +236,18 @@ def brain_init_registration(
 @brain_app.command("preprocess")
 def brain_preprocess(
     config: str = typer.Option(..., "--config", "-c", help="Pipeline YAML config."),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Re-run downsampling even when cached registration TIFFs match the current config.",
+    ),
 ) -> None:
     """Downsample sample volumes for registration (preprocessLightSheetVolume.m)."""
     from lightsuite.config.loader import load_config
     from lightsuite.preprocess.brain import preprocess_lightsheet_volume
 
     cfg = load_config(config)
-    result = preprocess_lightsheet_volume(cfg)
+    result = preprocess_lightsheet_volume(cfg, force=force)
     typer.echo(f"Primary registration volume: {result.checkpoint.regvolpath}")
 
 

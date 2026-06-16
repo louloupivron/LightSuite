@@ -7,18 +7,24 @@ from collections.abc import Iterator
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import numpy as np
+import tifffile
 from rich.console import Console
 
 from lightsuite.config.models import BrainPipelineConfig, TiffLayout
 from lightsuite.io.discover import TiffStackDiscovery, discover_tiff_stack
 from lightsuite.io.readers.tiff_stack import TiffStackReader
-from lightsuite.preprocess.checkpoint import RegOptsCheckpoint
+from lightsuite.preprocess.checkpoint import (
+    RegOptsCheckpoint,
+    compute_preprocess_fingerprint,
+)
 from lightsuite.preprocess.slice_ops import (
     SliceLoadJob,
     SliceProcessResult,
     output_xy_shape,
+    output_z_count,
     process_slice_job,
     write_z_downsampled_volume,
 )
@@ -225,7 +231,89 @@ def _process_channel_to_registration_tiff(
     console.print("Done.")
 
 
-def preprocess_lightsheet_volume(config: BrainPipelineConfig) -> PreprocessResult:
+def _registration_volume_matches(
+    path: Path,
+    *,
+    expected_shape: tuple[int, int],
+    expected_pages: int,
+) -> bool:
+    if not path.is_file():
+        return False
+    try:
+        with tifffile.TiffFile(path) as tif:
+            if len(tif.pages) != expected_pages:
+                return False
+            return tuple(int(v) for v in tif.pages[0].shape) == expected_shape
+    except (OSError, ValueError, tifffile.TiffFileError):
+        return False
+
+
+def _registration_tiff_path(save_path: Path, channel: int, registres_um: float) -> Path:
+    return save_path / f"chan_{channel}_sample_register_{int(registres_um)}um.tif"
+
+
+def _fingerprint_matches(
+    stored: dict[str, Any] | None,
+    current: dict[str, Any],
+) -> bool:
+    return stored is not None and stored == current
+
+
+def _load_existing_checkpoint(save_path: Path) -> RegOptsCheckpoint | None:
+    regopts_path = save_path / "regopts.json"
+    if not regopts_path.is_file():
+        return None
+    return RegOptsCheckpoint.load(regopts_path)
+
+
+def _build_preprocess_checkpoint(
+    config: BrainPipelineConfig,
+    *,
+    ny: int,
+    nx: int,
+    nz: int,
+    nchans: int,
+    voxel_um: list[float],
+    registres_um: float,
+    regvolpaths: dict[int, Path],
+    fingerprint: dict[str, Any],
+) -> RegOptsCheckpoint:
+    primary = config.registration.channel_primary
+    secondary = config.registration.channel_secondary
+    if primary < 1 or primary > nchans:
+        msg = f"registration.channel_primary={primary} out of range 1..{nchans}"
+        raise ValueError(msg)
+    if secondary is not None:
+        if secondary < 1 or secondary > nchans:
+            msg = f"registration.channel_secondary={secondary} out of range 1..{nchans}"
+            raise ValueError(msg)
+        if secondary == primary:
+            msg = "registration.channel_secondary must differ from channel_primary"
+            raise ValueError(msg)
+
+    return RegOptsCheckpoint(
+        sample_name=config.sample.name,
+        ny=ny,
+        nx=nx,
+        nz=nz,
+        nchans=nchans,
+        voxel_um=voxel_um,
+        registres_um=registres_um,
+        regvolpath=str(regvolpaths[primary]),
+        regvolpath_secondary=str(regvolpaths[secondary]) if secondary else None,
+        regvolpaths={str(k): str(v) for k, v in regvolpaths.items()},
+        tiff_type=config.sample.source.tiff_type.value,
+        channel_primary=primary,
+        channel_secondary=secondary,
+        preprocess_fingerprint=fingerprint,
+    )
+
+
+def preprocess_lightsheet_volume(
+    config: BrainPipelineConfig,
+    *,
+    force: bool = False,
+) -> PreprocessResult:
     """Downsample channels and write registration TIFFs under save_path."""
     vx, vy, vz = _require_voxel_um(config)
     registres = config.registration.resolution_um
@@ -248,6 +336,48 @@ def preprocess_lightsheet_volume(config: BrainPipelineConfig) -> PreprocessResul
     regvolpaths: dict[int, Path] = {}
     cell_channel = _channel_for_cells(config)
     out_h, out_w = output_xy_shape(ny, nx, scale_xy)
+    expected_pages = output_z_count(nz, scale_z)
+    expected_shape = (out_h, out_w)
+    fingerprint = compute_preprocess_fingerprint(
+        ny=ny,
+        nx=nx,
+        nz=nz,
+        nchans=nchans,
+        voxel_um=[vx, vy, vz],
+        registres_um=registres,
+        tiff_type=config.sample.source.tiff_type.value,
+    )
+    existing = _load_existing_checkpoint(config.sample.save_path)
+    fingerprint_unchanged = _fingerprint_matches(
+        existing.preprocess_fingerprint if existing is not None else None,
+        fingerprint,
+    )
+    cached_tiffs_valid = all(
+        _registration_volume_matches(
+            _registration_tiff_path(config.sample.save_path, ichannel, registres),
+            expected_shape=expected_shape,
+            expected_pages=expected_pages,
+        )
+        for ichannel in range(1, nchans + 1)
+    )
+    skip_downsample = (
+        not force
+        and cached_tiffs_valid
+        and (fingerprint_unchanged or existing is None or existing.preprocess_fingerprint is None)
+    )
+    if skip_downsample:
+        console.print(
+            "[green]Using existing registration TIFFs[/green] "
+            "(downsampling inputs unchanged). Refreshing regopts.json from config."
+        )
+        if existing is not None and (
+            existing.channel_primary != config.registration.channel_primary
+            or existing.channel_secondary != config.registration.channel_secondary
+        ):
+            console.print(
+                "[yellow]channel_primary / channel_secondary changed — "
+                "re-run init-registration if you switch the primary channel.[/yellow]"
+            )
 
     scratch_bytes = out_h * out_w * nz * 2
     max_ram_bytes = int(config.compute.max_in_memory_scratch_gb * (1024**3))
@@ -268,6 +398,13 @@ def preprocess_lightsheet_volume(config: BrainPipelineConfig) -> PreprocessResul
 
     for ichannel in range(1, nchans + 1):
         chan0 = ichannel - 1
+        sample_path = _registration_tiff_path(config.sample.save_path, ichannel, registres)
+        regvolpaths[ichannel] = sample_path
+
+        if skip_downsample:
+            console.print(f"Channel {ichannel}/{nchans}: skipped (cached).")
+            continue
+
         has_cells = cell_channel is not None and ichannel == cell_channel
         console.print(f"Channel {ichannel}/{nchans}.")
 
@@ -283,9 +420,6 @@ def preprocess_lightsheet_volume(config: BrainPipelineConfig) -> PreprocessResul
         if has_cells:
             binary_path = config.sample.scratch / f"chan_{ichannel}_binary_{config.sample.name}.dat"
 
-        sample_path = (
-            config.sample.save_path / f"chan_{ichannel}_sample_register_{int(registres)}um.tif"
-        )
         if sample_path.exists():
             sample_path.unlink()
 
@@ -303,38 +437,22 @@ def preprocess_lightsheet_volume(config: BrainPipelineConfig) -> PreprocessResul
             binary_path=binary_path,
             max_in_memory_bytes=max_ram_bytes,
         )
-        regvolpaths[ichannel] = sample_path
 
     reader.close()
 
-    primary = config.registration.channel_primary
-    secondary = config.registration.channel_secondary
-    if primary < 1 or primary > nchans:
-        msg = f"registration.channel_primary={primary} out of range 1..{nchans}"
-        raise ValueError(msg)
-    if secondary is not None:
-        if secondary < 1 or secondary > nchans:
-            msg = f"registration.channel_secondary={secondary} out of range 1..{nchans}"
-            raise ValueError(msg)
-        if secondary == primary:
-            msg = "registration.channel_secondary must differ from channel_primary"
-            raise ValueError(msg)
-
-    checkpoint = RegOptsCheckpoint(
-        sample_name=config.sample.name,
+    checkpoint = _build_preprocess_checkpoint(
+        config,
         ny=ny,
         nx=nx,
         nz=nz,
         nchans=nchans,
         voxel_um=[vx, vy, vz],
         registres_um=registres,
-        regvolpath=str(regvolpaths[primary]),
-        regvolpath_secondary=str(regvolpaths[secondary]) if secondary else None,
-        regvolpaths={str(k): str(v) for k, v in regvolpaths.items()},
-        tiff_type=config.sample.source.tiff_type.value,
-        channel_primary=primary,
-        channel_secondary=secondary,
+        regvolpaths=regvolpaths,
+        fingerprint=fingerprint,
     )
+    if existing is not None and (skip_downsample or fingerprint_unchanged):
+        checkpoint = checkpoint.merge_downstream_from(existing)
     regopts_path = config.sample.save_path / "regopts.json"
     checkpoint.save(regopts_path)
     console.print(f"Wrote checkpoint [bold]{regopts_path}[/bold]")

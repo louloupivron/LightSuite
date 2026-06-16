@@ -109,3 +109,87 @@ def test_preprocess_planeperfile_multi_channel(tmp_path: Path) -> None:
     assert result.checkpoint.regvolpath_secondary is not None
     assert (save / "chan_1_sample_register_20um.tif").is_file()
     assert (save / "chan_2_sample_register_20um.tif").is_file()
+
+
+def test_preprocess_skips_cached_tiffs_when_yaml_metadata_changes(tmp_path: Path) -> None:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    scratch = tmp_path / "scratch"
+    save = tmp_path / "results"
+    save.mkdir()
+
+    slice_a = (np.arange(24, dtype=np.uint16).reshape(4, 6) * 10 + 100)
+    slice_b = slice_a + 50
+    _write_channel_stack(data_dir / "ch1.tif", [slice_a, slice_b])
+    _write_channel_stack(data_dir / "ch2.tif", [slice_a + 1, slice_b + 1])
+
+    config_data = {
+        "sample": {
+            "name": "test",
+            "source": {
+                "format": "tiff_stack",
+                "path": str(data_dir),
+                "tiff_type": "channelperfile",
+            },
+            "scratch": str(scratch),
+            "save_path": str(save),
+            "voxel_um": [10.0, 10.0, 10.0],
+        },
+        "registration": {"resolution_um": 20, "channel_primary": 1, "channel_secondary": 2},
+        "detection": {"enabled": False},
+    }
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.dump(config_data), encoding="utf-8")
+
+    cfg = load_config(config_path)
+    preprocess_lightsheet_volume(cfg)
+
+    ch1_mtime = (save / "chan_1_sample_register_20um.tif").stat().st_mtime
+    ch2_mtime = (save / "chan_2_sample_register_20um.tif").stat().st_mtime
+
+    config_data["registration"]["channel_primary"] = 2
+    config_data["registration"]["channel_secondary"] = 1
+    config_path.write_text(yaml.dump(config_data), encoding="utf-8")
+    cfg = load_config(config_path)
+    result = preprocess_lightsheet_volume(cfg)
+
+    assert Path(result.checkpoint.regvolpath).name == "chan_2_sample_register_20um.tif"
+    assert (save / "chan_1_sample_register_20um.tif").stat().st_mtime == ch1_mtime
+    assert (save / "chan_2_sample_register_20um.tif").stat().st_mtime == ch2_mtime
+
+
+def test_preprocess_force_redoes_downsample(tmp_path: Path) -> None:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    scratch = tmp_path / "scratch"
+    save = tmp_path / "results"
+    save.mkdir()
+
+    slice_a = (np.arange(24, dtype=np.uint16).reshape(4, 6) * 10 + 100)
+    _write_channel_stack(data_dir / "ch1.tif", [slice_a, slice_a + 1])
+
+    config_data = {
+        "sample": {
+            "name": "test",
+            "source": {
+                "format": "tiff_stack",
+                "path": str(data_dir),
+                "tiff_type": "channelperfile",
+            },
+            "scratch": str(scratch),
+            "save_path": str(save),
+            "voxel_um": [10.0, 10.0, 10.0],
+        },
+        "registration": {"resolution_um": 20, "channel_primary": 1},
+        "detection": {"enabled": False},
+    }
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.dump(config_data), encoding="utf-8")
+
+    cfg = load_config(config_path)
+    preprocess_lightsheet_volume(cfg)
+    first_mtime = (save / "chan_1_sample_register_20um.tif").stat().st_mtime
+
+    preprocess_lightsheet_volume(cfg, force=True)
+    second_mtime = (save / "chan_1_sample_register_20um.tif").stat().st_mtime
+    assert second_mtime >= first_mtime
