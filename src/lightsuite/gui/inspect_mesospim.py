@@ -6,11 +6,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-import tifffile
 
 from lightsuite.mesospim.checkpoint import MesospimRegOptsCheckpoint, mesospim_checkpoint_path
 from lightsuite.mesospim.config_models import MesospimPipelineConfig
-from lightsuite.mesospim.io import load_tiff_zyx_memmap
+from lightsuite.mesospim.io import load_registered_canvas_zyx, load_tiff_zyx_volume
 from lightsuite.mesospim.registration import sanitize_experiment_name
 
 
@@ -82,19 +81,14 @@ def load_mesospim_inspect_volumes(cfg: MesospimPipelineConfig) -> tuple[np.ndarr
     """Load overview and registered full-canvas volumes as ZYX float32 arrays."""
     paths = resolve_mesospim_inspect_paths(cfg)
     meso = cfg.mesospim
-    overview = load_tiff_zyx_memmap(
+    overview = load_tiff_zyx_volume(
         paths.overview_path,
         overview_path=meso.overview.path,
         roi_path=meso.roi.path,
         remap=meso.tiff_remap,
     ).astype(np.float32, copy=False)
 
-    registered = np.asarray(tifffile.memmap(str(paths.registered_full_overview_path)), dtype=np.float32)
-    while registered.ndim > 3 and registered.shape[0] == 1:
-        registered = registered[0]
-    if registered.ndim != 3:
-        msg = f"Expected 3D registered canvas, got shape {registered.shape}"
-        raise ValueError(msg)
+    registered = load_registered_canvas_zyx(paths.registered_full_overview_path)
 
     if overview.shape != registered.shape:
         msg = (

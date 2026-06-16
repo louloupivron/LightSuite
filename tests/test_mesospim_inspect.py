@@ -9,6 +9,7 @@ import tifffile
 import yaml
 
 from lightsuite.gui.inspect_mesospim import resolve_mesospim_inspect_paths
+from lightsuite.mesospim.io import load_registered_canvas_zyx
 from lightsuite.mesospim.meta import meta_path_for_tiff
 
 
@@ -75,3 +76,14 @@ def test_resolve_mesospim_inspect_paths(tmp_path: Path) -> None:
     paths = resolve_mesospim_inspect_paths(cfg)
     assert paths.overview_path == overview.resolve()
     assert paths.registered_full_overview_path == registered.resolve()
+
+
+def test_load_registered_canvas_zyx_compressed(tmp_path: Path) -> None:
+    path = tmp_path / "registered.tif"
+    arr = np.arange(2 * 4 * 4, dtype=np.float32).reshape(2, 4, 4)
+    tifffile.imwrite(path, arr, imagej=True, compression="zlib")
+
+    loaded = load_registered_canvas_zyx(path)
+    assert loaded.shape == (2, 4, 4)
+    assert loaded.dtype == np.float32
+    assert loaded[0, 0, 0] == arr[0, 0, 0]

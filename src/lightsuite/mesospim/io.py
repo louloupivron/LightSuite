@@ -252,16 +252,25 @@ def read_tiff_as_float(
     return image
 
 
-def load_tiff_zyx_memmap(
+def _load_tiff_raw_array(path: Path) -> np.ndarray:
+    """Load a TIFF volume, using memmap when possible and falling back to a full read."""
+    path = path.expanduser().resolve()
+    try:
+        return np.asarray(tifffile.memmap(str(path)))
+    except ValueError:
+        return np.asarray(tifffile.imread(str(path)))
+
+
+def load_tiff_zyx_volume(
     path: Path,
     *,
     overview_path: Path,
     roi_path: Path,
     remap: MesospimTiffRemapConfig,
 ) -> np.ndarray:
-    """Memory-map a mesoSPIM stack and apply configured axis remapping."""
+    """Load a mesoSPIM stack and apply configured axis remapping."""
     path = path.expanduser().resolve()
-    vol = np.asarray(tifffile.memmap(str(path)))
+    vol = _load_tiff_raw_array(path)
     vol = _normalize_tiff_array(vol, path)
     vol = remap_tiff_array_zyx(
         vol,
@@ -277,6 +286,29 @@ def load_tiff_zyx_memmap(
         roi_path=roi_path,
         remap=remap,
     )
+
+
+def load_tiff_zyx_memmap(
+    path: Path,
+    *,
+    overview_path: Path,
+    roi_path: Path,
+    remap: MesospimTiffRemapConfig,
+) -> np.ndarray:
+    """Load a mesoSPIM stack (memmap when possible) with axis remapping."""
+    return load_tiff_zyx_volume(
+        path,
+        overview_path=overview_path,
+        roi_path=roi_path,
+        remap=remap,
+    )
+
+
+def load_registered_canvas_zyx(path: Path) -> np.ndarray:
+    """Load a registered full-overview canvas TIFF as ZYX float32."""
+    vol = _load_tiff_raw_array(path)
+    vol = _normalize_tiff_array(vol, path)
+    return np.asarray(vol, dtype=np.float32)
 
 
 def write_sitk_hyperstack_tiff(path: Path, image: sitk.Image) -> None:
