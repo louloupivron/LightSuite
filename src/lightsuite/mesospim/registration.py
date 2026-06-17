@@ -8,13 +8,14 @@ from pathlib import Path
 
 import SimpleITK as sitk
 
+from lightsuite.mesospim.config_models import MesospimPipelineConfig
 from lightsuite.mesospim.geometry import (
     embed_crop_in_full_overview,
-    prepare_registration_pair,
     resample_to_reference_grid,
     voxel_count_gb,
 )
-from lightsuite.mesospim.io import read_tiff_as_float, sitk_to_itk
+from lightsuite.mesospim.io import sitk_to_itk
+from lightsuite.mesospim.prepare import MesospimPreparedPair, prepare_mesospim_registration_pair
 
 
 def sanitize_experiment_name(name: str) -> str:
@@ -53,57 +54,35 @@ class MesospimRegistrationResult:
     crop_start_index: list[int]
     fixed_voxel_gb: float
     moving_voxel_gb: float
+    roi_to_overview_tform: list[list[float]] | None = None
 
 
 def register_roi_to_overview(
     *,
-    overview_path: Path,
-    roi_path: Path,
-    overview_meta: dict,
-    roi_meta: dict,
-    geometry,
-    tiff_remap,
+    cfg: MesospimPipelineConfig,
+    prepared: MesospimPreparedPair | None = None,
     output_dir: Path,
     experiment_slug: str,
     overview_stem: str,
     roi_stem: str,
-    overlap_margin_um: float,
     registration_bin: int,
     elastix_stages: list[str],
     write_full_overview_canvas: bool = True,
 ) -> MesospimRegistrationResult:
-    """Load stacks, prepare pair, run itk-elastix, and write outputs."""
+    """Run itk-elastix on a prepared overview / ROI pair."""
     import itk
 
-    overview_path = overview_path.expanduser().resolve()
-    roi_path = roi_path.expanduser().resolve()
     output_dir = output_dir.expanduser()
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    fixed = read_tiff_as_float(
-        overview_path,
-        overview_path=overview_path,
-        roi_path=roi_path,
-        remap=tiff_remap,
-    )
-    roi_full = read_tiff_as_float(
-        roi_path,
-        overview_path=overview_path,
-        roi_path=roi_path,
-        remap=tiff_remap,
-    )
+    if prepared is None:
+        prepared = prepare_mesospim_registration_pair(cfg)
 
-    from lightsuite.mesospim.geometry import apply_image_geometry
-
-    apply_image_geometry(fixed, overview_meta, geometry)
-    apply_image_geometry(roi_full, roi_meta, geometry)
-
-    fixed_cropped, moving, overlap_box, crop_start_index = prepare_registration_pair(
-        fixed,
-        roi_full,
-        margin_um=overlap_margin_um,
-    )
-    del roi_full
+    fixed = prepared.overview
+    fixed_cropped = prepared.fixed_cropped
+    moving = prepared.moving
+    overlap_box = prepared.overlap_box
+    crop_start_index = prepared.crop_start_index
 
     fixed_for_elastix = fixed_cropped
     moving_for_elastix = moving
@@ -151,6 +130,10 @@ def register_roi_to_overview(
         raise RuntimeError(msg)
 
     overlap_min, overlap_max = overlap_box
+    roi_tform = None
+    if prepared.landmark_fit is not None:
+        roi_tform = prepared.landmark_fit.roi_to_overview_tform.tolist()
+
     return MesospimRegistrationResult(
         output_dir=output_dir,
         transform_paths=transform_paths,
@@ -161,4 +144,5 @@ def register_roi_to_overview(
         crop_start_index=crop_start_index,
         fixed_voxel_gb=fixed_gb,
         moving_voxel_gb=moving_gb,
+        roi_to_overview_tform=roi_tform,
     )

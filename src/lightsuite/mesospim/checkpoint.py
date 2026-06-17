@@ -26,6 +26,10 @@ class MesospimRegOptsCheckpoint:
     registered_roi_full_overview_path: str | None = None
     crop_start_index: list[int] | None = None
     geometry_report_paths: dict[str, str] | None = None
+    geometry_mode: str | None = None
+    landmark_session_path: str | None = None
+    roi_to_overview_tform: list[list[float]] | None = None
+    landmark_rms_error_um: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

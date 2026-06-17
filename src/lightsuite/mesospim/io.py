@@ -159,6 +159,43 @@ def _read_raw_plane_yx(path: Path, raw_z: int) -> np.ndarray:
     return np.asarray(vol[raw_z], dtype=np.float32)
 
 
+def read_tiff_xy_slice_at_z_index(
+    path: Path,
+    z_index: int,
+    *,
+    overview_path: Path,
+    roi_path: Path,
+    remap: MesospimTiffRemapConfig,
+) -> np.ndarray:
+    """Load one remapped XY plane by stack Z index without reading the full stack."""
+    path = path.expanduser().resolve()
+    shape_zyx = tiff_shape(path)
+    nz = shape_zyx[0]
+    remapped_z = int(np.clip(int(z_index), 0, nz - 1))
+    raw_page = _remapped_z_to_raw_page(remapped_z, nz, reverse_z=remap.reverse_z)
+
+    plane = _read_raw_plane_yx(path, raw_page)
+    if plane.ndim != 2:
+        msg = f"Expected 2D TIFF page, got shape {plane.shape} for {path}"
+        raise ValueError(msg)
+
+    slab = remap_tiff_array_zyx(
+        plane[np.newaxis, ...],
+        path,
+        overview_path=overview_path,
+        roi_path=roi_path,
+        remap=remap,
+    )
+    slab = _apply_path_extra_flips(
+        slab,
+        path,
+        overview_path=overview_path,
+        roi_path=roi_path,
+        remap=remap,
+    )
+    return np.asarray(slab[0], dtype=np.float32)
+
+
 def read_tiff_xy_slice_at_physical_um(
     path: Path,
     *,

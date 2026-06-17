@@ -1,0 +1,16 @@
+{
+  "overview_points_zyx": [
+    [100, 512, 512],
+    [200, 600, 600],
+    [150, 400, 700]
+  ],
+  "roi_points_zyx": [
+    [50, 256, 256],
+    [150, 344, 344],
+    [100, 144, 444]
+  ],
+  "fit_mode": "similarity",
+  "roi_to_overview_tform": null,
+  "rms_error_um": null,
+  "fit_point_errors_um": null
+}

@@ -8,7 +8,12 @@ import numpy as np
 import tifffile
 
 from lightsuite.mesospim.config_models import MesospimGeometryConfig, MesospimTiffRemapConfig
-from lightsuite.mesospim.io import _remapped_z_to_raw_page, read_tiff_xy_slice_at_physical_um, tiff_shape
+from lightsuite.mesospim.io import (
+    _remapped_z_to_raw_page,
+    read_tiff_xy_slice_at_physical_um,
+    read_tiff_xy_slice_at_z_index,
+    tiff_shape,
+)
 from lightsuite.mesospim.meta import meta_path_for_tiff
 
 
@@ -74,6 +79,26 @@ def test_read_tiff_xy_slice_at_physical_um(tmp_path: Path) -> None:
     )
     assert sl.shape == tiff_shape(overview)[1:]
     assert sl.dtype == np.float32
+
+
+def test_read_tiff_xy_slice_at_z_index(tmp_path: Path) -> None:
+    overview = tmp_path / "overview.tif"
+    roi = tmp_path / "roi.tif"
+    shape = (5, 16, 16)
+    _write_stack(overview, shape)
+    _write_stack(roi, shape)
+
+    remap = MesospimTiffRemapConfig()
+    sl = read_tiff_xy_slice_at_z_index(
+        overview,
+        2,
+        overview_path=overview,
+        roi_path=roi,
+        remap=remap,
+    )
+    assert sl.shape == shape[1:]
+    assert sl.dtype == np.float32
+    assert sl[0, 0] == float(2 * 16 * 16)
 
 
 def test_read_raw_plane_yx_volumetric_memmap(tmp_path: Path, monkeypatch) -> None:

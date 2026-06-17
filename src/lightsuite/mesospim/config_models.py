@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
+from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from lightsuite.mesospim.landmark_session import LandmarkFitMode, default_landmark_session_path
 from lightsuite.mesospim.meta import meta_path_for_tiff
+
+
+class MesospimGeometryMode(StrEnum):
+    METADATA = "metadata"
+    LANDMARKS = "landmarks"
+    HYBRID = "hybrid"
 
 
 class MesospimSampleConfig(BaseModel):
@@ -26,6 +34,7 @@ class MesospimSampleConfig(BaseModel):
 class MesospimVolumeConfig(BaseModel):
     path: Path
     meta_path: Path | None = None
+    voxel_um: Annotated[list[float], Field(min_length=3, max_length=3)] | None = None
 
     @field_validator("path", "meta_path")
     @classmethod
@@ -42,18 +51,23 @@ class MesospimVolumeConfig(BaseModel):
             raise ValueError(msg)
         return value
 
+    @field_validator("voxel_um")
+    @classmethod
+    def voxel_um_positive(cls, value: list[float] | None) -> list[float] | None:
+        if value is None:
+            return None
+        if any(v <= 0 for v in value):
+            msg = "voxel_um values must be positive"
+            raise ValueError(msg)
+        return value
+
     def resolved_meta_path(self) -> Path:
         if self.meta_path is not None:
             return self.meta_path
         return meta_path_for_tiff(self.path).resolve()
 
-    @model_validator(mode="after")
-    def meta_must_exist(self) -> MesospimVolumeConfig:
-        meta = self.resolved_meta_path()
-        if not meta.is_file():
-            msg = f"Meta sidecar does not exist: {meta}"
-            raise ValueError(msg)
-        return self
+    def has_meta_sidecar(self) -> bool:
+        return self.resolved_meta_path().is_file()
 
 
 class MesospimGeometryConfig(BaseModel):
@@ -68,6 +82,19 @@ class MesospimGeometryConfig(BaseModel):
             msg = "lateral_flip values must be +1 or -1"
             raise ValueError(msg)
         return value
+
+
+class MesospimLandmarkConfig(BaseModel):
+    session_path: Path | None = None
+    fit_mode: LandmarkFitMode = "similarity"
+    min_pairs: int = Field(default=3, ge=3)
+
+    @field_validator("session_path")
+    @classmethod
+    def expand_session_path(cls, value: Path | None) -> Path | None:
+        if value is None:
+            return None
+        return value.expanduser()
 
 
 class MesospimTiffRemapConfig(BaseModel):
@@ -99,9 +126,45 @@ class MesospimRegistrationSettings(BaseModel):
 class MesospimConfig(BaseModel):
     overview: MesospimVolumeConfig
     roi: MesospimVolumeConfig
+    geometry_mode: MesospimGeometryMode = MesospimGeometryMode.METADATA
     geometry: MesospimGeometryConfig = Field(default_factory=MesospimGeometryConfig)
+    landmarks: MesospimLandmarkConfig = Field(default_factory=MesospimLandmarkConfig)
     tiff_remap: MesospimTiffRemapConfig = Field(default_factory=MesospimTiffRemapConfig)
     registration: MesospimRegistrationSettings = Field(default_factory=MesospimRegistrationSettings)
+
+    @model_validator(mode="after")
+    def validate_geometry_requirements(self) -> MesospimConfig:
+        mode = self.geometry_mode
+        if mode == MesospimGeometryMode.METADATA:
+            for label, volume in (("overview", self.overview), ("roi", self.roi)):
+                if not volume.has_meta_sidecar():
+                    msg = (
+                        f"geometry_mode=metadata requires a meta sidecar for {label}: "
+                        f"{volume.resolved_meta_path()}"
+                    )
+                    raise ValueError(msg)
+        elif mode == MesospimGeometryMode.LANDMARKS:
+            for label, volume in (("overview", self.overview), ("roi", self.roi)):
+                if volume.voxel_um is None:
+                    msg = (
+                        f"geometry_mode=landmarks requires mesospim.{label}.voxel_um "
+                        f"when metadata is unavailable"
+                    )
+                    raise ValueError(msg)
+        elif mode == MesospimGeometryMode.HYBRID:
+            for label, volume in (("overview", self.overview), ("roi", self.roi)):
+                if not volume.has_meta_sidecar():
+                    msg = (
+                        f"geometry_mode=hybrid requires a meta sidecar for {label}: "
+                        f"{volume.resolved_meta_path()}"
+                    )
+                    raise ValueError(msg)
+        return self
+
+    def resolved_landmark_session_path(self, save_path: Path) -> Path:
+        if self.landmarks.session_path is not None:
+            return self.landmarks.session_path.expanduser().resolve()
+        return default_landmark_session_path(save_path)
 
 
 class MesospimPipelineConfig(BaseModel):

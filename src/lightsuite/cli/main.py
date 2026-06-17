@@ -313,6 +313,24 @@ def mesospim_register(
     run_mesospim_registration(load_mesospim_config(config))
 
 
+@mesospim_app.command("match-points")
+def mesospim_match_points(
+    config: str = typer.Option(..., "--config", "-c", help="mesoSPIM pipeline YAML config."),
+    headless: bool = typer.Option(
+        False,
+        "--headless",
+        help="Create an empty landmark session without opening Napari (for tests).",
+    ),
+) -> None:
+    """Interactive overview / ROI landmark placement (Napari)."""
+    from lightsuite.config.loader import load_mesospim_config
+    from lightsuite.gui.match_points_mesospim import run_mesospim_match_points
+
+    cfg = load_mesospim_config(config)
+    path = run_mesospim_match_points(cfg, headless=headless)
+    typer.echo(f"Landmark session: {path}")
+
+
 @mesospim_app.command("inspect")
 def mesospim_inspect(
     config: str = typer.Option(..., "--config", "-c", help="mesoSPIM pipeline YAML config."),
