@@ -32,6 +32,7 @@ You will need:
 | 7 | `lightsuite brain register` | Automated | `multiobjRegistration.m` |
 | 8 | `lightsuite brain export` | Automated | `generateRegisteredBrainVolumes.m` |
 | 9 | `lightsuite brain import-annotations` | Automated | `transformPointsToAtlas.m` |
+| 10 | `lightsuite brain inspect-imports` | **Manual (GUI)** | *(Napari — atlas-space import QC)* |
 
 Built-in cell detection is **not yet ported**; set `detection.enabled: false` and use `import-annotations` with native `points.csv` / `mask.tif` exports (see [Annotation import](annotation_import.md)).
 
@@ -395,6 +396,7 @@ uv run lightsuite brain match-points -c $CONFIG
 uv run lightsuite brain register -c $CONFIG
 uv run lightsuite brain export -c $CONFIG --save-volume --write-csv
 uv run lightsuite brain import-annotations -c $CONFIG
+uv run lightsuite brain inspect-imports -c $CONFIG
 ```
 
 ---

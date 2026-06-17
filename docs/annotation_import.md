@@ -64,7 +64,7 @@ x,y,z
 
 - **Units:** 1-based voxel indices at native resolution (floats allowed for center-of-mass).
 - **Bounds:** `1 ≤ x ≤ nx`, `1 ≤ y ≤ ny`, `1 ≤ z ≤ nz` (from `shape_yxz`).
-- **Extra columns** (e.g. `id`, `intensity`) are preserved as optional features in the output NPZ.
+- **Extra columns** (e.g. `intensity`, `volume_um3`) — numeric values are preserved as optional features; text columns (e.g. segment names) are skipped.
 
 Example file: `examples/annotation_sample/points.csv`.
 

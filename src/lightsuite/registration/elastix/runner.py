@@ -12,6 +12,7 @@ import numpy as np
 
 from lightsuite.registration.elastix.mhd import (
     _mhd_element_dtype,
+    _mhd_header_field,
     read_mhd_volume,
     scale_volume_for_elastix_mi,
     write_mhd,
@@ -349,32 +350,43 @@ def run_transformix_deformation_field(
 def _read_mhd_vector_field(mhd_path: Path) -> np.ndarray:
     """Read elastix vector deformation field into (Y, X, Z, 3) float32."""
     text = mhd_path.expanduser().read_text(encoding="utf-8")
-    dim_field = re.search(r"(?im)^DimSize\s*=\s*([^\r\n#]+)", text)
+    dim_field = _mhd_header_field(text, "DimSize")
     if dim_field is None:
         msg = f"DimSize missing in {mhd_path}"
         raise ValueError(msg)
-    parts = [int(v) for v in dim_field.group(1).split()]
-    if len(parts) != 4:
-        msg = f"Expected 4D vector DimSize in {mhd_path}, got {parts}"
+    parts = [int(v) for v in dim_field.split()]
+    if len(parts) == 3:
+        nx, ny, nz = parts
+        channels_field = _mhd_header_field(text, "ElementNumberOfChannels")
+        if channels_field is None:
+            msg = (
+                f"Expected ElementNumberOfChannels for 3D vector DimSize in {mhd_path}, "
+                f"got DimSize = {parts}"
+            )
+            raise ValueError(msg)
+        nc = int(channels_field)
+    elif len(parts) == 4:
+        nx, ny, nz, nc = parts
+    else:
+        msg = f"Expected 3D or 4D vector DimSize in {mhd_path}, got {parts}"
         raise ValueError(msg)
-    nx, ny, nz, nc = parts
     if nc != 3:
         msg = f"Expected 3-vector deformation field, got {nc} components"
         raise ValueError(msg)
 
-    raw_name = re.search(r"(?im)^ElementDataFile\s*=\s*([^\r\n#]+)", text)
+    raw_name = _mhd_header_field(text, "ElementDataFile")
     if raw_name is None:
         msg = f"ElementDataFile missing in {mhd_path}"
         raise ValueError(msg)
-    element_type = re.search(r"(?im)^ElementType\s*=\s*([^\r\n#]+)", text)
-    dtype = _mhd_element_dtype((element_type.group(1) if element_type else "MET_FLOAT").strip())
-    raw_path = mhd_path.parent / raw_name.group(1).strip()
+    element_type = _mhd_header_field(text, "ElementType") or "MET_FLOAT"
+    dtype = _mhd_element_dtype(element_type)
+    raw_path = mhd_path.parent / raw_name
     flat = np.fromfile(raw_path, dtype=dtype)
     expected = nx * ny * nz * nc
     if flat.size != expected:
         msg = f"RAW size mismatch for vector field {raw_path}: {flat.size} vs {expected}"
         raise ValueError(msg)
-    # MetaIO vector image: components vary fastest, then X, Y, Z.
+    # MetaIO vector image: components vary fastest, then X, Y, Z (ITK x,y,z DimSize).
     vol = flat.reshape((nz, ny, nx, nc), order="C")
     return np.transpose(vol, (1, 2, 0, 3)).astype(np.float32, copy=False)
 

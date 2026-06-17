@@ -16,6 +16,7 @@ from lightsuite.registration.elastix.mhd import (
 from lightsuite.registration.elastix.runner import (
     _discover_transformix_result,
     _patch_transformix_params,
+    _read_mhd_vector_field,
     read_elastix_landmark_metric_mm,
     volume_shape_from_transform_params,
 )
@@ -244,6 +245,39 @@ def test_read_elastix_landmark_metric_mm_single_metric(tmp_path: Path) -> None:
     patched = _patch_transformix_params("(UseDirectionCosines true)\n", nearest=True)
     assert '(UseDirectionCosines "false")' in patched
     assert '(DefaultPixelValue "0")' in patched
+
+
+def test_read_mhd_vector_field_elastix_layout(tmp_path: Path) -> None:
+    """elastix -def all writes DimSize (x,y,z) + ElementNumberOfChannels, not 4D DimSize."""
+    nx, ny, nz, nc = 4, 5, 6, 3
+    # Build (Y, X, Z, 3) field with known values at one voxel.
+    field_yxz = np.zeros((ny, nx, nz, nc), dtype=np.float32)
+    field_yxz[1, 2, 3, 0] = 1.0
+    field_yxz[1, 2, 3, 1] = 2.0
+    field_yxz[1, 2, 3, 2] = 3.0
+    flat = np.transpose(field_yxz, (2, 0, 1, 3)).ravel(order="C")
+    raw_path = tmp_path / "deformationField.raw"
+    flat.tofile(raw_path)
+    mhd_path = tmp_path / "deformationField.mhd"
+    mhd_path.write_text(
+        "\n".join(
+            [
+                "ObjectType = Image",
+                "NDims = 3",
+                "BinaryData = True",
+                f"DimSize = {nx} {ny} {nz}",
+                f"ElementNumberOfChannels = {nc}",
+                "ElementType = MET_FLOAT",
+                "ElementDataFile = deformationField.raw",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    loaded = _read_mhd_vector_field(mhd_path)
+    assert loaded.shape == (ny, nx, nz, nc)
+    assert loaded[1, 2, 3, 0] == 1.0
+    assert loaded[1, 2, 3, 1] == 2.0
+    assert loaded[1, 2, 3, 2] == 3.0
 
 
 def test_volume_shape_from_transform_params() -> None:

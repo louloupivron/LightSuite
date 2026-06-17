@@ -13,30 +13,71 @@ from lightsuite.import_.models import ImportedMask, ImportedPoints
 from lightsuite.import_.normalize import filter_in_bounds_points
 from lightsuite.import_.sample_reference import SampleReference
 
-_MAX_MASK_BYTES = 4_000_000_000
+# Sanity cap on mask voxel count (~64 GiB as uint8). Raise if needed for very large samples.
+_MAX_MASK_VOXELS = 64 * 1024**3
 
 
-def _load_mask_volume(path: Path) -> np.ndarray:
-    """Load a 3D mask TIFF as (Y, X, Z), supporting page stacks and single 3D pages."""
-    path = path.expanduser()
+def _mask_tiff_shape_yxz(path: Path) -> tuple[int, int, int]:
+    """Read (Y, X, Z) shape from a mask TIFF without loading the full volume."""
     with tifffile.TiffFile(path) as tif:
         if len(tif.pages) == 0:
             msg = f"No TIFF pages in {path}"
             raise ValueError(msg)
         if len(tif.pages) == 1:
-            page = np.asarray(tif.pages[0].asarray(), dtype=np.float32)
-            if page.ndim == 3:
-                return np.transpose(page, (1, 2, 0))
-            if page.ndim == 2:
+            page = tif.pages[0]
+            arr = page.asarray()
+            if arr.ndim == 3:
+                return int(arr.shape[1]), int(arr.shape[2]), int(arr.shape[0])
+            if arr.ndim == 2:
                 msg = f"2D TIFF mask not supported (expected Z-stack): {path}"
                 raise ValueError(msg)
-        planes = [np.asarray(page.asarray(), dtype=np.float32) for page in tif.pages]
-        if any(plane.ndim != 2 for plane in planes):
-            shapes = [plane.shape for plane in planes[:3]]
-            msg = f"Expected 2D TIFF pages in {path}, got shapes {shapes}"
+            msg = f"Unsupported mask page shape {arr.shape} in {path}"
             raise ValueError(msg)
-        stack_zyx = np.stack(planes, axis=0)
-        return np.transpose(stack_zyx, (1, 2, 0))
+        ny, nx = (int(v) for v in tif.pages[0].shape[:2])
+        return ny, nx, len(tif.pages)
+
+
+def _load_mask_volume(path: Path) -> np.ndarray:
+    """Load a 3D mask TIFF as (Y, X, Z) uint8, supporting page stacks and single 3D pages."""
+    path = path.expanduser()
+    ny, nx, nz = _mask_tiff_shape_yxz(path)
+    if ny * nx * nz > _MAX_MASK_VOXELS:
+        msg = (
+            f"Mask TIFF has {ny * nx * nz / 1e9:.1f}B voxels — exceeds the "
+            f"{_MAX_MASK_VOXELS / 1e9:.0f}B voxel safety limit."
+        )
+        raise ValueError(msg)
+
+    volume = np.zeros((ny, nx, nz), dtype=np.uint8)
+    with tifffile.TiffFile(path) as tif:
+        if len(tif.pages) == 1:
+            page = np.asarray(tif.pages[0].asarray())
+            if page.ndim == 3:
+                stack_zyx = page
+                for z in range(nz):
+                    volume[:, :, z] = (stack_zyx[z] > 0)
+                return volume
+        for z, page in enumerate(tif.pages):
+            plane = np.asarray(page.asarray())
+            if plane.ndim != 2:
+                shapes = plane.shape
+                msg = f"Expected 2D TIFF pages in {path}, got shape {shapes} at page {z}"
+                raise ValueError(msg)
+            volume[:, :, z] = (plane > 0)
+    return volume
+
+
+def _column_is_numeric(rows: list[dict[str, str]], key: str) -> bool:
+    """Return True if every non-empty cell in ``key`` parses as a float."""
+    for row in rows:
+        raw = row.get(key, "")
+        if raw is None or str(raw).strip() == "":
+            continue
+        try:
+            float(raw)
+        except (TypeError, ValueError):
+            return False
+    return True
 
 
 def load_points_csv(spec: AnnotationImportConfig) -> ImportedPoints:
@@ -74,17 +115,30 @@ def load_points_csv(spec: AnnotationImportConfig) -> ImportedPoints:
         ]
     )
     extra_keys = [field_map[k] for k in field_map if k not in {"x", "y", "z"}]
+    numeric_keys = [key for key in extra_keys if _column_is_numeric(rows, key)]
+    skipped_keys = [key for key in extra_keys if key not in numeric_keys]
     features = None
-    if extra_keys:
-        features = np.column_stack([[float(row[key]) for row in rows] for key in extra_keys])
+    if numeric_keys:
+        features = np.column_stack(
+            [
+                [float(row[key]) if str(row.get(key, "")).strip() else np.nan for row in rows]
+                for key in numeric_keys
+            ]
+        )
 
     label = spec.label or csv_path.stem
+    metadata: dict = {"format": "points_csv", "n_points": len(rows)}
+    if numeric_keys:
+        metadata["feature_columns"] = numeric_keys
+    if skipped_keys:
+        metadata["skipped_non_numeric_columns"] = skipped_keys
+
     return ImportedPoints(
         label=label,
         coordinates=coords,
         features=features,
         source_path=csv_path,
-        metadata={"format": "points_csv", "n_points": len(rows)},
+        metadata=metadata,
     )
 
 
@@ -100,22 +154,13 @@ def load_mask_tiff(spec: AnnotationImportConfig) -> ImportedMask:
         msg = f"Mask TIFF must be a 3D stack (Y, X, Z), got shape {volume.shape} in {tiff_path}"
         raise ValueError(msg)
 
-    nbytes = int(np.prod(volume.shape))
-    if nbytes > _MAX_MASK_BYTES:
-        msg = (
-            f"Mask TIFF is {nbytes / 1e9:.1f} GB — too large to load in memory. "
-            "Split the mask or process on a machine with more RAM."
-        )
-        raise ValueError(msg)
-
-    mask = (volume > 0).astype(np.uint8)
     label = spec.label or tiff_path.stem
     return ImportedMask(
         label=label,
-        volume=mask,
+        volume=volume,
         voxel_um=[1.0, 1.0, 1.0],
         source_path=tiff_path,
-        metadata={"format": "mask_tiff", "shape_yxz": tuple(int(v) for v in mask.shape)},
+        metadata={"format": "mask_tiff", "shape_yxz": tuple(int(v) for v in volume.shape)},
     )
 
 

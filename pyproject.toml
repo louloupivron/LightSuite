@@ -22,6 +22,7 @@ dependencies = [
     "dask[array]>=2024.1",
     "imagecodecs>=2024.1",
     "open3d>=0.18",
+    "openpyxl>=3.1.5",
 ]
 
 [project.optional-dependencies]

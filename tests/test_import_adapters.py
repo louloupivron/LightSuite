@@ -43,6 +43,24 @@ def test_load_points_csv(tmp_path: Path) -> None:
     assert points.features.shape == (2, 1)
 
 
+def test_load_points_csv_skips_non_numeric_extra_columns(tmp_path: Path) -> None:
+    csv_path = tmp_path / "cells.csv"
+    csv_path.write_text(
+        "x,y,z,name,volume_um3\n"
+        "1.0,2.0,3.0,Segment #001,27\n"
+        "4.5,5.5,6.5,Segment #002,42\n",
+        encoding="utf-8",
+    )
+    spec = AnnotationImportConfig(format=AnnotationFormat.POINTS_CSV, path=csv_path)
+    points = load_points_csv(spec)
+    assert points.coordinates.shape == (2, 3)
+    assert points.features is not None
+    assert points.features.shape == (2, 1)
+    assert points.features[0, 0] == 27.0
+    assert points.metadata["skipped_non_numeric_columns"] == ["name"]
+    assert points.metadata["feature_columns"] == ["volume_um3"]
+
+
 def test_load_points_csv_requires_xyz_header(tmp_path: Path) -> None:
     csv_path = tmp_path / "bad.csv"
     csv_path.write_text("a,b,c\n1,2,3\n", encoding="utf-8")
@@ -101,3 +119,13 @@ def test_sample_reference_roundtrip(tmp_path: Path) -> None:
     assert loaded.shape_yxz == [100, 200, 50]
     assert loaded.format == "lightsuite_sample_space_v1"
     assert loaded.index_base == 1
+
+
+def test_registration_shape_native_yxz_matches_preprocess_grid() -> None:
+    from lightsuite.import_.brain_import import _registration_shape_native_yxz
+    from lightsuite.registration.volume import permute_brain_volume
+
+    shape = _registration_shape_native_yxz((2048, 2048, 1361), [6.55, 6.55, 5.0], 20.0)
+    assert shape == (671, 671, 341)
+    permuted = permute_brain_volume(np.zeros(shape, dtype=np.uint8), [-1, 3, 2])
+    assert permuted.shape == (671, 341, 671)

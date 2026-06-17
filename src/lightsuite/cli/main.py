@@ -107,6 +107,30 @@ def brain_import_annotations(
         typer.echo(f"{item.label}: {item.kind} — {item.n_atlas} atlas features")
 
 
+@brain_app.command("inspect-imports")
+def brain_inspect_imports(
+    config: str = typer.Option(..., "--config", "-c", help="Pipeline YAML config."),
+    headless: bool = typer.Option(
+        False,
+        "--headless",
+        help="Validate inspect inputs without opening Napari.",
+    ),
+) -> None:
+    """Napari QC: registered channels, atlas, and imported points/masks in atlas space."""
+    from lightsuite.config.loader import load_config
+    from lightsuite.gui.inspect_brain_imports import run_brain_inspect_imports
+
+    cfg = load_config(config)
+    paths = run_brain_inspect_imports(cfg, headless=headless)
+    typer.echo(f"volume_registered: {paths.volume_registered_dir}")
+    if paths.registered_channels:
+        typer.echo(f"  channels: {sorted(paths.registered_channels)}")
+    if paths.point_npz_paths:
+        typer.echo(f"  point layers: {list(paths.point_npz_paths)}")
+    if paths.mask_paths:
+        typer.echo(f"  mask layers: {list(paths.mask_paths)}")
+
+
 @brain_app.command("export")
 def brain_export(
     config: str = typer.Option(..., "--config", "-c", help="Pipeline YAML config."),

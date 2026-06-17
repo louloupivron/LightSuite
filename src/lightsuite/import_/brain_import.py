@@ -27,6 +27,7 @@ from lightsuite.import_.sample_reference import (
 )
 from lightsuite.import_.transform import transform_points_to_atlas
 from lightsuite.preprocess.checkpoint import RegOptsCheckpoint
+from lightsuite.preprocess.slice_ops import output_xy_shape, output_z_count
 
 console = Console()
 
@@ -36,6 +37,21 @@ def _slug(label: str) -> str:
     return cleaned or "annotation"
 
 
+def _registration_shape_native_yxz(
+    shape_yxz: tuple[int, int, int],
+    voxel_um: list[float],
+    registres_um: float,
+) -> tuple[int, int, int]:
+    """Downsampled native grid (Y, X, Z) before orientation permute — matches preprocess TIFFs."""
+    ny, nx, nz = shape_yxz
+    vx, vy, vz = (float(v) for v in voxel_um)
+    scale_xy = vx / float(registres_um)
+    scale_z = vz / float(registres_um)
+    out_h, out_w = output_xy_shape(ny, nx, scale_xy)
+    out_z = output_z_count(nz, scale_z)
+    return out_h, out_w, out_z
+
+
 def _resample_mask_native_to_registration(
     mask: np.ndarray,
     *,
@@ -43,14 +59,9 @@ def _resample_mask_native_to_registration(
     native_voxel_um: list[float],
     registres_um: float,
 ) -> np.ndarray:
-    """Downsample a native-resolution mask onto the registration-resolution grid."""
+    """Downsample a native-resolution mask onto the unpermuted registration grid."""
     vol = np.asarray(mask)
-    native_um = np.asarray(native_voxel_um, dtype=np.float64)
-    reg_um = np.full(3, float(registres_um), dtype=np.float64)
-
-    reg_shape = tuple(
-        max(1, int(round(vol.shape[i] * native_um[i] / reg_um[i]))) for i in range(3)
-    )
+    reg_shape = _registration_shape_native_yxz(vol.shape, native_voxel_um, registres_um)
     if reg_shape != vol.shape:
         vol = sk_resize(
             vol,
@@ -161,7 +172,11 @@ def _import_mask(
         metadata=loaded.metadata,
     )
 
-    reg_shape = tuple(int(v) for v in transform_params.regvolsize)
+    reg_shape = _registration_shape_native_yxz(
+        loaded.volume.shape,
+        voxel_um,
+        checkpoint.registres_um,
+    )
     mask_reg = _resample_mask_native_to_registration(
         loaded.volume,
         target_shape_yxz=reg_shape,
