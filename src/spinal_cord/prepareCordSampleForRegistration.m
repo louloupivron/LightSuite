@@ -8,15 +8,32 @@ finvoluse = cordvol;
 opts.regvolsize = size(finvoluse);
 fprintf('Done! Took %2.2f s.\n', toc)
 %==========================================================================
-fprintf('Loading cord atlas and extracting point clouds... '); tic;
-[tv, av, tvpts, atlasres, segmentinfo] = loadSpinalCordAtlasAndPoints(opts.registrationres);
-fprintf('Done! Took %2.2f s.\n', toc)
-%--------------------------------------------------------------------------
-iregchan  = opts.regchan;
+iregchan = opts.regchan;
 if opts.Nchan == 1
     iregchan = 1;
 end
-assert(iregchan<=opts.Nchan , 'Your registration channel is out of range');
+assert(iregchan <= opts.Nchan, 'Your registration channel is out of range');
+fprintf('Saving downsampled registration volumes... '); tic;
+saveopts.compress = 'lzw';
+saveopts.message  = false;
+registresLabel    = round(opts.registrationres(1));
+regvolpaths       = cell(opts.Nchan, 1);
+for ichannel = 1:opts.Nchan
+    samplepath = fullfile(opts.lsfolder, sprintf('chan_%d_sample_register_%dum.tif', ...
+        ichannel, registresLabel));
+    if exist(samplepath, 'file')
+        delete(samplepath);
+    end
+    saveastiff(cordvol(:, :, :, ichannel), samplepath, saveopts);
+    regvolpaths{ichannel} = samplepath;
+end
+opts.regvolpaths = regvolpaths;
+opts.regvolpath  = regvolpaths{iregchan};
+fprintf('Done! Took %2.2f s.\n', toc)
+%==========================================================================
+fprintf('Loading cord atlas and extracting point clouds... '); tic;
+[tv, av, tvpts, atlasres, segmentinfo] = loadSpinalCordAtlasAndPoints(opts.registrationres);
+fprintf('Done! Took %2.2f s.\n', toc)
 %--------------------------------------------------------------------------
 % we assume the long dimension is first
 regvol           = cordvol(:, :, :, iregchan);

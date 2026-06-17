@@ -2,11 +2,23 @@ function straightvol = generateRegisteredCordVolume(regopts, transformparams)
 %UNTITLED Summary of this function goes here
 %   Detailed explanation goes here
 %==========================================================================
-cordvol   = readSpinalCordSample(regopts.datafolder, regopts.sampleres, ...
-    getOr(regopts, 'tifftype', 'auto'), regopts.registrationres);
-Nchannels = size(cordvol, 4);
-%==========================================================================
-cordvol = cordDownsampleVolume(cordvol, regopts);
+if isfield(regopts, 'regvolpaths') && ~isempty(regopts.regvolpaths) && ...
+        all(cellfun(@(p) exist(p, 'file') == 2, regopts.regvolpaths))
+    fprintf('Loading downsampled registration volumes... '); loadtic = tic;
+    Nchannels = numel(regopts.regvolpaths);
+    firstVol  = readDownStack(regopts.regvolpaths{1});
+    cordvol   = zeros([size(firstVol) Nchannels], 'uint16', 'like', firstVol);
+    cordvol(:, :, :, 1) = firstVol;
+    for ichan = 2:Nchannels
+        cordvol(:, :, :, ichan) = readDownStack(regopts.regvolpaths{ichan});
+    end
+    fprintf('Done! Took %2.2f s.\n', toc(loadtic));
+else
+    cordvol   = readSpinalCordSample(regopts.datafolder, regopts.sampleres, ...
+        getOr(regopts, 'tifftype', 'auto'), regopts.registrationres);
+    Nchannels = size(cordvol, 4);
+    cordvol   = cordDownsampleVolume(cordvol, regopts);
+end
 %==========================================================================
 channames = cell(Nchannels, 1);
 if isfield(regopts, 'channames')

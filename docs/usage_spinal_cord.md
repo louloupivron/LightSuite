@@ -48,7 +48,7 @@ sampleres = [2.0, 2.0, 5.0];
 
 Large plane-per-file stacks are downsampled **while loading** to the registration grid (default 20 µm isotropic) so the full native volume is never held in RAM.
 
-These functions load your raw TIFF data at the specified resolution and prepare a downsampled registration volume, similar to the lightsheet brain pipeline. The registration options are saved to `regopts.mat`.
+These functions load your raw TIFF data at the specified resolution and prepare a downsampled registration volume, similar to the lightsheet brain pipeline. Per-channel registration TIFFs are saved to `lightsuite/` (e.g. `chan_1_sample_register_20um.tif`), and the registration options are saved to `regopts.mat`.
 
 ---
 
@@ -201,6 +201,7 @@ The `resout` struct contains `counts`, `volumes`, `signal`, `names`, and `indice
 
 ```
 <lsfolder>/
+├── chan_1_sample_register_20um.tif    # Downsampled volumes (one per channel)
 ├── regopts.mat                        # Registration options (updated at each stage)
 ├── spinal_alignment_opt.mat           # Straightening spline parameters
 ├── corresponding_points.mat           # Manual control points and initial affine
