@@ -7,7 +7,7 @@ if isfield(regopts, 'regvolpaths') && ~isempty(regopts.regvolpaths) && ...
     fprintf('Loading downsampled registration volumes... '); loadtic = tic;
     Nchannels = numel(regopts.regvolpaths);
     firstVol  = readDownStack(regopts.regvolpaths{1});
-    cordvol   = zeros([size(firstVol) Nchannels], 'uint16', 'like', firstVol);
+    cordvol   = zeros([size(firstVol) Nchannels], 'like', firstVol);
     cordvol(:, :, :, 1) = firstVol;
     for ichan = 2:Nchannels
         cordvol(:, :, :, ichan) = readDownStack(regopts.regvolpaths{ichan});

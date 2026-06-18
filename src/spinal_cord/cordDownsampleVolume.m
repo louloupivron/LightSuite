@@ -7,15 +7,15 @@ if isfield(opts, 'orisize') && ~isempty(opts.orisize)
 else
     nativeSize = size(cordvol, 1:3);
 end
-[resfac, targetSize] = cordVolumeDownsampleSpec(nativeSize, ...
+[~, targetSize] = cordVolumeDownsampleSpec(nativeSize, ...
     opts.sampleres, opts.registrationres);
 if isequal(size(cordvol, 1:3), targetSize)
     return
 end
 Nchan = size(cordvol, 4);
-finvoluse = zeros([targetSize Nchan], 'uint16', 'like', cordvol);
+finvoluse = zeros([targetSize Nchan], 'like', cordvol);
 for ii = 1:Nchan
-    finvoluse(:, :, :, ii) = imresize3(cordvol(:, :, :, ii), 'Scale', resfac);
+    finvoluse(:, :, :, ii) = imresize3(cordvol(:, :, :, ii), targetSize);
 end
 cordvol = finvoluse;
 end

@@ -214,13 +214,12 @@ backvol = backvol(:, :, 1:nLoaded);
 finvol = zeros(targetNy, targetNx, targetNz, 1, 'uint16');
 if resfac(3) == 1
     finvol(:, :, :, 1) = backvol;
-    nativeSize = [targetNy, targetNx, nLoaded];
 else
     [~, targetSizeLoaded] = cordVolumeDownsampleSpec( ...
         [Ny0, Nx0, nLoaded], sampleres, registrationres);
     finvol(:, :, :, 1) = imresize3(backvol, targetSizeLoaded);
-    nativeSize = targetSizeLoaded;
 end
+nativeSize = [Ny0, Nx0, nLoaded];
 if ~isempty(skippedSlices)
     fprintf('  loaded %d / %d slices (%d skipped as corrupt)\n', ...
         nLoaded, NzListed, height(skippedSlices));
