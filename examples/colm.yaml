@@ -4,28 +4,23 @@
 #   uv run lightsuite brain validate-config -c examples/Gilda.yaml
 
 sample:
-  name: Gilda
+  name: COLM
   source:
     format: tiff_stack
-    tiff_type: planeperfile
-    channels:
-      - /media/gbm/NVME2/ALICe-pipelines-data/Gilda/output/channel_488/RES(5690x5834x2052)
-      - /media/gbm/NVME2/ALICe-pipelines-data/Gilda/output/channel_647/RES(5690x5834x2052)
+    tiff_type: channelperfile
+    path: /media/gbm/NVME2/ALICe-pipelines-data/COLM/4X_YX044/output/channel_0
   scratch: /media/gbm/NVME2/lightsuite_scratch
-  save_path: /media/gbm/NVME2/ALICe-pipelines-data/Gilda/output/registered_perens_dual
-
-  voxel_um: [2.03, 2.03, 3]
+  save_path: /media/gbm/NVME2/ALICe-pipelines-data/COLM/4X_YX044/output/registered_allen
+  voxel_um: [1.625, 1.625, 5]
 
 atlas:
-  provider: perens
-  resolution_um: 20
-  atlas_dir: /home/gbm/ALICe-pipelines/LightSuite/atlas/perens_20um
+  provider: allen
+  resolution_um: 10
+  atlas_dir: /home/gbm/ALICe-pipelines/LightSuite/atlas/allen_CCF3_10um
 
 registration:
   channel_primary: 1
-  channel_secondary: 2  # set to 2 when channel_561 is listed above
-  dual_channel_mi_weight_autofluor: 0.5
-  dual_channel_mi_weight_signal: 0.5
+  channel_secondary: null  # set to 2 when channel_561 is listed above
   resolution_um: 20
   cloud_threshold: 3
   sample_cloud_subsample: 0.25

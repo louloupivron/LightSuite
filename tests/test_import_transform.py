@@ -5,8 +5,13 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from lightsuite.import_.transform import sample_points_to_registration_voxels
+from lightsuite.import_.transform import (
+    native_xyz_to_unpermuted_registration_yxz,
+    permute_registration_indices_yxz,
+    sample_points_to_registration_voxels,
+)
 from lightsuite.registration.brain_register import TransformParamsCheckpoint
+from lightsuite.registration.volume import permute_brain_volume
 
 
 def _transform_params() -> TransformParamsCheckpoint:
@@ -27,13 +32,20 @@ def _transform_params() -> TransformParamsCheckpoint:
     )
 
 
+def test_native_xyz_to_unpermuted_registration_yxz() -> None:
+    pts = np.array([[1.0, 1.0, 1.0], [81.0, 101.0, 61.0]])
+    reg = native_xyz_to_unpermuted_registration_yxz(pts, ori_voxel_um=[5.0, 5.0, 5.0], registres_um=20.0)
+    assert reg.shape == (2, 3)
+    assert np.allclose(reg[0], [0.0, 0.0, 0.0])
+    assert np.allclose(reg[1], [25.0, 20.0, 15.0])
+
+
 def test_sample_points_to_registration_identity_perm() -> None:
     pts = np.array([[1.0, 1.0, 1.0], [81.0, 101.0, 61.0]])
     reg = sample_points_to_registration_voxels(pts, _transform_params(), registres_um=20.0)
-    # regsize_mm = 10 * 2 * 1e-3 = 0.02 mm; native (0,0,0) -> reg origin
     assert reg.shape == (2, 3)
-    assert reg[0, 0] == pytest.approx(0.0)
-    assert np.allclose(reg[1], [20.0, 25.0, 15.0])
+    assert np.allclose(reg[0], [0.0, 0.0, 0.0])
+    assert np.allclose(reg[1], [25.0, 20.0, 15.0])
 
 
 def test_sample_points_to_registration_with_flip() -> None:
@@ -43,3 +55,18 @@ def test_sample_points_to_registration_with_flip() -> None:
     reg = sample_points_to_registration_voxels(pts, params, registres_um=20.0)
     assert reg.shape == (1, 3)
     assert np.isfinite(reg).all()
+
+
+def test_permute_registration_indices_matches_volume() -> None:
+    shape = (671, 671, 341)
+    vol = np.zeros(shape, dtype=np.float32)
+    vol[24, 326, 239] = 1.0
+    permuted = permute_brain_volume(vol, [-1, 3, 2])
+    idx = np.argwhere(permuted > 0)[0].astype(float)
+
+    reg = permute_registration_indices_yxz(
+        np.array([[24.0, 326.0, 239.0]]),
+        shape,
+        [-1, 3, 2],
+    )[0]
+    assert np.allclose(reg, idx, atol=0.5)
