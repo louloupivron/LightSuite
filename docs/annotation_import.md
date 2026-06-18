@@ -137,6 +137,8 @@ Each site maintains a small converter script. Common translations:
 | **0-based indices** | Add 1 to each coordinate |
 | **`[z, y, x]` order** | Reorder to `[x, y, z]` |
 | **Arivis Blob Finder CSV** | Use COM columns as `x,y,z`; add 1 if 0-based |
+| **Imaris Statistics CSV** | `Position X/Y/Z` in µm → `int(pos / voxel_um) + 1` per axis; see `examples/notebooks/convert_imaris_to_lightsuite.ipynb` |
+| **Imaris mask TIFF series** | One label slice per Z (`*_Z####.tif`, 0-based in filename); binarize `(plane > 0)` and stack to multi-page TIFF |
 | **LCT JSON** `[[z,y,x],…]` | Reorder to `x,y,z`; add 1 |
 | **Downsampled segmentation** | Resample mask/coordinates to native `shape_yxz` before import |
 
