@@ -38,7 +38,7 @@ uv sync --extra dev
 uv sync --extra gui
 
 # All optional extras
-uv sync --extra dev --extra gui --extra formats --extra gpu
+uv sync --extra dev --extra gui --extra formats --extra gpu --extra atlas
 ```
 
 This creates a virtual environment in `.venv` and installs the `lightsuite` command.
@@ -250,6 +250,7 @@ Expected checks:
 | `gui` | `uv sync --extra gui` | Napari match-points GUI |
 | `dev` | `uv sync --extra dev` | pytest, ruff |
 | `formats` | `uv sync --extra formats` | Future OME-Zarr / Imaris readers |
+| `atlas` | `uv sync --extra atlas` | BrainGlobe Atlas API (`atlas.source: brainglobe` in config) |
 | `gpu` | `uv sync --extra gpu` | CuPy (future GPU detection) |
 
 ---

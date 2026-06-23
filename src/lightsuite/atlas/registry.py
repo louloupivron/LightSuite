@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 ATLAS_FILES: dict[str, dict[str, str]] = {
     "allen": {
@@ -28,6 +29,12 @@ class AtlasPaths:
     boundary_path: Path | None
     structures_csv_path: Path | None
     supports_parcellation: bool
+    atlas_source: str = "files"
+    brainglobe_name: str | None = None
+
+
+if TYPE_CHECKING:
+    from lightsuite.config.models import AtlasConfig
 
 
 def _search_dirs(explicit: Path | None) -> list[Path]:
@@ -39,23 +46,16 @@ def _search_dirs(explicit: Path | None) -> list[Path]:
         if part.strip():
             dirs.append(Path(part.strip()).expanduser().resolve())
     dirs.append(Path.cwd())
-    # Common split Perens layout: template under perens/, annotation in parent
     for base in list(dirs):
         dirs.append(base / "LSFM_atlas_files")
         dirs.append(base / "LSFM_atlas_files" / "perens")
     return dirs
 
 
-def resolve_brain_atlas(
-    brain_atlas: str = "allen",
-    atlas_dir: Path | None = None,
+def _resolve_files_atlas(
+    atlas_id: str,
+    atlas_dir: Path | None,
 ) -> AtlasPaths:
-    """Resolve template and annotation NIfTI paths for a brain atlas."""
-    atlas_id = brain_atlas.lower().strip()
-    if atlas_id not in ATLAS_FILES:
-        msg = f"Unknown brain atlas '{brain_atlas}'. Expected: {', '.join(ATLAS_FILES)}"
-        raise ValueError(msg)
-
     files = ATLAS_FILES[atlas_id]
     template_name = files["template"]
     annotation_name = files["annotation"]
@@ -115,4 +115,97 @@ def resolve_brain_atlas(
         boundary_path=boundary_path,
         structures_csv_path=structures_csv,
         supports_parcellation=supports_parcellation,
+        atlas_source="files",
+        brainglobe_name=None,
     )
+
+
+def resolve_brain_atlas(
+    brain_atlas: str = "allen",
+    atlas_dir: Path | None = None,
+    *,
+    source: str = "files",
+    brainglobe_name: str | None = None,
+    resolution_um: float | None = None,
+) -> AtlasPaths:
+    """Resolve template and annotation paths for a brain atlas."""
+    atlas_id = brain_atlas.lower().strip()
+    if atlas_id not in ATLAS_FILES and source == "files":
+        msg = f"Unknown brain atlas '{brain_atlas}'. Expected: {', '.join(ATLAS_FILES)}"
+        raise ValueError(msg)
+
+    source = source.lower().strip()
+    if source == "brainglobe":
+        from lightsuite.atlas.brainglobe_backend import (
+            default_brainglobe_name,
+            resolve_brainglobe_paths,
+        )
+
+        bg_name = brainglobe_name or default_brainglobe_name(
+            atlas_id,
+            resolution_um if resolution_um is not None else 20.0,
+        )
+        template_path, annotation_path, boundary_path, structures_csv, _res, root = (
+            resolve_brainglobe_paths(bg_name, provider=atlas_id)
+        )
+        structures_path = structures_csv if structures_csv.is_file() else None
+        supports = structures_path is not None
+        return AtlasPaths(
+            brain_atlas=atlas_id,
+            atlas_dir=root,
+            template_path=template_path,
+            annotation_path=annotation_path,
+            boundary_path=boundary_path,
+            structures_csv_path=structures_path,
+            supports_parcellation=supports,
+            atlas_source="brainglobe",
+            brainglobe_name=bg_name,
+        )
+
+    if source != "files":
+        msg = f"Unknown atlas source {source!r}. Expected 'files' or 'brainglobe'."
+        raise ValueError(msg)
+
+    return _resolve_files_atlas(atlas_id, atlas_dir)
+
+
+def resolve_brain_atlas_from_config(cfg: AtlasConfig) -> AtlasPaths:
+    """Resolve atlas paths from pipeline :class:`AtlasConfig`."""
+    return resolve_brain_atlas(
+        cfg.provider.value,
+        cfg.atlas_dir,
+        source=cfg.source.value,
+        brainglobe_name=cfg.brainglobe_name,
+        resolution_um=cfg.resolution_um,
+    )
+
+
+def resolve_brain_atlas_with_config(brain_atlas: str, cfg: AtlasConfig) -> AtlasPaths:
+    """Resolve atlas using a stored ``brain_atlas`` id and current atlas config."""
+    return resolve_brain_atlas(
+        brain_atlas,
+        cfg.atlas_dir,
+        source=cfg.source.value,
+        brainglobe_name=cfg.brainglobe_name,
+        resolution_um=cfg.resolution_um,
+    )
+
+
+def uses_ccf_id_parcellation(atlas: AtlasPaths) -> bool:
+    """True when annotation voxels store Allen CCF structure ids (not ABC indices)."""
+    if atlas.atlas_source == "brainglobe":
+        return True
+    return atlas.brain_atlas == "perens"
+
+
+def atlas_resolution_um_for_cache(atlas: AtlasPaths, fallback: float) -> float:
+    """Best-effort atlas voxel size in µm for cached division-map filenames."""
+    if atlas.brainglobe_name:
+        for token in ("10um", "15um", "20um", "25um", "50um"):
+            if token in atlas.brainglobe_name:
+                return float(token.replace("um", ""))
+    if atlas.brain_atlas == "allen":
+        return 10.0
+    if atlas.brain_atlas == "perens":
+        return 20.0
+    return fallback

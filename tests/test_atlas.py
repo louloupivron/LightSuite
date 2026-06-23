@@ -1,11 +1,14 @@
-"""Tests for atlas path resolution."""
+"""Tests for atlas path resolution and volume I/O."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import pytest
+import tifffile
 
+from lightsuite.atlas.io import load_atlas_volume
 from lightsuite.atlas.registry import resolve_brain_atlas
 
 
@@ -37,3 +40,12 @@ def test_resolve_allen_atlas_with_boundary(tmp_path: Path) -> None:
 def test_resolve_atlas_missing_raises(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError):
         resolve_brain_atlas("allen", atlas_dir=tmp_path)
+
+
+def test_load_atlas_volume_tiff(tmp_path: Path) -> None:
+    vol = np.arange(24, dtype=np.uint16).reshape(2, 3, 4)
+    path = tmp_path / "reference.tiff"
+    tifffile.imwrite(path, vol)
+    loaded = load_atlas_volume(path)
+    np.testing.assert_array_equal(loaded, vol)
+

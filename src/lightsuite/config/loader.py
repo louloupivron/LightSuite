@@ -94,3 +94,18 @@ def save_orientation_to_config(config_path: str | Path, permvec: list[int]) -> P
     path.write_text("".join(lines), encoding="utf-8")
     load_config(path)
     return path
+
+
+def load_cohort_config(path: str | Path):
+    """Load and validate a cross-subject cohort YAML config."""
+    from lightsuite.analysis.cohort_models import CohortConfig
+
+    config_path = Path(path).expanduser().resolve()
+    if not config_path.is_file():
+        msg = f"Cohort config file not found: {config_path}"
+        raise FileNotFoundError(msg)
+
+    with config_path.open(encoding="utf-8") as handle:
+        raw: dict[str, Any] = yaml.safe_load(handle) or {}
+
+    return CohortConfig.model_validate(raw)

@@ -8,12 +8,12 @@ import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-import nibabel as nib
 import numpy as np
 from rich.console import Console
 from scipy.spatial.distance import cdist
 
-from lightsuite.atlas.registry import resolve_brain_atlas
+from lightsuite.atlas.io import load_atlas_volume
+from lightsuite.atlas.registry import resolve_brain_atlas_from_config
 from lightsuite.config.models import BrainPipelineConfig
 from lightsuite.gui.affine import (
     affine_point_errors,
@@ -344,9 +344,9 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
     )
     affine_diag.save(save_path / "affine_fit_stats.json")
 
-    atlas = resolve_brain_atlas(config.atlas.provider.value, config.atlas.atlas_dir)
-    tv = np.asanyarray(nib.load(atlas.template_path).dataobj).astype(np.float32)
-    av = np.asanyarray(nib.load(atlas.annotation_path).dataobj).astype(np.float32)
+    atlas = resolve_brain_atlas_from_config(config.atlas)
+    tv = load_atlas_volume(atlas.template_path).astype(np.float32)
+    av = load_atlas_volume(atlas.annotation_path).astype(np.float32)
 
     downfac = float(
         checkpoint.downfac_reg or (config.atlas.resolution_um / checkpoint.registres_um)

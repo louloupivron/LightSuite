@@ -27,6 +27,11 @@ class BrainAtlasId(str, Enum):
     PERENS = "perens"
 
 
+class AtlasSource(str, Enum):
+    FILES = "files"
+    BRAINGLOBE = "brainglobe"
+
+
 class SampleSourceConfig(BaseModel):
     format: SourceFormat = SourceFormat.AUTO
     path: Path | None = None
@@ -101,6 +106,17 @@ class AtlasConfig(BaseModel):
     provider: BrainAtlasId = BrainAtlasId.ALLEN
     resolution_um: float = Field(default=10.0, gt=0)
     atlas_dir: Path | None = None
+    source: AtlasSource = Field(
+        default=AtlasSource.FILES,
+        description="Atlas provider: local NIfTI files (files) or BrainGlobe Atlas API (brainglobe).",
+    )
+    brainglobe_name: str | None = Field(
+        default=None,
+        description=(
+            "BrainGlobe registry name when source=brainglobe (e.g. perens_lsfm_mouse_20um). "
+            "Inferred from provider and resolution_um when omitted."
+        ),
+    )
 
     @field_validator("atlas_dir")
     @classmethod
@@ -218,6 +234,23 @@ class ExportConfig(BaseModel):
     save_registered_volume: bool = False
 
 
+class AnalysisConfig(BaseModel):
+    """Post-registration analysis (region stats, cell counts, taxonomy)."""
+
+    write_tidy_csv: bool = Field(
+        default=True,
+        description="Emit long-form chanXX_region_stats.csv (with region names) during export.",
+    )
+    count_points: bool = Field(
+        default=True,
+        description="Bin imported atlas-space point clouds into per-region cell counts/densities.",
+    )
+    point_labels: list[str] | None = Field(
+        default=None,
+        description="Import labels to count (matches *_atlas_coords.npz stems); None = all found.",
+    )
+
+
 class AnnotationFormat(str, Enum):
     """LightSuite Sample Space v1 — native-resolution exports only."""
 
@@ -257,6 +290,7 @@ class BrainPipelineConfig(BaseModel):
     detection: DetectionConfig = Field(default_factory=DetectionConfig)
     compute: ComputeConfig = Field(default_factory=ComputeConfig)
     export: ExportConfig = Field(default_factory=ExportConfig)
+    analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
     import_config: ImportConfig | None = Field(default=None, alias="import")
 
     @model_validator(mode="after")

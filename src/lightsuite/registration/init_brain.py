@@ -5,11 +5,11 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-import nibabel as nib
+from lightsuite.atlas.io import load_atlas_volume
 import numpy as np
 from rich.console import Console
 
-from lightsuite.atlas.registry import resolve_brain_atlas
+from lightsuite.atlas.registry import resolve_brain_atlas_from_config
 from lightsuite.config.models import BrainPipelineConfig
 from lightsuite.preprocess.checkpoint import RegOptsCheckpoint
 from lightsuite.registration.align import (
@@ -50,14 +50,14 @@ def initialize_brain_registration(config: BrainPipelineConfig) -> RegOptsCheckpo
     backvol = load_registration_volume(Path(checkpoint.regvolpath))
     downfac = config.atlas.resolution_um / checkpoint.registres_um
 
-    atlas = resolve_brain_atlas(config.atlas.provider.value, config.atlas.atlas_dir)
-    tv = np.asanyarray(nib.load(atlas.template_path).dataobj)
-    av = np.asanyarray(nib.load(atlas.annotation_path).dataobj)
+    atlas = resolve_brain_atlas_from_config(config.atlas)
+    tv = load_atlas_volume(atlas.template_path)
+    av = load_atlas_volume(atlas.annotation_path)
     tvreg = resize_atlas_volume(tv.astype(np.float32), downfac, nearest=False)
     avreg = resize_atlas_volume(av.astype(np.float32), downfac, nearest=True)
 
     if atlas.boundary_path is not None:
-        boundary_full = np.asanyarray(nib.load(atlas.boundary_path).dataobj)
+        boundary_full = load_atlas_volume(atlas.boundary_path)
     else:
         from lightsuite.registration.plots import boundary_volume_from_annotation
 

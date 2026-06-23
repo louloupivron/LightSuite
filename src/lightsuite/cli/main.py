@@ -16,8 +16,10 @@ app = typer.Typer(
 )
 brain_app = typer.Typer(help="Brain lightsheet pipeline stages.")
 mesospim_app = typer.Typer(help="mesoSPIM overview ↔ ROI registration.")
+analysis_app = typer.Typer(help="Post-registration analysis (region stats, cell counts).")
 app.add_typer(brain_app, name="brain")
 app.add_typer(mesospim_app, name="mesospim")
+app.add_typer(analysis_app, name="analysis")
 
 
 def _version_callback(value: bool) -> None:
@@ -275,6 +277,279 @@ def brain_preprocess(
     cfg = load_config(config)
     result = preprocess_lightsheet_volume(cfg, force=force)
     typer.echo(f"Primary registration volume: {result.checkpoint.regvolpath}")
+
+
+@analysis_app.command("region-stats")
+def analysis_region_stats(
+    config: str = typer.Option(..., "--config", "-c", help="Pipeline YAML config."),
+    count_points: bool = typer.Option(
+        None,
+        "--count-points/--no-count-points",
+        help="Bin imported atlas-space points into cell counts (default: analysis.count_points).",
+    ),
+) -> None:
+    """Assemble a tidy region_stats.csv (intensity + cell counts) with region names."""
+    from lightsuite.analysis.runner import run_region_stats
+    from lightsuite.config.loader import load_config
+
+    cfg = load_config(config)
+    result = run_region_stats(cfg, count_points=count_points)
+    if result.combined_path is not None:
+        typer.echo(f"Region stats: {result.combined_path} ({result.n_rows} rows)")
+    else:
+        typer.echo("No region stats produced (run 'lightsuite brain export' first).")
+
+
+@analysis_app.command("validate-cohort")
+def analysis_validate_cohort(
+    config: str = typer.Option(..., "--config", "-c", help="Cohort YAML config."),
+) -> None:
+    """Load and validate a cross-subject cohort configuration file."""
+    from lightsuite.config.loader import load_cohort_config
+
+    cfg = load_cohort_config(config)
+    typer.echo(
+        f"Cohort valid: '{cfg.name}' with {len(cfg.samples)} sample(s), "
+        f"output → {cfg.output_dir}"
+    )
+
+
+@analysis_app.command("group-stats")
+def analysis_group_stats(
+    config: str = typer.Option(..., "--config", "-c", help="Cohort YAML config."),
+) -> None:
+    """Cross-subject group summaries and optional pairwise comparisons."""
+    from lightsuite.analysis.cohort_runner import run_cohort_group_analysis
+    from lightsuite.config.loader import load_cohort_config
+
+    cfg = load_cohort_config(config)
+    result = run_cohort_group_analysis(cfg)
+    for path in result.written_paths:
+        typer.echo(f"  {path.name}")
+    typer.echo(f"Output directory: {result.output_dir}")
+
+
+def _resolve_plot_input(
+    *,
+    input_path: str | None,
+    brain_config: str | None,
+) -> "Path":
+    from pathlib import Path
+
+    from lightsuite.analysis.viz.io import resolve_region_stats_from_config
+
+    if input_path and brain_config:
+        raise typer.BadParameter("Use only one of --input or --config.")
+    if brain_config:
+        return resolve_region_stats_from_config(brain_config)
+    if input_path:
+        return Path(input_path).expanduser().resolve()
+    raise typer.BadParameter("Provide --input or --config.")
+
+
+@analysis_app.command("plot-division-bars")
+def analysis_plot_division_bars(
+    input_path: str | None = typer.Option(None, "--input", "-i", help="region_stats or intensities CSV."),
+    brain_config: str | None = typer.Option(
+        None, "--config", "-c", help="Brain YAML; uses volume_registered/region_stats.csv."
+    ),
+    output: str = typer.Option(..., "--output", "-o", help="Output PNG path."),
+    channel: int | None = typer.Option(1, "--channel", help="Channel id (tidy tables only)."),
+    metric: str = typer.Option("median_intensity", "--metric", help="Metric to plot."),
+    title: str | None = typer.Option(None, "--title", help="Figure title."),
+    exclude_division: list[str] | None = typer.Option(
+        None, "--exclude-division", help="Division names to omit (repeatable)."
+    ),
+    dpi: int = typer.Option(200, "--dpi", help="Figure DPI."),
+) -> None:
+    """Bar plot: left vs right mean per Allen division."""
+    from lightsuite.analysis.viz.io import load_region_plot_table
+    from lightsuite.analysis.viz.plots import plot_division_bars
+
+    csv_path = _resolve_plot_input(input_path=input_path, brain_config=brain_config)
+    table = load_region_plot_table(csv_path, channel=channel, metric=metric)
+    out = Path(output).expanduser()
+    plot_division_bars(
+        table,
+        title=title,
+        output_path=out,
+        dpi=dpi,
+        exclude_divisions=exclude_division,
+    )
+    typer.echo(f"Saved: {out.resolve()}")
+
+
+@analysis_app.command("plot-lr-scatter")
+def analysis_plot_lr_scatter(
+    input_path: str | None = typer.Option(None, "--input", "-i", help="region_stats or intensities CSV."),
+    brain_config: str | None = typer.Option(
+        None, "--config", "-c", help="Brain YAML; uses volume_registered/region_stats.csv."
+    ),
+    output: str = typer.Option(..., "--output", "-o", help="Output PNG path."),
+    channel: int | None = typer.Option(1, "--channel", help="Channel id (tidy tables only)."),
+    metric: str = typer.Option("median_intensity", "--metric", help="Metric to plot."),
+    title: str | None = typer.Option(None, "--title", help="Figure title."),
+    keep_division: list[str] | None = typer.Option(
+        None, "--keep-division", help="Only these divisions (repeatable)."
+    ),
+    exclude_division: list[str] | None = typer.Option(
+        None, "--exclude-division", help="Division names to omit (repeatable)."
+    ),
+    axis_min: float | None = typer.Option(None, "--axis-min", help="Fixed scatter axis minimum."),
+    axis_max: float | None = typer.Option(None, "--axis-max", help="Fixed scatter axis maximum."),
+    dpi: int = typer.Option(200, "--dpi", help="Figure DPI."),
+) -> None:
+    """Scatter plot: left vs right per region, coloured by division."""
+    from lightsuite.analysis.viz.io import load_region_plot_table
+    from lightsuite.analysis.viz.plots import plot_lr_scatter
+
+    csv_path = _resolve_plot_input(input_path=input_path, brain_config=brain_config)
+    table = load_region_plot_table(csv_path, channel=channel, metric=metric)
+    out = Path(output).expanduser()
+    plot_lr_scatter(
+        table,
+        title=title,
+        output_path=out,
+        dpi=dpi,
+        keep_divisions=keep_division,
+        exclude_divisions=exclude_division,
+        axis_min=axis_min,
+        axis_max=axis_max,
+    )
+    typer.echo(f"Saved: {out.resolve()}")
+
+
+@analysis_app.command("plot-group-division")
+def analysis_plot_group_division(
+    input_path: str = typer.Option(
+        ...,
+        "--input",
+        "-i",
+        help="group_summary_by_division.csv from cohort group-stats.",
+    ),
+    output: str = typer.Option(..., "--output", "-o", help="Output PNG path."),
+    title: str | None = typer.Option(None, "--title", help="Figure title."),
+    dpi: int = typer.Option(200, "--dpi", help="Figure DPI."),
+) -> None:
+    """Bar plot: group means by division (cohort output)."""
+    import pandas as pd
+
+    from lightsuite.analysis.viz.cohort_plots import plot_group_division_bars
+
+    summary = pd.read_csv(input_path)
+    out = Path(output).expanduser()
+    plot_group_division_bars(summary, title=title, output_path=out, dpi=dpi)
+    typer.echo(f"Saved: {out.resolve()}")
+
+
+@analysis_app.command("build-division-map")
+def analysis_build_division_map(
+    config: str = typer.Option(..., "--config", "-c", help="Brain pipeline YAML config."),
+    force: bool = typer.Option(False, "--force", help="Rebuild cached division labels."),
+) -> None:
+    """Build or refresh atlas-side division label volume + legend CSV."""
+    from lightsuite.analysis.division_map import ensure_division_map
+    from lightsuite.atlas.registry import resolve_brain_atlas_with_config
+    from lightsuite.config.loader import load_config
+    from lightsuite.export.brain_export import _load_transform_params
+
+    cfg = load_config(config)
+    transform_params = _load_transform_params(cfg.sample.save_path.expanduser())
+    atlas = resolve_brain_atlas_with_config(transform_params.brain_atlas, cfg.atlas)
+    result = ensure_division_map(atlas, force=force)
+    typer.echo(f"Division labels: {result.paths.labels_tiff}")
+    typer.echo(f"Legend: {result.paths.legend_csv} ({len(result.legend)} divisions)")
+
+
+@analysis_app.command("view-divisions")
+def analysis_view_divisions(
+    config: str = typer.Option(..., "--config", "-c", help="Brain pipeline YAML config."),
+    headless: bool = typer.Option(
+        False,
+        "--headless",
+        help="Validate inputs and build division map without opening Napari.",
+    ),
+    stride: int = typer.Option(
+        1,
+        "--stride",
+        min=1,
+        help="Load every Nth voxel along each axis (faster interaction on large volumes).",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Rebuild cached atlas division labels before opening the viewer.",
+    ),
+) -> None:
+    """Napari: toggle atlas divisions on registered channel volumes."""
+    from lightsuite.config.loader import load_config
+    from lightsuite.gui.view_divisions_brain import run_brain_division_viewer
+
+    cfg = load_config(config)
+    paths = run_brain_division_viewer(
+        cfg,
+        headless=headless,
+        stride=stride,
+        force_division_rebuild=force,
+    )
+    typer.echo(f"Division labels: {paths.division_labels}")
+    typer.echo(f"Channels: {sorted(paths.channel_paths)}")
+
+
+@analysis_app.command("registration-qc")
+def analysis_registration_qc(
+    config: str = typer.Option(..., "--config", "-c", help="Brain pipeline YAML config."),
+    channel: int = typer.Option(1, "--channel", help="Registered channel to score."),
+    threshold: float | None = typer.Option(
+        None,
+        "--threshold",
+        "-t",
+        help="Intensity threshold (above = signal). Auto-estimated from volume if omitted.",
+    ),
+    inspect: bool = typer.Option(
+        False,
+        "--inspect",
+        help="Open Napari first to visually validate the threshold (requires gui extra).",
+    ),
+    sweep: bool = typer.Option(
+        False,
+        "--sweep",
+        help="Also run a threshold sensitivity sweep and save CSV + plot.",
+    ),
+    sweep_points: int = typer.Option(9, "--sweep-points", min=2, help="Points in sweep."),
+    headless: bool = typer.Option(
+        False,
+        "--headless",
+        help="Skip Napari inspect; validate inputs and write score only.",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Rebuild cached atlas division labels before scoring.",
+    ),
+) -> None:
+    """Naive registration QC: fraction of signal voxels in unassigned divisions."""
+    from lightsuite.analysis.registration_qc_runner import run_registration_qc
+    from lightsuite.config.loader import load_config
+
+    cfg = load_config(config)
+    result = run_registration_qc(
+        cfg,
+        channel=channel,
+        threshold=threshold,
+        inspect=inspect,
+        sweep=sweep,
+        sweep_points=sweep_points,
+        headless=headless,
+        force_division_rebuild=force,
+    )
+    if result.score_csv is not None:
+        typer.echo(
+            f"Unassigned fraction: {result.score['naive_unassigned_percent']:.2f}% "
+            f"(threshold={result.threshold:g})"
+        )
+    if result.sweep_plot is not None:
+        typer.echo(f"Sweep plot: {result.sweep_plot}")
 
 
 @mesospim_app.command("validate-config")

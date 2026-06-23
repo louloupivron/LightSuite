@@ -5,11 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-import nibabel as nib
 import numpy as np
 from rich.console import Console
 
-from lightsuite.atlas.registry import resolve_brain_atlas
+from lightsuite.atlas.io import load_atlas_volume
+from lightsuite.atlas.registry import resolve_brain_atlas_from_config
 from lightsuite.config.loader import save_orientation_to_config
 from lightsuite.config.models import BrainPipelineConfig
 from lightsuite.gui.brain_data import _normalize_display
@@ -60,8 +60,8 @@ def load_orientation_check_data(config: BrainPipelineConfig) -> OrientationCheck
     checkpoint = RegOptsCheckpoint.load(regopts_path)
     sample = load_registration_volume(Path(checkpoint.regvolpath)).astype(np.float32)
 
-    atlas = resolve_brain_atlas(config.atlas.provider.value, config.atlas.atlas_dir)
-    template = np.asanyarray(nib.load(atlas.template_path).dataobj).astype(np.float32)
+    atlas = resolve_brain_atlas_from_config(config.atlas)
+    template = load_atlas_volume(atlas.template_path).astype(np.float32)
     downfac = config.atlas.resolution_um / checkpoint.registres_um
     atlas_reg = resize_atlas_volume(template, downfac, nearest=False)
 

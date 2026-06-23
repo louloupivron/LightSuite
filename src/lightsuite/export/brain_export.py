@@ -9,9 +9,16 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 from rich.console import Console
 
-from lightsuite.atlas.registry import resolve_brain_atlas
+from lightsuite.analysis.ontology import RegionTable, load_region_table
+from lightsuite.analysis.region_stats import (
+    concat_tidy,
+    parcellation_result_to_tidy,
+    write_region_stats_csv,
+)
+from lightsuite.atlas.registry import resolve_brain_atlas_from_config
 from lightsuite.config.models import BrainPipelineConfig
 from lightsuite.export.atlas_space import transform_volume_to_atlas
 from lightsuite.export.parcellation import (
@@ -32,6 +39,8 @@ class BrainExportResult:
     registered_volumes: dict[int, Path]
     parcellation_paths: dict[int, Path]
     all_medians: np.ndarray | None
+    region_stats_paths: dict[int, Path] | None = None
+    region_stats_combined_path: Path | None = None
 
 
 def _load_transform_params(save_path: Path) -> TransformParamsCheckpoint:
@@ -81,7 +90,7 @@ def export_registered_brain_volumes(
         msg = "regopts.json missing regvolpaths."
         raise RuntimeError(msg)
 
-    atlas = resolve_brain_atlas(transform_params.brain_atlas, config.atlas.atlas_dir)
+    atlas = resolve_brain_atlas_from_config(config.atlas)
     n_chans = len(channel_paths)
     atlas_shape = tuple(int(v) for v in transform_params.atlassize)
     straightvol = np.zeros((*atlas_shape, n_chans), dtype=np.uint16)
@@ -110,21 +119,32 @@ def export_registered_brain_volumes(
         console.print(f"Channel {ichan}/{n_chans} done in {time.perf_counter() - t0:.1f}s.")
 
     parcellation_paths: dict[int, Path] = {}
+    region_stats_paths: dict[int, Path] = {}
+    region_stats_combined_path: Path | None = None
+    tidy_frames: list[pd.DataFrame] = []
     all_medians: np.ndarray | None = None
+
+    emit_tidy = write_csv and atlas.supports_parcellation and config.analysis.write_tidy_csv
+    region_table: RegionTable | None = None
+    if emit_tidy:
+        try:
+            region_table = load_region_table(atlas)
+        except FileNotFoundError as exc:
+            console.print(f"[yellow]Region names unavailable:[/yellow] {exc}")
 
     if write_csv and atlas.supports_parcellation:
         console.print("Calculating parcellation intensities...")
         for ichan in sorted(channel_paths):
             vol = straightvol[:, :, :, ichan - 1]
             try:
-                if atlas.brain_atlas == "allen":
-                    result = compute_allen_parcellation(
+                if uses_ccf_id_parcellation(atlas):
+                    result = compute_perens_parcellation(
                         vol,
                         atlas,
                         transform_params.atlas_resolution_um,
                     )
                 else:
-                    result = compute_perens_parcellation(
+                    result = compute_allen_parcellation(
                         vol,
                         atlas,
                         transform_params.atlas_resolution_um,
@@ -150,10 +170,28 @@ def export_registered_brain_volumes(
             csv_path = register_path / f"chan{ichan:02d}_intensities.csv"
             write_parcellation_csv(csv_path, result)
             parcellation_paths[ichan] = csv_path
+
+            if emit_tidy:
+                tidy = parcellation_result_to_tidy(
+                    result,
+                    region_table,
+                    sample=config.sample.name,
+                    channel=ichan,
+                    atlas=atlas.brain_atlas,
+                )
+                tidy_path = register_path / f"chan{ichan:02d}_region_stats.csv"
+                write_region_stats_csv(tidy_path, tidy)
+                region_stats_paths[ichan] = tidy_path
+                tidy_frames.append(tidy)
+
             if all_medians is None:
                 n_areas = result.median_over_areas.shape[0]
                 all_medians = np.full((n_areas, 2, n_chans), np.nan, dtype=np.float32)
             all_medians[:, :, ichan - 1] = result.median_over_areas
+
+        if tidy_frames:
+            region_stats_combined_path = register_path / "region_stats.csv"
+            write_region_stats_csv(region_stats_combined_path, concat_tidy(tidy_frames))
     elif write_csv:
         console.print(
             "[yellow]Parcellation CSV skipped:[/yellow] atlas does not expose structure metadata."
@@ -164,4 +202,6 @@ def export_registered_brain_volumes(
         registered_volumes=registered_paths,
         parcellation_paths=parcellation_paths,
         all_medians=all_medians,
+        region_stats_paths=region_stats_paths or None,
+        region_stats_combined_path=region_stats_combined_path,
     )

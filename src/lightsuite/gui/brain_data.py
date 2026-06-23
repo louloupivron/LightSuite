@@ -5,11 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-import nibabel as nib
 import numpy as np
 from skimage.exposure import equalize_adapthist
 
-from lightsuite.atlas.registry import resolve_brain_atlas
+from lightsuite.atlas.io import load_atlas_volume
+from lightsuite.atlas.registry import resolve_brain_atlas_from_config
 from lightsuite.config.models import BrainPipelineConfig
 from lightsuite.gui.affine import transform_points_inverse
 from lightsuite.gui.chooselist import (
@@ -106,9 +106,9 @@ def _load_brain_registration_volumes(
     regvol = load_registration_volume(Path(checkpoint.regvolpath))
     regvol = permute_brain_volume(regvol.astype(np.float32), permvec)
 
-    atlas = resolve_brain_atlas(config.atlas.provider.value, config.atlas.atlas_dir)
-    tv = np.asanyarray(nib.load(atlas.template_path).dataobj).astype(np.float32)
-    av = np.asanyarray(nib.load(atlas.annotation_path).dataobj).astype(np.float32)
+    atlas = resolve_brain_atlas_from_config(config.atlas)
+    tv = load_atlas_volume(atlas.template_path).astype(np.float32)
+    av = load_atlas_volume(atlas.annotation_path).astype(np.float32)
     tvreg = resize_atlas_volume(tv, downfac, nearest=False)
     avreg = resize_atlas_volume(av, downfac, nearest=True)
 

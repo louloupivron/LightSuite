@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import nibabel as nib
 import numpy as np
 from rich.console import Console
 
-from lightsuite.atlas.registry import resolve_brain_atlas
+from lightsuite.atlas.io import load_atlas_volume
+from lightsuite.atlas.registry import resolve_brain_atlas_from_config
 from lightsuite.config.models import BrainPipelineConfig
 from lightsuite.gui.brain_data import load_slice_correspondence, prepare_brain_align_slices_session
 from lightsuite.gui.slice_correspondence import SliceCorrespondence, default_correspondence_path
@@ -20,8 +20,8 @@ console = Console()
 
 
 def _atlas_reg_shape(config: BrainPipelineConfig, checkpoint: RegOptsCheckpoint) -> tuple[int, int, int]:
-    atlas = resolve_brain_atlas(config.atlas.provider.value, config.atlas.atlas_dir)
-    tv = np.asanyarray(nib.load(atlas.template_path).dataobj)
+    atlas = resolve_brain_atlas_from_config(config.atlas)
+    tv = load_atlas_volume(atlas.template_path)
     downfac = float(
         checkpoint.downfac_reg or (config.atlas.resolution_um / checkpoint.registres_um)
     )

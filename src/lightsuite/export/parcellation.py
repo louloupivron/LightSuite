@@ -6,10 +6,11 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-import nibabel as nib
 import numpy as np
 import pandas as pd
 
+from lightsuite.analysis.hemisphere import hemisphere_side_masks
+from lightsuite.atlas.io import load_atlas_volume
 from lightsuite.atlas.registry import AtlasPaths
 
 
@@ -91,17 +92,16 @@ def compute_allen_parcellation(
     substr = parcelinfo["parcellation_term_set_name"] == "substructure"
     area_ids = parcelinfo.loc[substr, "parcellation_index"].drop_duplicates().to_numpy(dtype=np.int64)
 
-    av = np.asanyarray(nib.load(atlas.annotation_path).dataobj)
-    n_z_half = av.shape[2] // 2
+    av = load_atlas_volume(atlas.annotation_path)
     voxel_mm3 = (atlas_resolution_um * 1e-3) ** 3
 
     median_over = np.full((len(area_ids), 2), np.nan, dtype=np.float32)
     std_over = np.full((len(area_ids), 2), np.nan, dtype=np.float32)
     volume_over = np.full((len(area_ids), 2), np.nan, dtype=np.float32)
 
-    for side, z_slice in enumerate([slice(0, n_z_half), slice(n_z_half, av.shape[2])]):
-        labels = av[:, :, z_slice].reshape(-1)
-        values = registered_volume[:, :, z_slice].reshape(-1)
+    for side, mask in enumerate(hemisphere_side_masks(av, "allen")):
+        labels = av[mask]
+        values = registered_volume[mask]
         med, std, vol = _accumulate_side(labels, values, area_ids, voxel_mm3)
         median_over[:, side] = med
         std_over[:, side] = std
@@ -128,24 +128,24 @@ def compute_perens_parcellation(
 
     st_tab = pd.read_csv(atlas.structures_csv_path)
     area_ids = st_tab["id"].to_numpy(dtype=np.int64)
-    av = np.asanyarray(nib.load(atlas.annotation_path).dataobj)
+    av = load_atlas_volume(atlas.annotation_path)
     if tuple(av.shape) != tuple(registered_volume.shape):
         msg = f"Annotation shape {av.shape} != registered volume {registered_volume.shape}"
         raise ValueError(msg)
-
-    axis = ml_axis - 1
-    coords = np.indices(av.shape)[axis].astype(np.float32)
-    brain = av > 0
-    split_plane = round(float(coords[brain].mean()))
-    side_lower = (coords <= split_plane) & brain
-    side_upper = (coords > split_plane) & brain
 
     voxel_mm3 = (atlas_resolution_um * 1e-3) ** 3
     median_over = np.full((len(area_ids), 2), np.nan, dtype=np.float32)
     std_over = np.full((len(area_ids), 2), np.nan, dtype=np.float32)
     volume_over = np.full((len(area_ids), 2), np.nan, dtype=np.float32)
 
-    for side, side_mask in enumerate([side_lower, side_upper]):
+    for side, side_mask in enumerate(
+        hemisphere_side_masks(
+            av,
+            atlas.brain_atlas,
+            ml_axis=ml_axis,
+            brainglobe_name=atlas.brainglobe_name,
+        )
+    ):
         labels = av[side_mask]
         values = registered_volume[side_mask]
         positive = labels > 0

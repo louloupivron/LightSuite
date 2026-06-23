@@ -8,10 +8,9 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import nibabel as nib
 import numpy as np
 
-from lightsuite.atlas.registry import resolve_brain_atlas
+from lightsuite.atlas.registry import resolve_brain_atlas_from_config
 from lightsuite.config.models import BrainPipelineConfig
 from lightsuite.export.brain_export import _load_transform_params
 from lightsuite.registration.volume import load_registration_volume
@@ -64,7 +63,7 @@ def discover_brain_import_inspect_paths(config: BrainPipelineConfig) -> BrainImp
         msg = f"Missing {transform_params_path}. Run 'lightsuite brain register' first."
         raise FileNotFoundError(msg)
 
-    atlas = resolve_brain_atlas(config.atlas.provider.value, config.atlas.atlas_dir)
+    atlas = resolve_brain_atlas_from_config(config.atlas)
 
     registered_channels: dict[int, Path] = {}
     for path in sorted(vr.glob("chan_*_registered_atlas.tif")):
@@ -104,11 +103,9 @@ def discover_brain_import_inspect_paths(config: BrainPipelineConfig) -> BrainImp
 
 
 def _load_atlas_volume_yxz(path: Path) -> np.ndarray:
-    data = np.asanyarray(nib.load(str(path)).dataobj)
-    if data.ndim != 3:
-        msg = f"Expected 3D atlas volume in {path}, got shape {data.shape}"
-        raise ValueError(msg)
-    return data.astype(np.float32, copy=False)
+    from lightsuite.atlas.io import load_atlas_volume
+
+    return load_atlas_volume(path).astype(np.float32, copy=False)
 
 
 def _load_points_npz(path: Path) -> np.ndarray:

@@ -15,7 +15,7 @@ from rich.table import Table
 
 from lightsuite.config.loader import load_config
 from lightsuite.config.models import BrainPipelineConfig
-from lightsuite.atlas.registry import resolve_brain_atlas
+from lightsuite.atlas.registry import resolve_brain_atlas, resolve_brain_atlas_from_config
 from lightsuite.registration.bcpd import find_bcpd_executable
 
 console = Console()
@@ -170,12 +170,15 @@ def _check_brain_atlas(cfg: BrainPipelineConfig | None, strict: bool) -> list[Ch
         return results
 
     try:
-        resolved = resolve_brain_atlas(cfg.atlas.provider.value, cfg.atlas.atlas_dir)
+        resolved = resolve_brain_atlas_from_config(cfg.atlas)
+        detail = f"{resolved.template_path}"
+        if resolved.atlas_source == "brainglobe":
+            detail = f"{resolved.brainglobe_name} @ {resolved.template_path}"
         results.append(
             CheckResult(
                 f"Atlas ({resolved.brain_atlas})",
                 True,
-                f"{resolved.template_path}",
+                detail,
             )
         )
         if resolved.boundary_path is not None:
