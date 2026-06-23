@@ -9,7 +9,7 @@ from lightsuite.atlas.io import load_atlas_volume
 import numpy as np
 from rich.console import Console
 
-from lightsuite.atlas.registry import resolve_brain_atlas_from_config
+from lightsuite.atlas.registry import atlas_display_provider_from_config, resolve_brain_atlas_from_config
 from lightsuite.config.models import BrainPipelineConfig
 from lightsuite.preprocess.checkpoint import RegOptsCheckpoint
 from lightsuite.registration.align import (
@@ -125,7 +125,7 @@ def initialize_brain_registration(config: BrainPipelineConfig) -> RegOptsCheckpo
         avreg,
         transform_matlab,
         boundary_atlas=boundary_reg,
-        atlas_provider=config.atlas.provider.value,
+        atlas_provider=atlas_display_provider_from_config(config.atlas),
     )
     preview_elapsed = time.perf_counter() - t0
 

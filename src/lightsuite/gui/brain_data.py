@@ -9,7 +9,7 @@ import numpy as np
 from skimage.exposure import equalize_adapthist
 
 from lightsuite.atlas.io import load_atlas_volume
-from lightsuite.atlas.registry import resolve_brain_atlas_from_config
+from lightsuite.atlas.registry import atlas_display_provider_from_config, resolve_brain_atlas_from_config
 from lightsuite.config.models import BrainPipelineConfig
 from lightsuite.gui.affine import transform_points_inverse
 from lightsuite.gui.chooselist import (
@@ -248,7 +248,7 @@ def load_brain_align_slices_data(config: BrainPipelineConfig) -> BrainAlignSlice
         correspondence_path=correspondence_path,
         correspondence=correspondence,
         permvec=list(permvec),
-        atlas_provider=config.atlas.provider.value,
+        atlas_provider=atlas_display_provider_from_config(config.atlas),
     )
 
 
@@ -308,7 +308,7 @@ def load_brain_match_points_data(config: BrainPipelineConfig) -> BrainMatchPoint
         original_trans=original_trans,
         auto_alignment=auto_alignment,
         permvec=permvec,
-        atlas_provider=config.atlas.provider.value,
+        atlas_provider=atlas_display_provider_from_config(config.atlas),
         slice_correspondence=slice_correspondence,
     )
 

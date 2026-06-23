@@ -209,3 +209,17 @@ def atlas_resolution_um_for_cache(atlas: AtlasPaths, fallback: float) -> float:
     if atlas.brain_atlas == "perens":
         return 20.0
     return fallback
+
+
+def atlas_display_provider(atlas: AtlasPaths) -> str:
+    """QC display profile id for plots and GUIs (accounts for BrainGlobe axis order)."""
+    from lightsuite.atlas.display import display_provider_for_atlas
+
+    return display_provider_for_atlas(atlas.brain_atlas, atlas_source=atlas.atlas_source)
+
+
+def atlas_display_provider_from_config(cfg: AtlasConfig) -> str:
+    """QC display profile id from pipeline :class:`AtlasConfig`."""
+    from lightsuite.atlas.display import display_provider_for_atlas
+
+    return display_provider_for_atlas(cfg.provider.value, atlas_source=cfg.source.value)

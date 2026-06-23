@@ -131,9 +131,18 @@ _PERENS_CUT_TRANSFORMS: dict[int, SliceDisplayTransform] = {
     3: SliceDisplayTransform(rot90_k=1, flip_ud=False, flip_lr=False),
 }
 
+# BrainGlobe ``perens_lsfm_mouse_20um`` (ASR, shape 621×323×461): 1=coronal, 2=horizontal,
+# 3=sagittal. Calibrated against local Gubra NIfTIs so dim{1,2,3} QC panels match.
+_PERENS_BRAINGLOBE_CUT_TRANSFORMS: dict[int, SliceDisplayTransform] = {
+    1: SliceDisplayTransform(rot90_k=0, flip_ud=False, flip_lr=False),
+    2: SliceDisplayTransform(rot90_k=0, flip_ud=True, flip_lr=True),
+    3: SliceDisplayTransform(rot90_k=1, flip_ud=True, flip_lr=True),
+}
+
 # Plot panel dim (1=coronal, 2=sagittal, 3=horizontal) → volume cut_axis.
 _ALLEN_PLOT_DIM_TO_CUT_AXIS: dict[int, int] = {1: 1, 2: 3, 3: 2}
 _PERENS_PLOT_DIM_TO_CUT_AXIS: dict[int, int] = {1: 2, 2: 1, 3: 3}
+_PERENS_BRAINGLOBE_PLOT_DIM_TO_CUT_AXIS: dict[int, int] = {1: 1, 2: 3, 3: 2}
 
 
 @dataclass(frozen=True)
@@ -171,6 +180,12 @@ _DISPLAY_PROFILES: dict[str, AtlasDisplayProfile] = {
         plot_dim_to_cut_axis=_PERENS_PLOT_DIM_TO_CUT_AXIS,
         cut_transforms=_PERENS_CUT_TRANSFORMS,
     ),
+    "perens_brainglobe": AtlasDisplayProfile(
+        provider="perens_brainglobe",
+        axis_names=("P", "S", "L"),
+        plot_dim_to_cut_axis=_PERENS_BRAINGLOBE_PLOT_DIM_TO_CUT_AXIS,
+        cut_transforms=_PERENS_BRAINGLOBE_CUT_TRANSFORMS,
+    ),
 }
 
 
@@ -184,6 +199,21 @@ def get_display_profile(atlas_provider: str) -> AtlasDisplayProfile:
         )
         raise ValueError(msg)
     return _DISPLAY_PROFILES[key]
+
+
+def display_provider_for_atlas(
+    brain_atlas: str,
+    *,
+    atlas_source: str = "files",
+) -> str:
+    """Resolve the QC display profile id for an atlas provider and source backend."""
+    atlas_id = brain_atlas.lower().strip()
+    source = atlas_source.lower().strip()
+    if source == "brainglobe":
+        bg_key = f"{atlas_id}_brainglobe"
+        if bg_key in _DISPLAY_PROFILES:
+            return bg_key
+    return atlas_id
 
 
 def cut_axis_for_plot_dim(atlas_provider: str, plot_dim: int) -> int:

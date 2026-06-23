@@ -13,7 +13,7 @@ from rich.console import Console
 from scipy.spatial.distance import cdist
 
 from lightsuite.atlas.io import load_atlas_volume
-from lightsuite.atlas.registry import resolve_brain_atlas_from_config
+from lightsuite.atlas.registry import atlas_display_provider_from_config, resolve_brain_atlas_from_config
 from lightsuite.config.models import BrainPipelineConfig
 from lightsuite.gui.affine import (
     affine_point_errors,
@@ -469,7 +469,7 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
         voltoshow_padded,
         avaffine,
         "affine_registration",
-        atlas_provider=config.atlas.provider.value,
+        atlas_provider=atlas_display_provider_from_config(config.atlas),
     )
 
     elastix_temp = save_path / "elastix_temp"
@@ -520,7 +520,7 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
         voltoshow_padded,
         avreg_padded,
         "bspline_registration",
-        atlas_provider=config.atlas.provider.value,
+        atlas_provider=atlas_display_provider_from_config(config.atlas),
     )
 
     inverse_dir = save_path / "elastix_inverse_temp"

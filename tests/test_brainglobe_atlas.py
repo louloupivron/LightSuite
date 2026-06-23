@@ -96,6 +96,16 @@ def test_hemisphere_masks_use_brainglobe_when_name_set() -> None:
     assert masks[0].sum() + masks[1].sum() == ann.size
 
 
+def test_atlas_display_provider_from_config() -> None:
+    from lightsuite.atlas.registry import atlas_display_provider_from_config
+    from lightsuite.config.models import AtlasConfig, AtlasSource, BrainAtlasId
+
+    files_cfg = AtlasConfig(provider=BrainAtlasId.PERENS, source=AtlasSource.FILES)
+    bg_cfg = AtlasConfig(provider=BrainAtlasId.PERENS, source=AtlasSource.BRAINGLOBE)
+    assert atlas_display_provider_from_config(files_cfg) == "perens"
+    assert atlas_display_provider_from_config(bg_cfg) == "perens_brainglobe"
+
+
 def test_brainglobe_missing_dependency_raises() -> None:
     with patch(
         "lightsuite.atlas.brainglobe_backend.require_brainglobe",
