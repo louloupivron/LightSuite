@@ -61,19 +61,31 @@ def _parse_ccf_id(term_label: object) -> int | None:
 
 
 def _resolve_allen_membership_csv(atlas_dir: Path | None) -> Path | None:
-    """Locate the Allen ABC membership CSV (atlas dir → env → cwd glob)."""
-    if atlas_dir is not None:
-        candidate = atlas_dir / ALLEN_MEMBERSHIP_FILENAME
-        if candidate.is_file():
-            return candidate
+    """Locate the Allen ABC membership CSV (atlas dir → env → atlas path → cwd glob)."""
     env = os.environ.get("LIGHTSUITE_ALLEN_PARCELLATION_CSV", "").strip()
     if env:
         env_path = Path(env).expanduser()
         if env_path.is_file():
             return env_path
-    for base in (atlas_dir, Path.cwd()):
-        if base is None:
+
+    search_bases: list[Path] = []
+    if atlas_dir is not None:
+        search_bases.append(Path(atlas_dir).expanduser())
+    atlas_path_env = os.environ.get("LIGHTSUITE_ATLAS_PATH", "")
+    for part in atlas_path_env.split(os.pathsep):
+        if part.strip():
+            search_bases.append(Path(part.strip()).expanduser())
+    search_bases.append(Path.cwd())
+
+    seen: set[Path] = set()
+    for base in search_bases:
+        base = base.expanduser().resolve()
+        if base in seen:
             continue
+        seen.add(base)
+        candidate = base / ALLEN_MEMBERSHIP_FILENAME
+        if candidate.is_file():
+            return candidate
         for found in base.glob(f"**/{ALLEN_MEMBERSHIP_FILENAME}"):
             return found
     return None
@@ -127,18 +139,46 @@ def load_allen_region_table(csv_path: Path) -> RegionTable:
 
 
 def build_ccf_to_division(allen_csv: Path) -> dict[int, str]:
-    """Map every AllenCCF ontology id (leaf/structure/division) to a division name.
+    """Map AllenCCF ontology ids to division names from the ABC membership table."""
+    return _build_ccf_level_map(allen_csv, term_set="division", value_col="parcellation_term_name")
 
-    Used to translate other atlases (e.g. Perens, which stores raw CCF ids) into
-    the common Allen division grouping.
-    """
+
+def build_ccf_to_division_acronym(allen_csv: Path) -> dict[int, str]:
+    """Map AllenCCF ontology ids to division acronyms from the ABC membership table."""
+    return _build_ccf_level_map(allen_csv, term_set="division", value_col="parcellation_term_acronym")
+
+
+def build_ccf_to_structure(allen_csv: Path) -> dict[int, str]:
+    """Map AllenCCF ontology ids to Allen structure acronyms (MO, VENT, …)."""
     df = pd.read_csv(allen_csv)
     if "parcellation_term_label" not in df.columns:
         return {}
-    div_name = (
-        df[df["parcellation_term_set_name"] == "division"]
+    structure = (
+        df[df["parcellation_term_set_name"] == "structure"]
         .drop_duplicates(subset=["parcellation_index"])
-        .set_index("parcellation_index")["parcellation_term_name"]
+        .set_index("parcellation_index")["parcellation_term_acronym"]
+    )
+    mapping: dict[int, str] = {}
+    for level in ("substructure", "structure"):
+        rows = df[df["parcellation_term_set_name"] == level]
+        for pidx, label in zip(rows["parcellation_index"], rows["parcellation_term_label"]):
+            ccf = _parse_ccf_id(label)
+            acr = structure.get(pidx)
+            if ccf is None or not isinstance(acr, str) or not acr.strip():
+                continue
+            mapping.setdefault(int(ccf), str(acr))
+    return mapping
+
+
+def _build_ccf_level_map(allen_csv: Path, *, term_set: str, value_col: str) -> dict[int, str]:
+    """Map CCF ids at substructure/structure/division levels to one membership column."""
+    df = pd.read_csv(allen_csv)
+    if "parcellation_term_label" not in df.columns:
+        return {}
+    level_values = (
+        df[df["parcellation_term_set_name"] == term_set]
+        .drop_duplicates(subset=["parcellation_index"])
+        .set_index("parcellation_index")[value_col]
     )
     mapping: dict[int, str] = {}
     for level in ("substructure", "structure", "division"):
@@ -147,10 +187,103 @@ def build_ccf_to_division(allen_csv: Path) -> dict[int, str]:
             ccf = _parse_ccf_id(label)
             if ccf is None:
                 continue
-            name = div_name.get(pidx)
-            if isinstance(name, str) and name and name != "unassigned":
-                mapping.setdefault(ccf, name)
+            value = level_values.get(pidx)
+            if not isinstance(value, str) or not value.strip() or value == "unassigned":
+                continue
+            mapping.setdefault(int(ccf), str(value))
     return mapping
+
+
+def structures_parent_map(structures_df: pd.DataFrame) -> dict[int, int | None]:
+    """Build ``child_ccf_id -> parent_ccf_id`` from Perens or BrainGlobe structures tables."""
+    id_col = "id"
+    if id_col not in structures_df.columns:
+        msg = f"Structures CSV missing {id_col!r} column."
+        raise ValueError(msg)
+    parent_col = (
+        "parent_structure_id"
+        if "parent_structure_id" in structures_df.columns
+        else "parent_id"
+        if "parent_id" in structures_df.columns
+        else None
+    )
+    if parent_col is None:
+        return {int(row[id_col]): None for _, row in structures_df.iterrows()}
+
+    parents: dict[int, int | None] = {}
+    for _, row in structures_df.iterrows():
+        ccf_id = int(row[id_col])
+        raw_parent = row[parent_col]
+        if pd.isna(raw_parent):
+            parents[ccf_id] = None
+            continue
+        parent_id = int(raw_parent)
+        parents[ccf_id] = None if parent_id == ccf_id else parent_id
+    return parents
+
+
+def resolve_ccf_by_hierarchy(
+    ccf_id: int,
+    value_map: dict[int, str],
+    parent_map: dict[int, int | None],
+    *,
+    max_steps: int = 32,
+) -> str | None:
+    """Resolve a metadata string by walking ``parent_structure_id`` toward the root."""
+    current = int(ccf_id)
+    seen: set[int] = set()
+    for _ in range(max_steps):
+        if current in value_map:
+            return value_map[current]
+        if current in seen:
+            return None
+        seen.add(current)
+        parent = parent_map.get(current)
+        if parent is None:
+            return None
+        current = int(parent)
+    return None
+
+
+def _enrich_ccf_region_table(
+    table: pd.DataFrame,
+    structures_df: pd.DataFrame,
+    allen_membership_csv: Path | None,
+) -> pd.DataFrame:
+    """Fill missing division/structure fields using Allen membership and CCF hierarchy."""
+    if allen_membership_csv is None or not allen_membership_csv.is_file():
+        return table
+
+    parent_map = structures_parent_map(structures_df)
+    ccf_to_div = build_ccf_to_division(allen_membership_csv)
+    ccf_to_div_acr = build_ccf_to_division_acronym(allen_membership_csv)
+    ccf_to_struct = build_ccf_to_structure(allen_membership_csv)
+    div_name_to_acr: dict[str, str] = {}
+    div_rows = pd.read_csv(allen_membership_csv)
+    div_rows = div_rows[div_rows["parcellation_term_set_name"] == "division"][
+        ["parcellation_term_name", "parcellation_term_acronym"]
+    ].drop_duplicates()
+    for name, acr in div_rows.itertuples(index=False):
+        div_name_to_acr.setdefault(str(name), str(acr))
+
+    out = table.copy()
+    for idx, row in out.iterrows():
+        ccf_id = int(row["ccf_id"])
+        if pd.isna(row["division"]):
+            division = resolve_ccf_by_hierarchy(ccf_id, ccf_to_div, parent_map)
+            if division is not None:
+                out.at[idx, "division"] = division
+        if pd.isna(row["structure"]):
+            structure = resolve_ccf_by_hierarchy(ccf_id, ccf_to_struct, parent_map)
+            if structure is not None:
+                out.at[idx, "structure"] = structure
+        if pd.isna(row["division_acronym"]):
+            acr = resolve_ccf_by_hierarchy(ccf_id, ccf_to_div_acr, parent_map)
+            if acr is None and not pd.isna(out.at[idx, "division"]):
+                acr = div_name_to_acr.get(str(out.at[idx, "division"]))
+            if acr is not None:
+                out.at[idx, "division_acronym"] = acr
+    return out
 
 
 def load_perens_region_table(
@@ -163,7 +296,8 @@ def load_perens_region_table(
 
     Perens ``id`` values are AllenCCF ontology ids, so ``parcellation_index`` and
     ``ccf_id`` are identical here. When an Allen membership CSV is available the
-    common Allen ``division`` is filled in via :func:`build_ccf_to_division`.
+    common Allen ``division`` and ``structure`` are filled via direct CCF lookup
+    and, for unmapped ids, by walking ``parent_structure_id`` / ``parent_id``.
     """
     df = pd.read_csv(csv_path)
     required = {"id", "acronym", "name"}
@@ -188,6 +322,10 @@ def load_perens_region_table(
         ccf_to_div = build_ccf_to_division(allen_membership_csv)
         if ccf_to_div:
             table["division"] = table["ccf_id"].map(ccf_to_div)
+            table["division_acronym"] = table["ccf_id"].map(build_ccf_to_division_acronym(allen_membership_csv))
+            table["structure"] = table["ccf_id"].map(build_ccf_to_structure(allen_membership_csv))
+
+    table = _enrich_ccf_region_table(table, df, allen_membership_csv)
 
     return RegionTable(atlas=atlas_id, df=table, source_csv=csv_path)
 

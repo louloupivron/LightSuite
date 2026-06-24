@@ -18,7 +18,7 @@ from lightsuite.analysis.region_stats import (
     parcellation_result_to_tidy,
     write_region_stats_csv,
 )
-from lightsuite.atlas.registry import resolve_brain_atlas_from_config
+from lightsuite.atlas.registry import resolve_brain_atlas_from_config, uses_ccf_id_parcellation
 from lightsuite.config.models import BrainPipelineConfig
 from lightsuite.export.atlas_space import transform_volume_to_atlas
 from lightsuite.export.parcellation import (
