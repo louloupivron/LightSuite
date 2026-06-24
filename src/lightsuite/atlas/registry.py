@@ -131,7 +131,14 @@ def resolve_brain_atlas(
     """Resolve template and annotation paths for a brain atlas."""
     atlas_id = brain_atlas.lower().strip()
     if atlas_id not in ATLAS_FILES and source == "files":
-        msg = f"Unknown brain atlas '{brain_atlas}'. Expected: {', '.join(ATLAS_FILES)}"
+        brainglobe_only = ("princeton",)
+        hint = ""
+        if atlas_id in brainglobe_only:
+            hint = f" Atlas '{atlas_id}' is BrainGlobe-only; set atlas.source: brainglobe."
+        msg = (
+            f"Unknown brain atlas '{brain_atlas}'. Expected: {', '.join(ATLAS_FILES)}."
+            f"{hint}"
+        )
         raise ValueError(msg)
 
     source = source.lower().strip()
@@ -195,7 +202,7 @@ def uses_ccf_id_parcellation(atlas: AtlasPaths) -> bool:
     """True when annotation voxels store Allen CCF structure ids (not ABC indices)."""
     if atlas.atlas_source == "brainglobe":
         return True
-    return atlas.brain_atlas == "perens"
+    return atlas.brain_atlas in ("perens", "princeton")
 
 
 def atlas_resolution_um_for_cache(atlas: AtlasPaths, fallback: float) -> float:
@@ -206,7 +213,7 @@ def atlas_resolution_um_for_cache(atlas: AtlasPaths, fallback: float) -> float:
                 return float(token.replace("um", ""))
     if atlas.brain_atlas == "allen":
         return 10.0
-    if atlas.brain_atlas == "perens":
+    if atlas.brain_atlas in ("perens", "princeton"):
         return 20.0
     return fallback
 

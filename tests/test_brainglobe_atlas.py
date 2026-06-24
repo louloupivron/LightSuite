@@ -20,6 +20,7 @@ def test_default_brainglobe_name_mapping() -> None:
     assert default_brainglobe_name("allen", 10.0) == "allen_mouse_10um"
     assert default_brainglobe_name("perens", 20.0) == "perens_lsfm_mouse_20um"
     assert default_brainglobe_name("perens", 25.0) == "perens_multimodal_lsfm_25um"
+    assert default_brainglobe_name("princeton", 20.0) == "princeton_mouse_20um"
 
 
 def test_uses_ccf_id_parcellation_flags() -> None:
@@ -58,6 +59,31 @@ def test_hemisphere_side_masks_from_brainglobe_volume() -> None:
     side0, side1 = hemisphere_side_masks_from_brainglobe(hem, ann)
     assert side0.sum() == ann[:, :, :2].size
     assert side1.sum() == ann[:, :, 2:].size
+
+
+def test_princeton_files_backend_rejected() -> None:
+    with pytest.raises(ValueError, match="brainglobe"):
+        resolve_brain_atlas("princeton", source="files")
+
+
+@patch("lightsuite.atlas.brainglobe_backend._load_bg_atlas")
+def test_resolve_brain_atlas_princeton_brainglobe(mock_load: MagicMock, tmp_path: Path) -> None:
+    root = tmp_path / "princeton_mouse_20um_v1.1"
+    root.mkdir()
+    (root / "reference.tiff").write_bytes(b"")
+    (root / "annotation.tiff").write_bytes(b"")
+    (root / "structures.csv").write_text("id,name,acronym,structure_id_path,parent_structure_id\n")
+
+    mock_bg = MagicMock()
+    mock_bg.root_dir = str(root)
+    mock_bg.resolution = (20.0, 20.0, 20.0)
+    mock_load.return_value = mock_bg
+
+    resolved = resolve_brain_atlas("princeton", source="brainglobe")
+    assert resolved.brain_atlas == "princeton"
+    assert resolved.brainglobe_name == "princeton_mouse_20um"
+    assert resolved.atlas_source == "brainglobe"
+    assert uses_ccf_id_parcellation(resolved) is True
 
 
 @patch("lightsuite.atlas.brainglobe_backend._load_bg_atlas")
@@ -102,8 +128,10 @@ def test_atlas_display_provider_from_config() -> None:
 
     files_cfg = AtlasConfig(provider=BrainAtlasId.PERENS, source=AtlasSource.FILES)
     bg_cfg = AtlasConfig(provider=BrainAtlasId.PERENS, source=AtlasSource.BRAINGLOBE)
+    princeton_cfg = AtlasConfig(provider=BrainAtlasId.PRINCETON, source=AtlasSource.BRAINGLOBE)
     assert atlas_display_provider_from_config(files_cfg) == "perens"
     assert atlas_display_provider_from_config(bg_cfg) == "perens_brainglobe"
+    assert atlas_display_provider_from_config(princeton_cfg) == "princeton_brainglobe"
 
 
 def test_brainglobe_missing_dependency_raises() -> None:

@@ -15,6 +15,7 @@ _BRAINGLOBE_RIGHT = 2
 _DEFAULT_NAMES: dict[str, dict[int, str]] = {
     "allen": {10: "allen_mouse_10um", 25: "allen_mouse_25um", 50: "allen_mouse_50um", 100: "allen_mouse_100um"},
     "perens": {20: "perens_lsfm_mouse_20um", 25: "perens_multimodal_lsfm_25um"},
+    "princeton": {20: "princeton_mouse_20um"},
 }
 
 
@@ -44,6 +45,8 @@ def default_brainglobe_name(provider: str, resolution_um: float) -> str:
         return "allen_mouse_25um"
     if provider == "perens":
         return "perens_lsfm_mouse_20um"
+    if provider == "princeton":
+        return "princeton_mouse_20um"
     msg = f"Cannot infer BrainGlobe atlas for {provider} @ {resolution_um} µm."
     raise ValueError(msg)
 

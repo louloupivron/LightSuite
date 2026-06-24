@@ -18,7 +18,7 @@ from lightsuite.atlas.display import (
 from lightsuite.gui.slices import layer_xy_from_slice_pixels, slice_pixels_from_layer_xy, volume_index_to_image
 
 
-@pytest.mark.parametrize("provider", ["allen", "perens", "perens_brainglobe"])
+@pytest.mark.parametrize("provider", ["allen", "perens", "perens_brainglobe", "princeton_brainglobe"])
 def test_plot_dim_maps_to_distinct_cut_axes(provider: str) -> None:
     profile = get_display_profile(provider)
     mapped = {profile.cut_axis_for_plot_dim(d) for d in (1, 2, 3)}
@@ -47,7 +47,14 @@ def test_perens_brainglobe_plot_dim_to_cut_axis_mapping() -> None:
 def test_display_provider_for_atlas_brainglobe_perens() -> None:
     assert display_provider_for_atlas("perens", atlas_source="files") == "perens"
     assert display_provider_for_atlas("perens", atlas_source="brainglobe") == "perens_brainglobe"
+    assert display_provider_for_atlas("princeton", atlas_source="brainglobe") == "princeton_brainglobe"
     assert display_provider_for_atlas("allen", atlas_source="brainglobe") == "allen"
+
+
+def test_princeton_brainglobe_plot_dim_to_cut_axis_mapping() -> None:
+    assert cut_axis_for_plot_dim("princeton_brainglobe", 1) == 1
+    assert cut_axis_for_plot_dim("princeton_brainglobe", 2) == 3
+    assert cut_axis_for_plot_dim("princeton_brainglobe", 3) == 2
 
 
 def test_perens_brainglobe_coronal_cut_is_identity() -> None:
@@ -118,7 +125,7 @@ def test_canonical_view_independent_of_permvec() -> None:
     assert np.array_equal(a, b)
 
 
-@pytest.mark.parametrize("provider", ["allen", "perens", "perens_brainglobe"])
+@pytest.mark.parametrize("provider", ["allen", "perens", "perens_brainglobe", "princeton_brainglobe"])
 @pytest.mark.parametrize("cut_axis", [1, 2, 3])
 def test_display_coordinate_roundtrip(provider: str, cut_axis: int) -> None:
     slice_shape = (24, 32)

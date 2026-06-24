@@ -157,6 +157,7 @@ def load_perens_region_table(
     csv_path: Path,
     *,
     allen_membership_csv: Path | None = None,
+    atlas_id: str = "perens",
 ) -> RegionTable:
     """Build a :class:`RegionTable` from the Perens ``ARA2_annotation_info`` CSV.
 
@@ -188,7 +189,7 @@ def load_perens_region_table(
         if ccf_to_div:
             table["division"] = table["ccf_id"].map(ccf_to_div)
 
-    return RegionTable(atlas="perens", df=table, source_csv=csv_path)
+    return RegionTable(atlas=atlas_id, df=table, source_csv=csv_path)
 
 
 def load_region_table(
@@ -217,7 +218,7 @@ def load_region_table(
             raise FileNotFoundError(msg)
         return load_allen_region_table(csv_path)
 
-    if atlas.brain_atlas == "perens" or atlas.atlas_source == "brainglobe":
+    if atlas.brain_atlas in ("perens", "princeton") or atlas.atlas_source == "brainglobe":
         if atlas.structures_csv_path is None:
             msg = "Atlas structures CSV not found (ARA2 or BrainGlobe structures.csv)."
             raise FileNotFoundError(msg)
@@ -225,6 +226,7 @@ def load_region_table(
         return load_perens_region_table(
             atlas.structures_csv_path,
             allen_membership_csv=allen_csv,
+            atlas_id=atlas.brain_atlas,
         )
 
     msg = f"No region table loader for atlas '{atlas.brain_atlas}'."

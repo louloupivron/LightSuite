@@ -25,6 +25,7 @@ class TiffLayout(str, Enum):
 class BrainAtlasId(str, Enum):
     ALLEN = "allen"
     PERENS = "perens"
+    PRINCETON = "princeton"
 
 
 class AtlasSource(str, Enum):

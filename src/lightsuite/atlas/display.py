@@ -139,10 +139,19 @@ _PERENS_BRAINGLOBE_CUT_TRANSFORMS: dict[int, SliceDisplayTransform] = {
     3: SliceDisplayTransform(rot90_k=1, flip_ud=True, flip_lr=True),
 }
 
+# BrainGlobe ``princeton_mouse_20um`` (ASR, shape 640×352×540): same panel→axis map as Allen
+# with cut-specific in-plane transforms calibrated against downsampled Allen 10 µm.
+_PRINCETON_BRAINGLOBE_CUT_TRANSFORMS: dict[int, SliceDisplayTransform] = {
+    1: SliceDisplayTransform(rot90_k=0, flip_ud=False, flip_lr=False),
+    2: SliceDisplayTransform(rot90_k=0, flip_ud=False, flip_lr=False),
+    3: SliceDisplayTransform(rot90_k=1, flip_ud=True, flip_lr=True),
+}
+
 # Plot panel dim (1=coronal, 2=sagittal, 3=horizontal) → volume cut_axis.
 _ALLEN_PLOT_DIM_TO_CUT_AXIS: dict[int, int] = {1: 1, 2: 3, 3: 2}
 _PERENS_PLOT_DIM_TO_CUT_AXIS: dict[int, int] = {1: 2, 2: 1, 3: 3}
 _PERENS_BRAINGLOBE_PLOT_DIM_TO_CUT_AXIS: dict[int, int] = {1: 1, 2: 3, 3: 2}
+_PRINCETON_BRAINGLOBE_PLOT_DIM_TO_CUT_AXIS: dict[int, int] = {1: 1, 2: 3, 3: 2}
 
 
 @dataclass(frozen=True)
@@ -185,6 +194,12 @@ _DISPLAY_PROFILES: dict[str, AtlasDisplayProfile] = {
         axis_names=("P", "S", "L"),
         plot_dim_to_cut_axis=_PERENS_BRAINGLOBE_PLOT_DIM_TO_CUT_AXIS,
         cut_transforms=_PERENS_BRAINGLOBE_CUT_TRANSFORMS,
+    ),
+    "princeton_brainglobe": AtlasDisplayProfile(
+        provider="princeton_brainglobe",
+        axis_names=("AP", "DV", "LR"),
+        plot_dim_to_cut_axis=_PRINCETON_BRAINGLOBE_PLOT_DIM_TO_CUT_AXIS,
+        cut_transforms=_PRINCETON_BRAINGLOBE_CUT_TRANSFORMS,
     ),
 }
 
