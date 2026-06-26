@@ -48,14 +48,14 @@ import:
   write_csv: true
   annotations:
   - format: points_csv
-    path: /media/gbm/NVME2/ALICe-pipelines-data/JulieBuron/SegmentationImports/converted/arivis_561_points.csv
-    label: arivis_561_cells
+    path: /media/gbm/NVME2/ALICe-pipelines-data/registration_imports/converted/imaris_488_points.csv
+    label: imaris_488_cells
   - format: mask_tiff
-    path: /media/gbm/NVME2/ALICe-pipelines-data/JulieBuron/SegmentationImports/converted/arivis_561_mask.tif
-    label: arivis_561_mask
+    path: /media/gbm/NVME2/ALICe-pipelines-data/registration_imports/converted/imaris_488_mask.tif
+    label: imaris_488_mask
 
 export:
-  save_registered_volume: false
-  write_cells_csv: false
+  save_registered_volume: true
+  write_cells_csv: true
   registered_volume_format: tiff 
   write_pyramid: true

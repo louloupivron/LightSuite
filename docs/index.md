@@ -9,7 +9,7 @@ This documentation covers the **Python pipeline** on branch `feature/python-migr
 | Workflow | Status |
 |----------|--------|
 | **Brain lightsheet** (3D whole-brain volumes) | Preprocess → check orientation → init registration → match points → register → export |
-| **Spinal cord lightsheet** | MATLAB only ([usage guide](usage_spinal_cord.md)) |
+| **Spinal cord lightsheet** | Python MVP: preprocess → straighten → init registration → match points → register → export ([usage guide](usage_spinal_cord.md)) |
 | **Widefield coronal slices** | MATLAB only ([usage guide](usage_slice.md)) |
 
 ### Brain pipeline capabilities
@@ -26,7 +26,8 @@ This documentation covers the **Python pipeline** on branch `feature/python-migr
 ### Not yet ported from MATLAB
 
 - 3D cell detection and atlas mapping of cell coordinates
-- Spinal cord and slice pipelines
+- Spinal cord cohort analysis (`example_analysis_spinal_cord.m`)
+- Widefield coronal slice pipeline
 - OME-Zarr / Imaris readers (planned plugin layer)
 - GPU-accelerated detection
 
@@ -46,6 +47,11 @@ uv run lightsuite brain init-registration    -c my_sample.yaml
 uv run lightsuite brain match-points         -c my_sample.yaml
 uv run lightsuite brain register             -c my_sample.yaml
 uv run lightsuite brain export               -c my_sample.yaml --save-volume --write-csv
+
+# Spinal cord MVP (see usage_spinal_cord.md)
+uv run lightsuite spinal preprocess           -c my_spinal.yaml
+uv run lightsuite spinal straighten           -c my_spinal.yaml
+uv run lightsuite spinal init-registration    -c my_spinal.yaml
 ```
 
 Copy [`examples/brain_lightsheet.yaml`](../examples/brain_lightsheet.yaml), edit paths and voxel size, then follow the [brain lightsheet guide](usage_lightsheet_brain.md).

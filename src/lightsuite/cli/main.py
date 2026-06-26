@@ -15,9 +15,11 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 brain_app = typer.Typer(help="Brain lightsheet pipeline stages.")
+spinal_app = typer.Typer(help="Spinal cord lightsheet pipeline stages.")
 mesospim_app = typer.Typer(help="mesoSPIM overview ↔ ROI registration.")
 analysis_app = typer.Typer(help="Post-registration analysis (region stats, cell counts).")
 app.add_typer(brain_app, name="brain")
+app.add_typer(spinal_app, name="spinal")
 app.add_typer(mesospim_app, name="mesospim")
 app.add_typer(analysis_app, name="analysis")
 
@@ -620,9 +622,157 @@ def mesospim_inspect(
     from lightsuite.gui.inspect_mesospim import run_mesospim_inspect
 
     cfg = load_mesospim_config(config)
-    paths = run_mesospim_inspect(cfg, headless=headless)
+    paths =     run_mesospim_inspect(cfg, headless=headless)
     typer.echo(f"Overview: {paths.overview_path}")
     typer.echo(f"Registered canvas: {paths.registered_full_overview_path}")
+
+
+@spinal_app.command("validate-config")
+def spinal_validate_config(
+    config: str = typer.Option(..., "--config", "-c", help="Spinal cord pipeline YAML config."),
+) -> None:
+    """Load and validate a spinal cord pipeline configuration file."""
+    from lightsuite.config.loader import load_spinal_config
+
+    cfg = load_spinal_config(config)
+    typer.echo(
+        f"Config valid for sample '{cfg.sample.name}' "
+        f"({cfg.sample.source.tiff_type.value})."
+    )
+
+
+@spinal_app.command("preprocess")
+def spinal_preprocess(
+    config: str = typer.Option(..., "--config", "-c", help="Spinal cord pipeline YAML config."),
+) -> None:
+    """Prepare cord sample and atlas (prepareCordSampleForRegistration.m)."""
+    from lightsuite.config.loader import load_spinal_config
+    from lightsuite.preprocess.cord import preprocess_spinal_cord_sample
+
+    cfg = load_spinal_config(config)
+    result = preprocess_spinal_cord_sample(cfg)
+    typer.echo(f"Wrote checkpoint: {result.checkpoint.lsfolder}/regopts.json")
+
+
+@spinal_app.command("straighten")
+def spinal_straighten(
+    config: str = typer.Option(..., "--config", "-c", help="Spinal cord pipeline YAML config."),
+    headless: bool = typer.Option(
+        False,
+        "--headless",
+        help="Write default alignment without opening Napari (for tests).",
+    ),
+) -> None:
+    """Interactive cord straightening GUI (spinal_cord_aligner.m)."""
+    from lightsuite.config.loader import load_spinal_config
+    from lightsuite.gui.straighten_cord import run_spinal_straighten
+
+    cfg = load_spinal_config(config)
+    path = run_spinal_straighten(cfg, headless=headless)
+    typer.echo(f"Alignment checkpoint: {path}")
+
+
+@spinal_app.command("init-registration")
+def spinal_init_registration(
+    config: str = typer.Option(..., "--config", "-c", help="Spinal cord pipeline YAML config."),
+) -> None:
+    """Apply straightening and coarse affine registration (initializeCordRegistration.m)."""
+    from lightsuite.config.loader import load_spinal_config
+    from lightsuite.registration.init_cord import initialize_cord_registration
+
+    cfg = load_spinal_config(config)
+    initialize_cord_registration(cfg)
+
+
+@spinal_app.command("match-points")
+def spinal_match_points(
+    config: str = typer.Option(..., "--config", "-c", help="Spinal cord pipeline YAML config."),
+    headless: bool = typer.Option(
+        False,
+        "--headless",
+        help="Write an empty control-point session without Napari.",
+    ),
+) -> None:
+    """Interactive control-point matching (matchControlPointsSpine.m)."""
+    from lightsuite.config.loader import load_spinal_config
+    from lightsuite.gui.match_points_cord import run_spinal_match_points
+
+    cfg = load_spinal_config(config)
+    path = run_spinal_match_points(cfg, headless=headless)
+    typer.echo(f"Control points session: {path}")
+
+
+@spinal_app.command("register")
+def spinal_register(
+    config: str = typer.Option(..., "--config", "-c", help="Spinal cord pipeline YAML config."),
+) -> None:
+    """Run B-spline registration (multiobjCordRegistration.m)."""
+    from lightsuite.config.loader import load_spinal_config
+    from lightsuite.registration.cord_register import run_spinal_registration
+
+    cfg = load_spinal_config(config)
+    path = run_spinal_registration(cfg)
+    typer.echo(f"Transform params: {path}")
+
+
+@spinal_app.command("export")
+def spinal_export(
+    config: str = typer.Option(..., "--config", "-c", help="Spinal cord pipeline YAML config."),
+) -> None:
+    """Export registered cord volumes (generateRegisteredCordVolume.m)."""
+    from lightsuite.config.loader import load_spinal_config
+    from lightsuite.export.cord_export import export_registered_cord_volumes
+
+    cfg = load_spinal_config(config)
+    result = export_registered_cord_volumes(cfg)
+    typer.echo(f"Registered volumes in {result.output_dir} ({len(result.channel_paths)} channels)")
+
+
+@spinal_app.command("view")
+def spinal_view(
+    config: str = typer.Option(..., "--config", "-c", help="Spinal cord pipeline YAML config."),
+    headless: bool = typer.Option(
+        False,
+        "--headless",
+        help="Validate view inputs without opening Napari.",
+    ),
+    recompute_annotation: bool = typer.Option(
+        False,
+        "--recompute-annotation",
+        help="Rebuild annotation_registered.tiff from transform_params.json.",
+    ),
+) -> None:
+    """Open Napari with registered sample channel(s) and warped atlas annotation."""
+    from lightsuite.config.loader import load_spinal_config
+    from lightsuite.gui.view_registered_cord import run_spinal_registered_view
+
+    cfg = load_spinal_config(config)
+    paths = run_spinal_registered_view(
+        cfg,
+        headless=headless,
+        recompute_annotation=recompute_annotation,
+    )
+    typer.echo(f"Registered data: {paths.volume_registered_dir}")
+    if paths.annotation_path.is_file():
+        typer.echo(f"Annotation: {paths.annotation_path.name}")
+
+
+@spinal_app.command("validate-parity")
+def spinal_validate_parity(
+    fixture_root: str = typer.Option(
+        "tests/fixtures/spinal_cord",
+        "--fixture-root",
+        help="Directory containing parity reference fixtures.",
+    ),
+) -> None:
+    """Run automated MATLAB-parity checks for MVP stages (optimizer reference)."""
+    from lightsuite.validation.spinal_parity import run_mvp_parity_checks
+
+    report = run_mvp_parity_checks(Path(fixture_root).expanduser().resolve())
+    for message in report.messages:
+        typer.echo(message)
+    if not report.passed:
+        raise typer.Exit(code=1)
 
 
 def run() -> None:

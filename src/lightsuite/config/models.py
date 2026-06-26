@@ -280,6 +280,87 @@ class ImportConfig(BaseModel):
     write_csv: bool = True
 
 
+class CordTiffLayout(str, Enum):
+    """Spinal cord TIFF layout (readSpinalCordSample.m)."""
+
+    AUTO = "auto"
+    PLANE_PER_FILE = "planeperfile"
+    CHANNEL_PER_FILE = "channelperfile"
+    MULTICHANNEL_SINGLE = "multichannel_single"
+
+
+class CordAtlasConfig(BaseModel):
+    """Fiederling et al. 2021 spinal cord atlas (external TIFF + CSV)."""
+
+    atlas_dir: Path = Field(
+        description="Directory containing Template.tif, Annotation.tif, Segments.csv, Atlas_Regions.csv.",
+    )
+
+    @field_validator("atlas_dir")
+    @classmethod
+    def expand_cord_atlas_dir(cls, value: Path) -> Path:
+        return value.expanduser()
+
+
+class CordRegistrationConfig(BaseModel):
+    """Spinal cord registration settings."""
+
+    resolution_um: float = Field(default=20.0, gt=0)
+    channel_primary: int = Field(default=1, ge=1, description="Registration channel (MATLAB regchan).")
+    control_point_weight: float = Field(default=0.2, ge=0, le=1)
+    straightening_lambda_pos: float = Field(default=5000.0, gt=0)
+    straightening_lambda_ang: float = Field(default=5000.0, gt=0)
+    target_orientation_deg: float = Field(default=90.0)
+
+
+class CordSampleSourceConfig(BaseModel):
+    format: SourceFormat = SourceFormat.TIFF_STACK
+    path: Path
+    tiff_type: CordTiffLayout = CordTiffLayout.AUTO
+    skip_corrupt_slices: bool = Field(
+        default=False,
+        description="Skip unreadable plane-per-file slice TIFFs instead of failing (use sparingly).",
+    )
+
+    @field_validator("path")
+    @classmethod
+    def cord_path_must_exist(cls, value: Path) -> Path:
+        if not value.expanduser().exists():
+            msg = f"Sample source path does not exist: {value}"
+            raise ValueError(msg)
+        return value.expanduser().resolve()
+
+
+class CordSampleConfig(BaseModel):
+    name: str = Field(min_length=1)
+    source: CordSampleSourceConfig
+    scratch: Path
+    save_path: Path
+    voxel_um: Annotated[list[float], Field(min_length=3, max_length=3)]
+
+    @field_validator("scratch", "save_path")
+    @classmethod
+    def expand_cord_paths(cls, value: Path) -> Path:
+        return value.expanduser()
+
+
+class SpinalCordPipelineConfig(BaseModel):
+    """Top-level spinal cord lightsheet pipeline configuration."""
+
+    sample: CordSampleConfig
+    atlas: CordAtlasConfig
+    registration: CordRegistrationConfig = Field(default_factory=CordRegistrationConfig)
+    compute: ComputeConfig = Field(default_factory=ComputeConfig)
+
+    @property
+    def data_folder(self) -> Path:
+        return self.sample.source.path
+
+    @property
+    def lsfolder(self) -> Path:
+        return self.sample.save_path.expanduser()
+
+
 class BrainPipelineConfig(BaseModel):
     """Top-level brain lightsheet pipeline configuration."""
 

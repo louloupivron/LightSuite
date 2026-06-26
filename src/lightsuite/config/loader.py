@@ -8,13 +8,14 @@ from typing import Any
 
 import yaml
 
-from lightsuite.config.models import BrainPipelineConfig
-from lightsuite.mesospim.config_models import MesospimPipelineConfig
+from lightsuite.config.models import BrainPipelineConfig, SpinalCordPipelineConfig
 from lightsuite.registration.orientation import validate_permvec
 
 
-def load_mesospim_config(path: str | Path) -> MesospimPipelineConfig:
+def load_mesospim_config(path: str | Path):
     """Load and validate a mesoSPIM overview / ROI YAML config."""
+    from lightsuite.mesospim.config_models import MesospimPipelineConfig
+
     config_path = Path(path).expanduser().resolve()
     if not config_path.is_file():
         msg = f"Config file not found: {config_path}"
@@ -37,6 +38,19 @@ def load_config(path: str | Path) -> BrainPipelineConfig:
         raw: dict[str, Any] = yaml.safe_load(handle) or {}
 
     return BrainPipelineConfig.model_validate(raw)
+
+
+def load_spinal_config(path: str | Path) -> SpinalCordPipelineConfig:
+    """Load and validate a spinal cord pipeline YAML config."""
+    config_path = Path(path).expanduser().resolve()
+    if not config_path.is_file():
+        msg = f"Config file not found: {config_path}"
+        raise FileNotFoundError(msg)
+
+    with config_path.open(encoding="utf-8") as handle:
+        raw: dict[str, Any] = yaml.safe_load(handle) or {}
+
+    return SpinalCordPipelineConfig.model_validate(raw)
 
 
 def _format_orientation_line(permvec: list[int], indent: str) -> str:

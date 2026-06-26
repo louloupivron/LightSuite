@@ -1,0 +1,37 @@
+# Example spinal cord lightsheet config (Fiederling et al. 2021 atlas).
+# Copy and edit paths before running:
+#   uv run lightsuite doctor -c examples/spinal_cord.yaml
+#   uv run lightsuite spinal validate-config -c examples/spinal_cord.yaml
+#
+# Download atlas from https://data.mendeley.com/datasets/4rrggzv5d5/1
+# and set atlas.atlas_dir to the folder containing Segments.csv.
+
+sample:
+  name: example_spinal_cord
+  source:
+    format: tiff_stack
+    path: /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/Ex_488_Em_488F_Ch1_stitched
+    # auto: detect plane-per-file (Terastitcher) vs channel-per-file (default)
+    # planeperfile: one 2D TIFF per Z slice (large datasets)
+    # channelperfile: one multi-page TIFF per channel
+    # multichannel_single: single stack with interleaved channels (Bioformats layout)
+    tiff_type: auto
+    # skip_corrupt_slices: true  # optional: drop unreadable plane TIFFs
+  scratch: /media/gbm/NVME2/lightsuite_scratch
+  save_path: /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/Ex_488_Em_488F_Ch1_stitched/lightsuite
+  # Native microscope voxel size in µm (NOT the registration grid).
+  # Terastitcher exports are often ~1.8×1.8×4 µm; registration uses 20 µm.
+  voxel_um: [1.8, 1.8, 1.8]
+
+atlas:
+  atlas_dir: /home/gbm/ALICe-pipelines/LightSuite/atlas/SC_P56_Atlas_10x10x20_v5_2020
+
+registration:
+  resolution_um: 20
+  channel_primary: 1
+  control_point_weight: 0.2
+  straightening_lambda_pos: 5000
+  straightening_lambda_ang: 5000
+
+compute:
+  workers: 4

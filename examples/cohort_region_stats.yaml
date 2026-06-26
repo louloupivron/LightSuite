@@ -1,0 +1,39 @@
+# Cross-subject cohort: group summaries and pairwise comparisons.
+#
+# Each sample needs either:
+#   - region_stats: path to volume_registered/region_stats.csv
+#   - config: brain pipeline YAML (path resolved from sample.save_path)
+#
+# Run per-subject region stats first:
+#   uv run lightsuite analysis region-stats -c examples/JulieBuron.yaml
+#
+# Then:
+#   uv run lightsuite analysis validate-cohort -c examples/cohort_region_stats.yaml
+#   uv run lightsuite analysis group-stats -c examples/cohort_region_stats.yaml
+
+name: example_study
+output_dir: ./cohort_results/example_study
+
+samples:
+  - id: subject_a
+    group: control
+    region_stats: /data/subject_a/volume_registered/region_stats.csv
+  - id: subject_b
+    group: control
+    config: examples/JulieBuron.yaml
+  - id: subject_c
+    group: treatment
+    region_stats: /data/subject_c/volume_registered/region_stats.csv
+  - id: subject_d
+    group: treatment
+    config: examples/Gilda.yaml
+
+group_analysis:
+  channels: [1]
+  metrics: [median_intensity, cell_count]
+  hemispheres: [right, left]
+  rollups: [division]
+  comparisons:
+    - [control, treatment]
+  test: mannwhitney
+  fdr_alpha: 0.05

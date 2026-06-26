@@ -27,7 +27,7 @@ registration:
   bspline_spatial_scale_mm: 0.64
   augment_points: true
   control_point_weight: 0.2
-  orientation: [2, 1, 3]
+  orientation: [1, 3, 2]
   bcpd_path: /home/gbm/ALICe-pipelines/LightSuite/softwares/bcpd-master/
 
 

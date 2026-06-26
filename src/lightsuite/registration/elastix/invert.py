@@ -93,6 +93,31 @@ def write_inverted_transform_copy(source: Path, destination: Path) -> Path:
     return destination
 
 
+def _guess_target_mhd(transform_dir: Path) -> Path | None:
+    """Single-fixed elastix runs write ``*_target.mhd`` (Windows logs omit ``-f``)."""
+    candidates = sorted(
+        transform_dir.glob("*_target.mhd"),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    candidates.extend(
+        sorted(
+            transform_dir.glob("*_target.MHD"),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+    )
+    seen: set[str] = set()
+    for path in candidates:
+        key = path.name.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        if path.is_file():
+            return path
+    return None
+
+
 def _parse_fixed_image_path(log_text: str, transform_dir: Path) -> Path:
     patterns = [
         r"-f0\s+(.+?)\s+-m0\b",
@@ -108,6 +133,9 @@ def _parse_fixed_image_path(log_text: str, transform_dir: Path) -> Path:
     guesses = list(transform_dir.glob("*_dual_f0.mhd")) + list(transform_dir.glob("fixed.mhd"))
     if guesses:
         return guesses[0]
+    target_mhd = _guess_target_mhd(transform_dir)
+    if target_mhd is not None:
+        return target_mhd
     msg = f"Could not determine fixed image path from elastix log in {transform_dir}"
     raise RuntimeError(msg)
 

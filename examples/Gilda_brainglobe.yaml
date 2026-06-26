@@ -11,14 +11,14 @@ sample:
       - /media/gbm/NVME2/ALICe-pipelines-data/Gilda/output/channel_488/RES(5690x5834x2052)
       - /media/gbm/NVME2/ALICe-pipelines-data/Gilda/output/channel_647/RES(5690x5834x2052)
   scratch: /media/gbm/NVME2/lightsuite_scratch
-  save_path: /media/gbm/NVME2/ALICe-pipelines-data/Gilda/output/registered_perens_brainglobe
+  save_path: /media/gbm/NVME2/ALICe-pipelines-data/Gilda/output/registered_princeton
 
   voxel_um: [2.03, 2.03, 3]
 
 atlas:
-  provider: perens
+  provider: princeton
   source: brainglobe
-  # brainglobe_name: perens_lsfm_mouse_20um  # inferred from provider + resolution_um
+  # brainglobe_name: princeton_mouse_20um  # inferred from provider + resolution_um
   resolution_um: 20
 
 registration:

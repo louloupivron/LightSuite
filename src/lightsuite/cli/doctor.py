@@ -10,11 +10,13 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import numpy as np
 from rich.console import Console
 from rich.table import Table
 
 from lightsuite.config.loader import load_config
-from lightsuite.config.models import BrainPipelineConfig
+from lightsuite.config.models import BrainPipelineConfig, CordTiffLayout, SpinalCordPipelineConfig
+from lightsuite.atlas.fiederling import resolve_fiederling_paths
 from lightsuite.atlas.registry import resolve_brain_atlas, resolve_brain_atlas_from_config
 from lightsuite.registration.bcpd import find_bcpd_executable
 
@@ -251,9 +253,73 @@ def _check_bcpd(config: BrainPipelineConfig | None) -> CheckResult:
     )
 
 
+def _check_fiederling_atlas(cfg: SpinalCordPipelineConfig | None) -> CheckResult:
+    if cfg is None:
+        return _check_spinal_cord_atlas()
+    try:
+        paths = resolve_fiederling_paths(cfg.atlas.atlas_dir)
+        return CheckResult(
+            "Spinal cord atlas (Fiederling)",
+            True,
+            str(paths.atlas_dir),
+            required=True,
+        )
+    except FileNotFoundError as exc:
+        return CheckResult("Spinal cord atlas (Fiederling)", False, str(exc), required=True)
+
+
+def _check_spinal_sample_resolution(cfg: SpinalCordPipelineConfig) -> CheckResult:
+    """Warn when plane-per-file stacks declare native voxel size equal to registration grid."""
+    from lightsuite.io.cord_volume import (
+        _sorted_tiff_files,
+        normalize_res_um,
+        read_plane_tiff,
+        resolve_cord_tiff_layout,
+    )
+
+    folder = cfg.sample.source.path
+    try:
+        layout = resolve_cord_tiff_layout(folder, cfg.sample.source.tiff_type)
+    except FileNotFoundError as exc:
+        return CheckResult("Spinal sample resolution", False, str(exc), required=False)
+
+    sampleres = normalize_res_um(cfg.sample.voxel_um)
+    regres = normalize_res_um([cfg.registration.resolution_um] * 3)
+    resfac = sampleres / regres
+    if not np.allclose(resfac, 1.0):
+        return CheckResult(
+            "Spinal sample resolution",
+            True,
+            f"Native voxel_um {sampleres.tolist()} → registration {regres.tolist()}",
+            required=False,
+        )
+
+    if layout != CordTiffLayout.PLANE_PER_FILE:
+        return CheckResult(
+            "Spinal sample resolution",
+            True,
+            "voxel_um matches registration grid (small channel-per-file stack).",
+            required=False,
+        )
+
+    files = _sorted_tiff_files(folder)
+    if not files:
+        return CheckResult("Spinal sample resolution", False, f"No TIFFs in {folder}", required=False)
+    ny, nx = read_plane_tiff(files[0]).shape
+    native = (ny, nx, len(files))
+    native_gb = float(np.prod(native)) * 2.0 / 1e9
+    detail = (
+        f"Plane-per-file stack ({native[0]}×{native[1]}×{native[2]} px, ~{native_gb:.1f} GB) "
+        f"but sample.voxel_um equals registration.resolution_um — no downsampling on load. "
+        "Set sample.voxel_um to your native microscope voxel size (e.g. [1.8, 1.8, 4])."
+    )
+    return CheckResult("Spinal sample resolution", False, detail, required=False)
+
+
 def run_doctor(
     config: BrainPipelineConfig | None = None,
     strict: bool = False,
+    spinal_config: SpinalCordPipelineConfig | None = None,
 ) -> DoctorReport:
     report = DoctorReport()
     report.add(_check_python())
@@ -261,13 +327,18 @@ def run_doctor(
     report.add(_check_elastix_binary("elastix"))
     report.add(_check_elastix_binary("transformix"))
     report.add(_check_bcpd(config))
-    report.results.extend(_check_brain_atlas(config, strict))
-    report.add(_check_spinal_cord_atlas())
+    if spinal_config is not None:
+        report.add(_check_fiederling_atlas(spinal_config))
+        report.add(_check_spinal_sample_resolution(spinal_config))
+    else:
+        report.results.extend(_check_brain_atlas(config, strict))
+        report.add(_check_spinal_cord_atlas())
 
-    request_gpu = config.compute.use_gpu if config else True
+    active = config or spinal_config
+    request_gpu = active.compute.use_gpu if active else True
     report.add(_check_gpu(request_gpu))
 
-    scratch = config.sample.scratch if config else None
+    scratch = active.sample.scratch if active else None
     report.add(_check_disk(scratch, "Scratch disk", MIN_SCRATCH_GB))
 
     report.add(
@@ -283,11 +354,18 @@ def run_doctor(
 
 def doctor_command(config_path: str | None = None, strict: bool = False) -> None:
     config: BrainPipelineConfig | None = None
+    spinal_config: SpinalCordPipelineConfig | None = None
     if config_path:
-        config = load_config(config_path)
-        console.print(f"[bold]Validating config:[/bold] {config_path}")
+        from lightsuite.config.loader import load_spinal_config
 
-    report = run_doctor(config, strict=strict)
+        try:
+            config = load_config(config_path)
+            console.print(f"[bold]Validating brain config:[/bold] {config_path}")
+        except Exception:
+            spinal_config = load_spinal_config(config_path)
+            console.print(f"[bold]Validating spinal cord config:[/bold] {config_path}")
+
+    report = run_doctor(config, strict=strict, spinal_config=spinal_config)
 
     table = Table(title="LightSuite doctor")
     table.add_column("Check")
