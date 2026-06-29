@@ -18,10 +18,17 @@ from lightsuite.analysis.ontology import (
     ALLEN_MEMBERSHIP_FILENAME,
     RegionTable,
     _resolve_allen_membership_csv,
+    build_ccf_to_division,
     load_region_table,
+    resolve_ccf_by_hierarchy,
+    structures_parent_map,
 )
 from lightsuite.atlas.io import load_atlas_volume
-from lightsuite.atlas.registry import AtlasPaths, atlas_resolution_um_for_cache
+from lightsuite.atlas.registry import (
+    AtlasPaths,
+    atlas_resolution_um_for_cache,
+    uses_ccf_id_parcellation,
+)
 
 LEGEND_COLUMNS = ("division_id", "division_acronym", "division_name")
 
@@ -74,7 +81,10 @@ def build_division_labels(atlas: AtlasPaths) -> tuple[np.ndarray, pd.DataFrame]:
         name_to_acronym = _allen_division_name_to_acronym(membership)
     else:
         region_table = load_region_table(atlas)
-        index_to_division = _perens_ccf_to_division(region_table)
+        if uses_ccf_id_parcellation(atlas):
+            index_to_division = _ccf_id_to_division_map(atlas, region_table)
+        else:
+            index_to_division = _perens_ccf_to_division(region_table)
         allen_csv = _resolve_allen_membership_csv(None)
         if allen_csv is not None:
             name_to_acronym = _allen_division_name_to_acronym(allen_csv)
@@ -116,6 +126,41 @@ def _perens_ccf_to_division(region_table: RegionTable) -> dict[int, str]:
         int(row["parcellation_index"]): str(row["division"])
         for _, row in df.iterrows()
     }
+
+
+def _ccf_id_to_division_map(
+    atlas: AtlasPaths,
+    region_table: RegionTable,
+) -> dict[int, str]:
+    """Map annotation voxel ids (Allen CCF ontology) to division names."""
+    df = region_table.df.dropna(subset=["division", "ccf_id"])
+    mapping: dict[int, str] = {
+        int(row["ccf_id"]): str(row["division"])
+        for _, row in df.iterrows()
+    }
+
+    allen_csv = _resolve_allen_membership_csv(atlas.atlas_dir)
+    if allen_csv is None or not allen_csv.is_file():
+        allen_csv = _resolve_allen_membership_csv(None)
+    if allen_csv is None or not allen_csv.is_file():
+        return mapping
+
+    ccf_to_div = build_ccf_to_division(allen_csv)
+    for ccf_id, division in ccf_to_div.items():
+        mapping.setdefault(int(ccf_id), str(division))
+
+    if atlas.structures_csv_path is None or not atlas.structures_csv_path.is_file():
+        return mapping
+
+    structures_df = pd.read_csv(atlas.structures_csv_path)
+    parent_map = structures_parent_map(structures_df)
+    for ccf_id in structures_df["id"].astype(int):
+        if ccf_id in mapping:
+            continue
+        division = resolve_ccf_by_hierarchy(ccf_id, ccf_to_div, parent_map)
+        if division is not None:
+            mapping[int(ccf_id)] = str(division)
+    return mapping
 
 
 def _allen_division_name_to_acronym(membership_csv: Path) -> dict[str, str]:

@@ -32,6 +32,84 @@ def _write_allen_membership(path: Path) -> None:
     pd.DataFrame(rows).to_csv(path, index=False)
 
 
+def test_build_division_labels_allen_brainglobe_uses_ccf_ids(tmp_path: Path) -> None:
+    """BrainGlobe Allen annotations store CCF ids, not ABC parcellation indices."""
+    atlas_dir = tmp_path / "atlas"
+    atlas_dir.mkdir()
+    shape = (2, 2, 2)
+    ccf_isocortex = 320
+    ccf_thalamus = 718
+    annotation = np.array(
+        [
+            [[0, ccf_isocortex], [ccf_isocortex, 0]],
+            [[ccf_thalamus, ccf_thalamus], [0, ccf_isocortex]],
+        ],
+        dtype=np.uint32,
+    )
+    nib.save(nib.Nifti1Image(annotation, np.eye(4)), str(atlas_dir / "annotation_10.nii.gz"))
+    nib.save(nib.Nifti1Image(np.zeros(shape), np.eye(4)), str(atlas_dir / "average_template_10.nii.gz"))
+    membership = atlas_dir / "parcellation_to_parcellation_term_membership.csv"
+    pd.DataFrame(
+        [
+            {
+                "parcellation_index": 1,
+                "parcellation_term_set_name": "division",
+                "parcellation_term_name": "Isocortex",
+                "parcellation_term_acronym": "Isocortex",
+                "parcellation_term_label": "AllenCCF-Ontology-2017-315",
+            },
+            {
+                "parcellation_index": 1,
+                "parcellation_term_set_name": "substructure",
+                "parcellation_term_name": "Primary motor area, Layer 1",
+                "parcellation_term_acronym": "MOp1",
+                "parcellation_term_label": f"AllenCCF-Ontology-2017-{ccf_isocortex}",
+            },
+            {
+                "parcellation_index": 2,
+                "parcellation_term_set_name": "division",
+                "parcellation_term_name": "Thalamus",
+                "parcellation_term_acronym": "TH",
+                "parcellation_term_label": "AllenCCF-Ontology-2017-549",
+            },
+            {
+                "parcellation_index": 2,
+                "parcellation_term_set_name": "substructure",
+                "parcellation_term_name": "Ventral posterolateral nucleus",
+                "parcellation_term_acronym": "VPL",
+                "parcellation_term_label": f"AllenCCF-Ontology-2017-{ccf_thalamus}",
+            },
+        ]
+    ).to_csv(membership, index=False)
+    pd.DataFrame(
+        {
+            "id": [ccf_isocortex, ccf_thalamus],
+            "parent_id": [985, 637],
+            "acronym": ["MOp1", "VPL"],
+            "name": ["Primary motor area, Layer 1", "Ventral posterolateral nucleus"],
+        }
+    ).to_csv(atlas_dir / "structures.csv", index=False)
+
+    atlas = AtlasPaths(
+        brain_atlas="allen",
+        atlas_dir=atlas_dir,
+        template_path=atlas_dir / "average_template_10.nii.gz",
+        annotation_path=atlas_dir / "annotation_10.nii.gz",
+        boundary_path=None,
+        structures_csv_path=atlas_dir / "structures.csv",
+        supports_parcellation=True,
+        atlas_source="brainglobe",
+        brainglobe_name="allen_mouse_10um",
+    )
+    labels, legend = build_division_labels(atlas)
+    assert labels.shape == shape
+    assert set(np.unique(labels)) <= {0, 1, 2}
+    iso_id = int(legend.loc[legend["division_name"] == "Isocortex", "division_id"].iloc[0])
+    th_id = int(legend.loc[legend["division_name"] == "Thalamus", "division_id"].iloc[0])
+    assert np.any(labels == iso_id)
+    assert np.any(labels == th_id)
+
+
 def test_build_division_labels_allen(tmp_path: Path) -> None:
     atlas_dir = tmp_path / "atlas"
     atlas_dir.mkdir()
