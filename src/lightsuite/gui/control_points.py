@@ -86,6 +86,27 @@ class ControlPointSession:
             return np.zeros((0, 3)), np.zeros((0, 3))
         return np.vstack(atlas_pts), np.vstack(sample_pts)
 
+    def paired_points_volume_yxz(self) -> tuple[np.ndarray, np.ndarray]:
+        """Return matched points in 0-based volume array order (Y, X, Z).
+
+        Cord match-points store in-plane pixel indices as 0-based volume indices and
+        the slice coordinate on the cut axis as 1-based (MATLAB-style).
+        """
+        atlas_pts: list[np.ndarray] = []
+        sample_pts: list[np.ndarray] = []
+        for a_list, s_list in zip(self.atlas_control_points, self.histology_control_points, strict=True):
+            if len(a_list) != len(s_list) or len(a_list) == 0:
+                continue
+            a = np.asarray(a_list, dtype=float)[:, :3].copy()
+            s = np.asarray(s_list, dtype=float)[:, :3].copy()
+            a[:, 2] -= 1.0
+            s[:, 2] -= 1.0
+            atlas_pts.append(a)
+            sample_pts.append(s)
+        if not atlas_pts:
+            return np.zeros((0, 3)), np.zeros((0, 3))
+        return np.vstack(atlas_pts), np.vstack(sample_pts)
+
     def update_manual_alignment(
         self,
         min_pairs: int = 16,

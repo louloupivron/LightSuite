@@ -20,6 +20,7 @@ Spinal cord volumes register against the [Fiederling et al. (2021)](https://www.
 ```bash
 uv run lightsuite doctor -c examples/spinal_cord.yaml
 uv run lightsuite spinal validate-config -c my_spinal.yaml
+uv run lightsuite spinal check-orientation    -c my_spinal.yaml
 uv run lightsuite spinal preprocess           -c my_spinal.yaml
 uv run lightsuite spinal straighten           -c my_spinal.yaml
 uv run lightsuite spinal align-longitudinal   -c my_spinal.yaml
@@ -32,6 +33,7 @@ uv run lightsuite spinal view                 -c my_spinal.yaml
 
 ### Key differences from brain
 
+- **Orientation (`spinal check-orientation`)** — a small Napari window with side-by-side **longitudinal max projections**: atlas template (left, rostral at top) and sample (right). Click **Rostrocaudal** or **Caudorostral** to flip the sample until rostral anatomy aligns with the atlas, then **Save**. This writes `cord_orientation.txt` in `save_path`, which `preprocess` reads to decide whether to flip the atlas (replaces the old automatic detection). You can also edit `cord_orientation.txt` by hand or set `registration.longitudinal_direction: rostrocaudal|caudorostral` in the YAML to skip the GUI. **Preprocess fails if neither is set.**
 - **Straightening GUI** (`spinal straighten`) — trace central canal and anterior/posterior axis per slice before registration. Select **center**, **anterior**, or **posterior** in Napari’s layer list, then click on the slice to place a point. A **fit preview** (yellow axis, cyan center cross, green/red predicted ant/pos) appears once at least two slices are annotated; use **Toggle fit (p)** or **P** to show/hide it. **Clear last** undoes the most recent point; **Clear all** removes every annotation. Navigate with the **slice slider/spinbox**, **←/→**, **Page Up/Down**, or **scroll wheel**; save with **Save (s)** or **S** (works even when the dock has focus).
 - **Longitudinal align GUI** (`spinal align-longitudinal`) — match straightened sample z-slices to atlas z-planes when the imaged cord is shorter than the template. Sample transverse slice on the **left** (fixed), atlas on the **right** (scroll with **PgUp/PgDn**, spinbox, or wheel over the atlas panel). Confirm ~20 anchors with **Enter** or **Confirm anchor**, then **Save && Close** before init-registration.
 - Cord-specific Fiederling atlas (TIFF + CSV), not Allen/Perens NIfTI
@@ -79,6 +81,7 @@ Under `<sample.save_path>/`:
 
 | File / folder | Stage |
 |------|-------|
+| `cord_orientation.txt` | check-orientation (rostrocaudal/caudorostral) |
 | `regopts.json` | preprocess (+ updated by init-registration) |
 | `spinal_alignment_opt.json` | straighten |
 | `longitudinal_correspondence.json` | align-longitudinal |

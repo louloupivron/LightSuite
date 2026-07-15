@@ -164,3 +164,12 @@ def test_paired_points_xyz_dim_order() -> None:
     assert sample_pts.shape == (1, 3)
     assert np.allclose(atlas_pts[0], [21.0, 11.0, 6.0])
     assert np.allclose(sample_pts[0], [20.0, 10.0, 5.0])
+
+
+def test_paired_points_volume_yxz_zero_based() -> None:
+    session = ControlPointSession.empty(np.eye(4), n_slices=2)
+    session.histology_control_points[0] = [[10.0, 20.0, 5.0, 1.0]]
+    session.atlas_control_points[0] = [[11.0, 21.0, 6.0, 1.0]]
+    atlas_pts, sample_pts = session.paired_points_volume_yxz()
+    assert np.allclose(sample_pts[0], [10.0, 20.0, 4.0])
+    assert np.allclose(atlas_pts[0], [11.0, 21.0, 5.0])

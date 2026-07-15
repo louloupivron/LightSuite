@@ -713,6 +713,24 @@ def spinal_validate_config(
     )
 
 
+@spinal_app.command("check-orientation")
+def spinal_check_orientation(
+    config: str = typer.Option(..., "--config", "-c", help="Spinal cord pipeline YAML config."),
+    headless: bool = typer.Option(
+        False,
+        "--headless",
+        help="Write cord_orientation.txt without opening Napari (for tests).",
+    ),
+) -> None:
+    """Manually set the cord rostrocaudal direction (writes cord_orientation.txt)."""
+    from lightsuite.config.loader import load_spinal_config
+    from lightsuite.gui.orientation_cord import run_spinal_orientation
+
+    cfg = load_spinal_config(config)
+    path = run_spinal_orientation(cfg, headless=headless)
+    typer.echo(f"Cord orientation saved to {path}")
+
+
 @spinal_app.command("preprocess")
 def spinal_preprocess(
     config: str = typer.Option(..., "--config", "-c", help="Spinal cord pipeline YAML config."),

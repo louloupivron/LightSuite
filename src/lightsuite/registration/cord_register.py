@@ -12,7 +12,6 @@ from rich.console import Console
 from scipy import ndimage
 
 from lightsuite.config.models import SpinalCordPipelineConfig
-from lightsuite.gui.affine import fit_affine_transform, transform_points
 from lightsuite.gui.control_points import ControlPointSession
 from lightsuite.gui.cord_data import default_cord_session_path
 from lightsuite.preprocess.cord_checkpoint import (
@@ -68,71 +67,54 @@ def run_spinal_registration(config: SpinalCordPipelineConfig) -> Path:
 
     cptshistology = np.zeros((0, 3))
     cptsatlas = np.zeros((0, 3))
-    cpaffine = np.zeros((0, 3))
-    use_point_aff = False
     cp_path = default_cord_session_path(save_path)
     if cp_path.is_file() and cpwt > 0:
         session = ControlPointSession.load(cp_path)
         cptsatlas, cptshistology = session.paired_points_xyz()
         if cptshistology.shape[0] > 0:
-            cpaffine = cptsatlas.copy()
             console.print(f"Found {cptshistology.shape[0]} user-defined control points.")
-            if cptshistology.shape[0] > 16:
-                atlas_ori = transform_points(
-                    cptsatlas,
-                    np.linalg.inv(transaff),
-                )
-                transaff, _ = fit_affine_transform(atlas_ori, cptshistology)
-                cpaffine = transform_points(atlas_ori, transaff)
-                use_point_aff = True
 
     spacing_mm = config.registration.resolution_um * 1e-3
     tvtemp = ndimage.median_filter(tv, size=3)
-    if use_point_aff:
-        from lightsuite.registration.warp import warp_volume_affine
-
-        tvaffine = warp_volume_affine(tvtemp, transaff, straightvol.shape, order=1, point_coords="array")
-        avaffine = warp_volume_affine(av.astype(np.float32), transaff, straightvol.shape, order=0, point_coords="array")
-    else:
-        tvaffine = warp_cord_atlas_to_straightvol(
-            tvtemp,
-            transinit=transinit,
-            elastix_affine_path=elastix_affine_path,
-            output_shape=straightvol.shape,
-            spacing_mm=spacing_mm,
-            work_dir=cord_work_dir(config, "transformix", "register", "tv_affine"),
-            nearest=False,
-        )
-        avaffine = warp_cord_atlas_to_straightvol(
-            av,
-            transinit=transinit,
-            elastix_affine_path=elastix_affine_path,
-            output_shape=straightvol.shape,
-            spacing_mm=spacing_mm,
-            work_dir=cord_work_dir(config, "transformix", "register", "av_affine"),
-            nearest=True,
-        )
+    # Always warp the atlas into the straightened-sample grid via the initial z-scale +
+    # elastix affine. This is the same warp used by the match-points GUI (where the user
+    # placed the atlas landmarks) and the exact inverse applied by export, so control
+    # points and exported atlas-space volumes stay consistent. Control points refine the
+    # alignment through the elastix B-spline landmark metric below, not a separate
+    # single-matrix affine re-fit (which was axis-scrambled and broke the export inverse).
+    tvaffine = warp_cord_atlas_to_straightvol(
+        tvtemp,
+        transinit=transinit,
+        elastix_affine_path=elastix_affine_path,
+        output_shape=straightvol.shape,
+        spacing_mm=spacing_mm,
+        work_dir=cord_work_dir(config, "transformix", "register", "tv_affine"),
+        nearest=False,
+    )
+    avaffine = warp_cord_atlas_to_straightvol(
+        av,
+        transinit=transinit,
+        elastix_affine_path=elastix_affine_path,
+        output_shape=straightvol.shape,
+        spacing_mm=spacing_mm,
+        work_dir=cord_work_dir(config, "transformix", "register", "av_affine"),
+        nearest=True,
+    )
 
     volmax = float(np.quantile(straightvol, 0.999))
     volplot = np.clip(straightvol / max(volmax, 1.0) * 255.0, 0, 255).astype(np.uint8)
-    if use_point_aff:
-        save_cord_annotation_preview(
-            volplot,
-            avaffine.astype(np.uint16),
-            qc_dir / "registration_point_affine.png",
-        )
 
     elastix_temp = cord_work_dir(config, "elastix", "bspline")
     clear_elastix_workspace(elastix_temp)
 
     fixpath = elastix_temp / "fixed.txt"
     movpath = elastix_temp / "moving.txt"
-    if cpaffine.size and cptshistology.size:
+    if cptsatlas.size and cptshistology.size:
         volscale = spacing_mm
-        write_landmark_file(movpath, (cpaffine - 1.0) * volscale)
+        write_landmark_file(movpath, (cptsatlas - 1.0) * volscale)
         write_landmark_file(fixpath, (cptshistology - 1.0) * volscale)
 
-    has_control_points = cpaffine.size > 0 and cptshistology.size > 0
+    has_control_points = cptsatlas.size > 0 and cptshistology.size > 0
     if cpwt > 0 and not has_control_points:
         console.print(
             "No control points found; running B-spline with mutual information only "

@@ -311,6 +311,14 @@ class CordRegistrationConfig(BaseModel):
     straightening_lambda_pos: float = Field(default=5000.0, gt=0)
     straightening_lambda_ang: float = Field(default=5000.0, gt=0)
     target_orientation_deg: float = Field(default=90.0)
+    longitudinal_direction: str | None = Field(
+        default=None,
+        description=(
+            "Optional override for sample +Z anatomy direction: "
+            "'rostrocaudal' or 'caudorostral'. When unset, preprocess reads "
+            "cord_orientation.txt from check-orientation."
+        ),
+    )
 
 
 class CordSampleSourceConfig(BaseModel):

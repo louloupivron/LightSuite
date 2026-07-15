@@ -261,7 +261,7 @@ def run_spinal_match_points(
             matrix,
             data.sample_volume.shape,
             order=0,
-            point_coords="array",
+            point_coords="xyz",
         )
         state["_warped_annotation_key"] = key
         state["_warped_annotation"] = warped
