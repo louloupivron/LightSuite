@@ -13,7 +13,8 @@ from scipy import ndimage
 
 from lightsuite.config.models import SpinalCordPipelineConfig
 from lightsuite.gui.affine import fit_affine_transform, transform_points
-from lightsuite.gui.match_points_cord import CordControlPointSession, default_session_path
+from lightsuite.gui.control_points import ControlPointSession
+from lightsuite.gui.cord_data import default_cord_session_path
 from lightsuite.preprocess.cord_checkpoint import (
     CordRegOptsCheckpoint,
     CordTransformParamsCheckpoint,
@@ -69,20 +70,11 @@ def run_spinal_registration(config: SpinalCordPipelineConfig) -> Path:
     cptsatlas = np.zeros((0, 3))
     cpaffine = np.zeros((0, 3))
     use_point_aff = False
-    cp_path = default_session_path(save_path)
+    cp_path = default_cord_session_path(save_path)
     if cp_path.is_file() and cpwt > 0:
-        session = CordControlPointSession.load(cp_path)
-        atlas_pts = []
-        hist_pts = []
-        for a_list, h_list in zip(session.atlas_control_points, session.histology_control_points, strict=False):
-            if len(a_list) == len(h_list) and len(a_list) > 0:
-                atlas_pts.extend(a_list)
-                hist_pts.extend(h_list)
-        if atlas_pts:
-            cptsatlas = np.asarray(atlas_pts, dtype=float)[:, :3]
-            cptshistology = np.asarray(hist_pts, dtype=float)[:, :3]
-            cptsatlas = cptsatlas[:, [1, 0, 2]]
-            cptshistology = cptshistology[:, [1, 0, 2]]
+        session = ControlPointSession.load(cp_path)
+        cptsatlas, cptshistology = session.paired_points_xyz()
+        if cptshistology.shape[0] > 0:
             cpaffine = cptsatlas.copy()
             console.print(f"Found {cptshistology.shape[0]} user-defined control points.")
             if cptshistology.shape[0] > 16:

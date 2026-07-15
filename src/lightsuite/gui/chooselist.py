@@ -72,3 +72,35 @@ def generate_control_point_list(volume_shape: tuple[int, int, int]) -> np.ndarra
     reshaped = cplist.reshape(n_per_side, 3, n_types, n_types)
     cplist = reshaped[iperm, :, :, :].transpose(3, 1, 2, 0).reshape(n_types, -1).T
     return cplist.astype(int)
+
+
+def generate_cord_control_point_list(
+    length_axis_size: int,
+    n_slices: int = 100,
+    *,
+    cut_axis: int = 3,
+) -> np.ndarray:
+    """Return chooselist rows for spinal cord match-points (matchControlPointsSpine.m).
+
+    Cord registration always cuts transverse slices along the rostrocaudal axis (volume
+    dimension 3 after straightening). Rows are ``[slice_index, cut_axis, 1, 1]`` and
+    shuffled with seed 1 to match MATLAB ``rng(1); randperm(...)``.
+    """
+    if cut_axis not in {1, 2, 3}:
+        msg = f"cut_axis must be 1, 2, or 3, got {cut_axis}"
+        raise ValueError(msg)
+    if length_axis_size < 1:
+        msg = f"length_axis_size must be >= 1, got {length_axis_size}"
+        raise ValueError(msg)
+    sids = np.round(np.linspace(1, length_axis_size, n_slices)).astype(int)
+    sids = np.clip(sids, 1, length_axis_size)
+    chooselist = np.column_stack(
+        [
+            sids,
+            np.full(n_slices, cut_axis, dtype=int),
+            np.ones(n_slices, dtype=int),
+            np.ones(n_slices, dtype=int),
+        ]
+    )
+    rng = np.random.default_rng(1)
+    return chooselist[rng.permutation(n_slices)].astype(int)
