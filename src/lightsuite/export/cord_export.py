@@ -26,9 +26,10 @@ from lightsuite.preprocess.cord_checkpoint import (
     CordRegOptsCheckpoint,
     CordTransformParamsCheckpoint,
 )
-from lightsuite.registration.cord_affine import (
-    build_cord_z_transinit,
-    warp_cord_straightvol_to_atlas,
+from lightsuite.registration.cord_affine import warp_cord_straightvol_to_atlas
+from lightsuite.registration.cord_longitudinal import (
+    load_longitudinal_correspondence,
+    resolve_cord_z_transinit,
 )
 from lightsuite.registration.cord_paths import (
     cord_affine_transform_path,
@@ -79,7 +80,8 @@ def export_registered_cord_volumes(config: SpinalCordPipelineConfig) -> CordExpo
     elastix_affine_path = cord_affine_transform_path(config)
     spacing_mm = config.registration.resolution_um * 1e-3
     nslices = checkpoint.ikeeprange[1] - checkpoint.ikeeprange[0] + 1
-    transinit = build_cord_z_transinit(nslices, atlas_shape[2])
+    correspondence = load_longitudinal_correspondence(save_path)
+    transinit = resolve_cord_z_transinit(nslices, atlas_shape[2], correspondence)
 
     atlas_volumes = load_fiederling_atlas_volumes(config.atlas)
     native_template = atlas_volumes.template

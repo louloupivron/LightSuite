@@ -50,6 +50,10 @@ class ControlPointSession:
     def load(cls, path: Path) -> ControlPointSession:
         raw = json.loads(path.expanduser().read_text(encoding="utf-8"))
         raw.setdefault("atlas_slice_indices", None)
+        raw.setdefault("chooselist", None)
+        raw.setdefault("ori_trans", np.eye(4).tolist())
+        if "atlas2histology_tform" not in raw:
+            raw["atlas2histology_tform"] = np.eye(4).tolist()
         return cls(**raw)
 
     def point_counts(self) -> tuple[int, int, int]:

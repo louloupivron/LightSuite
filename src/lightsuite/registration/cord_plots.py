@@ -77,33 +77,40 @@ def _select_axial_slices(
     n_show: int,
     bg_threshold: int,
 ) -> np.ndarray:
-    """Pick axial slices with tissue and, when possible, overlapping annotation."""
+    """Pick axial slices evenly spanning the full rostrocaudal extent."""
     n_length = volume.shape[2]
-    fallback = np.round(np.linspace(0.02 * n_length, 0.98 * n_length, n_show)).astype(int)
-    pool = np.unique(
-        np.round(np.linspace(0.02 * n_length, 0.98 * n_length, max(n_show * 4, 24))).astype(int)
-    )
-    scored: list[tuple[int, int, int]] = []
-    for z in pool:
-        tissue = volume[:, :, z] > bg_threshold
-        if not np.any(tissue):
+    if n_show <= 0:
+        return np.array([], dtype=int)
+    if n_show == 1:
+        return np.array([n_length // 2], dtype=int)
+
+    # Partition the full z range into bins and pick the best slice in each bin.
+    edges = np.linspace(0, n_length, n_show + 1).astype(int)
+    picked: list[int] = []
+    for i in range(n_show):
+        z0 = int(edges[i])
+        z1 = int(edges[i + 1])
+        if z1 <= z0:
+            z1 = min(z0 + 1, n_length)
+        candidates = np.arange(z0, min(z1, n_length))
+        if candidates.size == 0:
+            picked.append(min(z0, n_length - 1))
             continue
-        ann = annotation[:, :, z] > 0
-        overlap = int(np.count_nonzero(tissue & ann))
-        scored.append((overlap, int(z), int(np.count_nonzero(ann))))
 
-    if len(scored) < n_show:
-        return fallback
-
-    scored.sort(key=lambda item: (-item[0], -item[2], item[1]))
-    picked = sorted({z for _, z, _ in scored[:n_show]})
-    if len(picked) < n_show:
-        for _, z, _ in scored[n_show:]:
-            if z not in picked:
-                picked.append(z)
-            if len(picked) == n_show:
-                break
-    return np.array(sorted(picked[:n_show]), dtype=int)
+        best_z = int(candidates[len(candidates) // 2])
+        best_score = -1
+        for z in candidates:
+            tissue = volume[:, :, z] > bg_threshold
+            if not np.any(tissue):
+                continue
+            ann = annotation[:, :, z] > 0
+            overlap = int(np.count_nonzero(tissue & ann))
+            score = overlap if overlap > 0 else int(np.count_nonzero(tissue))
+            if score > best_score:
+                best_score = score
+                best_z = int(z)
+        picked.append(best_z)
+    return np.array(picked, dtype=int)
 
 
 def _cord_center_row(volume: np.ndarray, bg_threshold: int) -> int:

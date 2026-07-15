@@ -626,6 +626,10 @@ uv run lightsuite analysis plot-lr-scatter \
   -c examples/JulieBuron.yaml -o ./plots/julie_lr_scatter.png \
   --keep-division Isocortex --keep-division Thalamus
 
+uv run lightsuite analysis plot-top-regions \
+  -c examples/JulieBuron.yaml -o ./plots/julie_top_regions.png \
+  --metric cell_count --top-n 15 --channel 1
+
 # Or pass a CSV directly
 uv run lightsuite analysis plot-division-bars \
   -i /data/M001/volume_registered/region_stats.csv \
@@ -634,12 +638,17 @@ uv run lightsuite analysis plot-division-bars \
 
 | Command | Description |
 |---------|-------------|
-| `plot-division-bars` | Horizontal bars: left vs right **mean per division** |
+| `plot-division-bars` | Horizontal bars: left vs right **per division** (sum for `cell_count`, mean for intensity by default) |
 | `plot-lr-scatter` | Left vs right **per region**, points coloured by division |
+| `plot-top-regions` | Horizontal bars: left vs right for the **top N regions** ranked by left + right total (`--top-n`, default 10) |
 | `plot-group-division` | Cohort **group means by division** (from `group_summary_by_division.csv`) |
 
-Common options: `--metric` (`median_intensity`, `cell_count`, …), `--channel`, `--title`,
-`--exclude-division`, `--dpi`. Scatter also supports `--keep-division`, `--axis-min`, `--axis-max`.
+Common options: `--metric` (`median_intensity`, `cell_count`, …), `--channel`, `--aggregate` (`auto`, `sum`, `mean`),
+`--title`, `--exclude-division`, `--dpi`. Scatter also supports `--keep-division`, `--axis-min`, `--axis-max`.
+Top-region plots support `--keep-division` and `--top-n` / `-n` (default 10).
+
+`--aggregate auto` (default) sums fine regions within each division for `cell_count`, and averages them for
+continuous metrics such as `median_intensity`.
 
 Division bar plots also write a `.csv` aggregation next to the PNG.
 

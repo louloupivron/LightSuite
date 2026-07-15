@@ -74,6 +74,34 @@ def generate_control_point_list(volume_shape: tuple[int, int, int]) -> np.ndarra
     return cplist.astype(int)
 
 
+def generate_cord_longitudinal_list(
+    length_axis_size: int,
+    n_slices: int = 20,
+    *,
+    cut_axis: int = 3,
+) -> np.ndarray:
+    """Return ordered chooselist rows for longitudinal align (rostrocaudal anchors)."""
+    if cut_axis not in {1, 2, 3}:
+        msg = f"cut_axis must be 1, 2, or 3, got {cut_axis}"
+        raise ValueError(msg)
+    if length_axis_size < 1:
+        msg = f"length_axis_size must be >= 1, got {length_axis_size}"
+        raise ValueError(msg)
+    minstart = max(1, int(np.ceil(length_axis_size / 20)))
+    if length_axis_size <= 2 * minstart:
+        minstart = 1
+    sids = np.round(np.linspace(minstart, length_axis_size - minstart, n_slices)).astype(int)
+    sids = np.clip(sids, 1, length_axis_size)
+    return np.column_stack(
+        [
+            sids,
+            np.full(n_slices, cut_axis, dtype=int),
+            np.ones(n_slices, dtype=int),
+            np.ones(n_slices, dtype=int),
+        ]
+    ).astype(int)
+
+
 def generate_cord_control_point_list(
     length_axis_size: int,
     n_slices: int = 100,

@@ -48,14 +48,23 @@ import:
   write_csv: true
   annotations:
   - format: points_csv
-    path: /media/gbm/NVME2/ALICe-pipelines-data/registration_imports/converted/imaris_488_points.csv
-    label: imaris_488_cells
+    path: /media/gbm/NVME2/ALICe-pipelines-data/JulieBuron/SegmentationImports/converted/arivis_561_points.csv
+    label: arivis_488_cells
   - format: mask_tiff
-    path: /media/gbm/NVME2/ALICe-pipelines-data/registration_imports/converted/imaris_488_mask.tif
-    label: imaris_488_mask
+    path: /media/gbm/NVME2/ALICe-pipelines-data/JulieBuron/SegmentationImports/converted/arivis_561_mask.tif
+    label: arivis_488_mask
 
 export:
   save_registered_volume: true
   write_cells_csv: true
   registered_volume_format: tiff 
   write_pyramid: true
+
+
+# Step 2 — count imported points per atlas region
+analysis:
+  write_tidy_csv: true       # also writes chanXX_region_stats.csv during export
+  count_points: true         # required: bin *_atlas_coords.npz into regions
+  point_labels:              # optional: restrict to Imaris only (recommended if you also import Arivis)
+    - arivis_488_cells
+    - imaris_488_cells

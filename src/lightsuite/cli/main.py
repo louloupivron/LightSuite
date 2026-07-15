@@ -356,20 +356,40 @@ def analysis_plot_division_bars(
         None, "--config", "-c", help="Brain YAML; uses volume_registered/region_stats.csv."
     ),
     output: str = typer.Option(..., "--output", "-o", help="Output PNG path."),
-    channel: int | None = typer.Option(1, "--channel", help="Channel id (tidy tables only)."),
+    channel: str = typer.Option(
+        "1",
+        "--channel",
+        help="Imaging channel (1, 2, …) or import label such as imaris_488_cells (tidy tables only).",
+    ),
     metric: str = typer.Option("median_intensity", "--metric", help="Metric to plot."),
+    aggregate: str = typer.Option(
+        "auto",
+        "--aggregate",
+        help="Division rollup: auto (sum for cell_count, mean otherwise), sum, or mean.",
+    ),
     title: str | None = typer.Option(None, "--title", help="Figure title."),
     exclude_division: list[str] | None = typer.Option(
         None, "--exclude-division", help="Division names to omit (repeatable)."
     ),
     dpi: int = typer.Option(200, "--dpi", help="Figure DPI."),
 ) -> None:
-    """Bar plot: left vs right mean per Allen division."""
-    from lightsuite.analysis.viz.io import load_region_plot_table
+    """Bar plot: left vs right per Allen division."""
+    from lightsuite.analysis.viz.io import (
+        default_division_aggregate,
+        load_region_plot_table,
+        parse_plot_channel,
+    )
     from lightsuite.analysis.viz.plots import plot_division_bars
 
+    agg_mode = aggregate.lower().strip()
+    if agg_mode == "auto":
+        agg_mode = default_division_aggregate(metric)
+    elif agg_mode not in ("sum", "mean"):
+        raise typer.BadParameter("--aggregate must be auto, sum, or mean.")
     csv_path = _resolve_plot_input(input_path=input_path, brain_config=brain_config)
-    table = load_region_plot_table(csv_path, channel=channel, metric=metric)
+    table = load_region_plot_table(
+        csv_path, channel=parse_plot_channel(channel), metric=metric
+    )
     out = Path(output).expanduser()
     plot_division_bars(
         table,
@@ -377,8 +397,9 @@ def analysis_plot_division_bars(
         output_path=out,
         dpi=dpi,
         exclude_divisions=exclude_division,
+        aggregate=agg_mode,  # type: ignore[arg-type]
     )
-    typer.echo(f"Saved: {out.resolve()}")
+    typer.echo(f"Saved: {out.resolve()} (aggregate={agg_mode})")
 
 
 @analysis_app.command("plot-lr-scatter")
@@ -388,7 +409,11 @@ def analysis_plot_lr_scatter(
         None, "--config", "-c", help="Brain YAML; uses volume_registered/region_stats.csv."
     ),
     output: str = typer.Option(..., "--output", "-o", help="Output PNG path."),
-    channel: int | None = typer.Option(1, "--channel", help="Channel id (tidy tables only)."),
+    channel: str = typer.Option(
+        "1",
+        "--channel",
+        help="Imaging channel (1, 2, …) or import label such as imaris_488_cells (tidy tables only).",
+    ),
     metric: str = typer.Option("median_intensity", "--metric", help="Metric to plot."),
     title: str | None = typer.Option(None, "--title", help="Figure title."),
     keep_division: list[str] | None = typer.Option(
@@ -402,11 +427,13 @@ def analysis_plot_lr_scatter(
     dpi: int = typer.Option(200, "--dpi", help="Figure DPI."),
 ) -> None:
     """Scatter plot: left vs right per region, coloured by division."""
-    from lightsuite.analysis.viz.io import load_region_plot_table
+    from lightsuite.analysis.viz.io import load_region_plot_table, parse_plot_channel
     from lightsuite.analysis.viz.plots import plot_lr_scatter
 
     csv_path = _resolve_plot_input(input_path=input_path, brain_config=brain_config)
-    table = load_region_plot_table(csv_path, channel=channel, metric=metric)
+    table = load_region_plot_table(
+        csv_path, channel=parse_plot_channel(channel), metric=metric
+    )
     out = Path(output).expanduser()
     plot_lr_scatter(
         table,
@@ -419,6 +446,51 @@ def analysis_plot_lr_scatter(
         axis_max=axis_max,
     )
     typer.echo(f"Saved: {out.resolve()}")
+
+
+@analysis_app.command("plot-top-regions")
+def analysis_plot_top_regions(
+    input_path: str | None = typer.Option(None, "--input", "-i", help="region_stats or intensities CSV."),
+    brain_config: str | None = typer.Option(
+        None, "--config", "-c", help="Brain YAML; uses volume_registered/region_stats.csv."
+    ),
+    output: str = typer.Option(..., "--output", "-o", help="Output PNG path."),
+    top_n: int = typer.Option(10, "--top-n", "-n", help="Number of top regions to show."),
+    channel: str = typer.Option(
+        "1",
+        "--channel",
+        help="Imaging channel (1, 2, …) or import label such as imaris_488_cells (tidy tables only).",
+    ),
+    metric: str = typer.Option("cell_count", "--metric", help="Metric to plot."),
+    title: str | None = typer.Option(None, "--title", help="Figure title."),
+    keep_division: list[str] | None = typer.Option(
+        None, "--keep-division", help="Only these divisions (repeatable)."
+    ),
+    exclude_division: list[str] | None = typer.Option(
+        None, "--exclude-division", help="Division names to omit (repeatable)."
+    ),
+    dpi: int = typer.Option(200, "--dpi", help="Figure DPI."),
+) -> None:
+    """Bar plot: left vs right for the top N regions by total metric value."""
+    from lightsuite.analysis.viz.io import load_region_plot_table, parse_plot_channel
+    from lightsuite.analysis.viz.plots import plot_top_region_bars
+
+    csv_path = _resolve_plot_input(input_path=input_path, brain_config=brain_config)
+    table = load_region_plot_table(
+        csv_path, channel=parse_plot_channel(channel), metric=metric
+    )
+    out = Path(output).expanduser()
+    plot_top_region_bars(
+        table,
+        top_n=top_n,
+        metric=metric,
+        title=title,
+        output_path=out,
+        dpi=dpi,
+        keep_divisions=keep_division,
+        exclude_divisions=exclude_division,
+    )
+    typer.echo(f"Saved: {out.resolve()} (top_n={top_n})")
 
 
 @analysis_app.command("plot-group-division")
@@ -670,6 +742,24 @@ def spinal_straighten(
     cfg = load_spinal_config(config)
     path = run_spinal_straighten(cfg, headless=headless)
     typer.echo(f"Alignment checkpoint: {path}")
+
+
+@spinal_app.command("align-longitudinal")
+def spinal_align_longitudinal(
+    config: str = typer.Option(..., "--config", "-c", help="Spinal cord pipeline YAML config."),
+    headless: bool = typer.Option(
+        False,
+        "--headless",
+        help="Auto-confirm centered z-init anchors without Napari (for tests).",
+    ),
+) -> None:
+    """Interactive rostrocaudal sample-to-atlas alignment before init-registration."""
+    from lightsuite.config.loader import load_spinal_config
+    from lightsuite.gui.align_longitudinal_cord import run_spinal_align_longitudinal
+
+    cfg = load_spinal_config(config)
+    path = run_spinal_align_longitudinal(cfg, headless=headless)
+    typer.echo(f"Longitudinal correspondence: {path}")
 
 
 @spinal_app.command("init-registration")

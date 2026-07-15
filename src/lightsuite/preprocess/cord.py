@@ -40,6 +40,49 @@ def _robust_std(values: np.ndarray) -> float:
     return float(1.4826 * np.median(np.abs(values - np.median(values))))
 
 
+def _cord_foreground_area(regvol: np.ndarray) -> np.ndarray:
+    """Cross-sectional foreground voxel count along the rostrocaudal axis."""
+    return (regvol > 0).sum(axis=(0, 1)).astype(float)
+
+
+def _tofliprc_from_atlas_profile(sample_area: np.ndarray, tv: np.ndarray) -> bool:
+    """Break ties by matching the sample length profile to the atlas template."""
+    from scipy.ndimage import zoom
+
+    if sample_area.size < 2 or tv.shape[2] < 2 or float(sample_area.max()) <= 0:
+        return False
+    sample_prof = sample_area / float(sample_area.max())
+    atlas_area = (tv > 0.01 * float(tv.max())).sum(axis=(0, 1)).astype(float)
+    if float(atlas_area.max()) <= 0:
+        return False
+    atlas_prof = atlas_area / float(atlas_area.max())
+    sample_rs = zoom(sample_prof, atlas_prof.size / sample_prof.size, order=1)
+    n = min(sample_rs.size, atlas_prof.size)
+    corr_normal = float(np.corrcoef(sample_rs[:n], atlas_prof[:n])[0, 1])
+    corr_flipped = float(np.corrcoef(sample_rs[:n][::-1], atlas_prof[:n])[0, 1])
+    if not np.isfinite(corr_normal) or not np.isfinite(corr_flipped):
+        return False
+    return corr_flipped > corr_normal
+
+
+def detect_tofliprc(regvol: np.ndarray, tv: np.ndarray) -> bool:
+    """Return True when the sample runs caudorostral along +Z (MATLAB tofliprc).
+
+    Uses foreground cross-section area at both ends. The binary segmentation mask used
+    for brain trimming can report equal endpoint areas after mode-fill + dilation even
+    when the raw sample is caudorostral; atlas profile correlation resolves ties.
+    """
+    ncheck = max(1, int(np.ceil(0.05 * regvol.shape[2])))
+    fg_area = _cord_foreground_area(regvol)
+    frontsum = float(fg_area[:ncheck].mean())
+    backsum = float(fg_area[-ncheck:].mean())
+    if frontsum + 1e-6 < backsum:
+        return True
+    if backsum + 1e-6 < frontsum:
+        return False
+    return _tofliprc_from_atlas_profile(fg_area, tv)
+
+
 def _brain_trim_range(ihigh: np.ndarray, tofliprc: bool, nz: int) -> list[int]:
     """Determine rostrocaudal slice range after removing brain-stem tissue."""
     ikeep = [1, nz]
@@ -48,7 +91,7 @@ def _brain_trim_range(ihigh: np.ndarray, tofliprc: bool, nz: int) -> list[int]:
     if tofliprc:
         high_idx = np.flatnonzero(ihigh)
         if high_idx.size:
-            ilast = int(high_idx[-1]) + 1
+            ilast = int(high_idx[0]) + 1
             ikeep = [1, min(ilast + 1, nz)]
     else:
         normal_idx = np.flatnonzero(~ihigh)
@@ -133,11 +176,13 @@ def preprocess_spinal_cord_sample(config: SpinalCordPipelineConfig) -> CordPrepr
 
     cordarea = newvol.sum(axis=(0, 1)).astype(float)
     ncheck = max(1, int(np.ceil(0.05 * cordarea.size)))
-    frontsum = float(cordarea[:ncheck].mean())
-    backsum = float(cordarea[-ncheck:].mean())
-    tofliprc = frontsum < backsum
+    tofliprc = detect_tofliprc(regvol, tv)
     if tofliprc:
-        console.print("Caudorostral direction detected — flipping atlas rostrocaudal axis")
+        fg_area = _cord_foreground_area(regvol)
+        console.print(
+            "Caudorostral direction detected — flipping atlas rostrocaudal axis "
+            f"(front fg={fg_area[:ncheck].mean():.0f}, back fg={fg_area[-ncheck:].mean():.0f})"
+        )
         tv = np.flip(tv, axis=2)
         av = np.flip(av, axis=2)
         tvpts[:, 2] = tv.shape[2] - tvpts[:, 2] + 1

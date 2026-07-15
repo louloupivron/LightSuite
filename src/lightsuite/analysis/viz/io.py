@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 import pandas as pd
 
 from lightsuite.analysis.region_stats import METRICS, TIDY_COLUMNS
+
+DivisionAggregate = Literal["mean", "sum"]
 
 #: Legacy wide intensity column names.
 _WIDE_INTENSITY = {
@@ -32,6 +35,18 @@ def _normalize_channel(value: object) -> str:
     if isinstance(value, (int, float)) and value == int(value):
         return str(int(value))
     return str(value).strip()
+
+
+def parse_plot_channel(value: str | int | None) -> int | str | None:
+    """Parse CLI ``--channel``: numeric imaging channels or import label strings."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if text.lstrip("-").isdigit():
+        return int(text)
+    return text
 
 
 def load_region_plot_table(
@@ -87,8 +102,37 @@ def filter_divisions(
     return out
 
 
-def aggregate_by_division(df: pd.DataFrame) -> pd.DataFrame:
-    """Mean left/right per division (mean of fine-region values in each division)."""
+def default_division_aggregate(metric: str) -> DivisionAggregate:
+    """Default division rollup: sum for counts, mean for continuous metrics."""
+    return "sum" if metric == "cell_count" else "mean"
+
+
+def select_top_regions(
+    df: pd.DataFrame,
+    *,
+    top_n: int,
+) -> pd.DataFrame:
+    """Return the top *top_n* regions ranked by left + right total."""
+    if top_n < 1:
+        msg = f"top_n must be >= 1, got {top_n}."
+        raise ValueError(msg)
+
+    work = df.copy()
+    work["total"] = work["left"].fillna(0) + work["right"].fillna(0)
+    work = work[work["total"] > 0]
+    if work.empty:
+        return work.reindex(columns=[*PLOT_COLUMNS, "total"])
+
+    ranked = work.sort_values("total", ascending=False).head(top_n)
+    return ranked.sort_values("total", ascending=True).reset_index(drop=True)
+
+
+def aggregate_by_division(
+    df: pd.DataFrame,
+    *,
+    how: DivisionAggregate = "mean",
+) -> pd.DataFrame:
+    """Roll up fine regions to divisions (mean or sum of left/right per side)."""
     if df.empty:
         return pd.DataFrame(columns=["division", "left", "right", "count"])
 
@@ -98,12 +142,13 @@ def aggregate_by_division(df: pd.DataFrame) -> pd.DataFrame:
     if work.empty:
         return pd.DataFrame(columns=["division", "left", "right", "count"])
 
+    reducer = "sum" if how == "sum" else "mean"
     agg = (
         work.groupby("division", sort=True)
-        .agg(left=("left", "mean"), right=("right", "mean"), count=("division", "size"))
+        .agg(left=("left", reducer), right=("right", reducer), count=("division", "size"))
         .reset_index()
     )
-    agg["total"] = agg["left"] + agg["right"]
+    agg["total"] = agg["left"].fillna(0) + agg["right"].fillna(0)
     return agg.sort_values("total", ascending=True)
 
 

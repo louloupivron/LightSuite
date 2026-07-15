@@ -7,7 +7,13 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import pandas as pd
 
-from lightsuite.analysis.viz.io import aggregate_by_division, filter_divisions
+from lightsuite.analysis.viz.io import (
+    DivisionAggregate,
+    aggregate_by_division,
+    default_division_aggregate,
+    filter_divisions,
+    select_top_regions,
+)
 
 # Default division palette (Allen-style divisions from notebook).
 DIVISION_COLORS: dict[str, str] = {
@@ -30,10 +36,11 @@ def plot_division_bars(
     keep_divisions: list[str] | None = None,
     exclude_divisions: list[str] | None = None,
     save_csv: bool = True,
+    aggregate: DivisionAggregate = "mean",
 ) -> tuple[plt.Figure, pd.DataFrame]:
-    """Horizontal grouped bars: left vs right mean per division."""
+    """Horizontal grouped bars: left vs right per division."""
     filtered = filter_divisions(df, keep=keep_divisions, exclude=exclude_divisions)
-    agg = aggregate_by_division(filtered)
+    agg = aggregate_by_division(filtered, how=aggregate)
     if agg.empty:
         msg = "No division data to plot after filtering."
         raise ValueError(msg)
@@ -61,8 +68,13 @@ def plot_division_bars(
 
     ax.set_yticks(list(y_pos))
     ax.set_yticklabels(agg["division"], fontsize=9)
-    ax.set_xlabel("Mean value (mean of regions in division)")
-    ax.set_title(title or "Left vs right by division", fontweight="bold")
+    if aggregate == "sum":
+        xlabel = "Total value (sum of regions in division)"
+    else:
+        xlabel = "Mean value (mean of regions in division)"
+    ax.set_xlabel(xlabel)
+    agg_label = "sum" if aggregate == "sum" else "mean"
+    ax.set_title(title or f"Left vs right by division ({agg_label})", fontweight="bold")
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     ax.legend(loc="lower right", fontsize=9)
@@ -148,3 +160,92 @@ def plot_lr_scatter(
         plt.close(fig)
 
     return fig, work
+
+
+_METRIC_XLABELS: dict[str, str] = {
+    "median_intensity": "Median intensity",
+    "cell_count": "Cell count",
+    "cell_density": "Cell density (per mm³)",
+    "std": "Intensity std",
+    "volume_mm3": "Volume (mm³)",
+}
+
+
+def _region_label(row: pd.Series) -> str:
+    for col in ("name", "structure"):
+        value = row.get(col)
+        if pd.notna(value) and str(value).strip():
+            return str(value).strip()
+    return str(row["parcellation_index"])
+
+
+def plot_top_region_bars(
+    df: pd.DataFrame,
+    *,
+    top_n: int = 10,
+    metric: str | None = None,
+    title: str | None = None,
+    output_path: Path | None = None,
+    dpi: int = 200,
+    show: bool = False,
+    keep_divisions: list[str] | None = None,
+    exclude_divisions: list[str] | None = None,
+    save_csv: bool = True,
+) -> tuple[plt.Figure, pd.DataFrame]:
+    """Horizontal grouped bars: left vs right for the top *top_n* regions by total value."""
+    filtered = filter_divisions(df, keep=keep_divisions, exclude=exclude_divisions)
+    top = select_top_regions(filtered, top_n=top_n)
+    if top.empty:
+        msg = "No regions with positive values to plot after filtering."
+        raise ValueError(msg)
+
+    labels = top.apply(_region_label, axis=1)
+    fig, ax = plt.subplots(figsize=(10, max(4, len(top) * 0.4)))
+    y_pos = range(len(top))
+    bar_h = 0.35
+
+    ax.barh(
+        [y - bar_h / 2 for y in y_pos],
+        top["left"],
+        height=bar_h,
+        color="#6A5ACD",
+        alpha=0.85,
+        label="Left",
+    )
+    ax.barh(
+        [y + bar_h / 2 for y in y_pos],
+        top["right"],
+        height=bar_h,
+        color="#9370DB",
+        alpha=0.85,
+        label="Right",
+    )
+
+    ax.set_yticks(list(y_pos))
+    ax.set_yticklabels(labels, fontsize=9)
+    xlabel = _METRIC_XLABELS.get(metric or "", "Value") if metric else "Value"
+    ax.set_xlabel(xlabel)
+    metric_label = metric.replace("_", " ") if metric else "value"
+    ax.set_title(
+        title or f"Top {len(top)} regions by {metric_label} (left + right total)",
+        fontweight="bold",
+    )
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.legend(loc="lower right", fontsize=9)
+    ax.grid(axis="x", alpha=0.3, linestyle="--")
+    fig.tight_layout()
+
+    if output_path is not None:
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
+        if save_csv:
+            top.to_csv(output_path.with_suffix(".csv"), index=False)
+
+    if show:
+        plt.show()
+    elif output_path is not None:
+        plt.close(fig)
+
+    return fig, top

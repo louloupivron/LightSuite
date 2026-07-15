@@ -15,8 +15,9 @@ import pytest
 from lightsuite.analysis.viz.io import (
     aggregate_by_division,
     load_region_plot_table,
+    select_top_regions,
 )
-from lightsuite.analysis.viz.plots import plot_division_bars, plot_lr_scatter
+from lightsuite.analysis.viz.plots import plot_division_bars, plot_lr_scatter, plot_top_region_bars
 from lightsuite.export.parcellation import ParcellationResult, write_parcellation_csv
 
 
@@ -45,6 +46,23 @@ def _tidy_rows() -> pd.DataFrame:
             }
         )
     return pd.DataFrame(rows)
+
+
+def test_load_region_plot_table_from_tidy_import_label(tmp_path: Path) -> None:
+    path = tmp_path / "region_stats.csv"
+    df = _tidy_rows()
+    df["channel"] = "imaris_488_cells"
+    df["metric"] = "cell_count"
+    df.to_csv(path, index=False)
+    table = load_region_plot_table(path, channel="imaris_488_cells", metric="cell_count")
+    assert len(table) == 2
+
+
+def test_parse_plot_channel() -> None:
+    from lightsuite.analysis.viz.io import parse_plot_channel
+
+    assert parse_plot_channel("1") == 1
+    assert parse_plot_channel("imaris_488_cells") == "imaris_488_cells"
 
 
 def test_load_region_plot_table_from_tidy(tmp_path: Path) -> None:
@@ -91,11 +109,29 @@ def test_aggregate_by_division_means_regions() -> None:
             {"division": "Thalamus", "left": 5.0, "right": 7.0},
         ]
     )
-    agg = aggregate_by_division(df)
+    agg = aggregate_by_division(df, how="mean")
     iso = agg[agg["division"] == "Isocortex"].iloc[0]
     assert iso["left"] == 20.0
     assert iso["right"] == 30.0
     assert iso["count"] == 2
+
+
+def test_aggregate_by_division_sums_regions() -> None:
+    from lightsuite.analysis.viz.io import default_division_aggregate
+
+    df = pd.DataFrame(
+        [
+            {"division": "Medulla", "left": 6.0, "right": 115.0},
+            {"division": "Medulla", "left": 6.0, "right": 15.0},
+        ]
+    )
+    agg = aggregate_by_division(df, how="sum")
+    row = agg.iloc[0]
+    assert row["left"] == 12.0
+    assert row["right"] == 130.0
+    assert row["total"] == 142.0
+    assert default_division_aggregate("cell_count") == "sum"
+    assert default_division_aggregate("median_intensity") == "mean"
 
 
 def test_plot_division_bars_writes_png(tmp_path: Path) -> None:
@@ -115,6 +151,29 @@ def test_plot_lr_scatter_writes_png(tmp_path: Path) -> None:
     out = tmp_path / "lr_scatter.png"
     plot_lr_scatter(table, output_path=out, keep_divisions=["Isocortex", "Thalamus"])
     assert out.is_file()
+
+
+def test_select_top_regions_ranks_by_total() -> None:
+    df = pd.DataFrame(
+        [
+            {"parcellation_index": 1, "name": "A", "structure": "MO", "division": "Isocortex", "left": 10.0, "right": 5.0},
+            {"parcellation_index": 2, "name": "B", "structure": "TH", "division": "Thalamus", "left": 50.0, "right": 40.0},
+            {"parcellation_index": 3, "name": "C", "structure": "HY", "division": "Hypothalamus", "left": 30.0, "right": 20.0},
+        ]
+    )
+    top = select_top_regions(df, top_n=2)
+    assert list(top["parcellation_index"]) == [3, 2]
+    assert top.iloc[-1]["total"] == 90.0
+
+
+def test_plot_top_region_bars_writes_png(tmp_path: Path) -> None:
+    path = tmp_path / "region_stats.csv"
+    _tidy_rows().to_csv(path, index=False)
+    table = load_region_plot_table(path, channel=1)
+    out = tmp_path / "top_regions.png"
+    plot_top_region_bars(table, top_n=2, metric="median_intensity", output_path=out)
+    assert out.is_file()
+    assert out.with_suffix(".csv").is_file()
 
 
 def test_plot_group_division_bars(tmp_path: Path) -> None:

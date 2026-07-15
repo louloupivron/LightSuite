@@ -12,9 +12,13 @@ from scipy import ndimage
 from lightsuite.config.models import SpinalCordPipelineConfig
 from lightsuite.preprocess.cord_checkpoint import CordRegOptsCheckpoint, SpinalAlignmentCheckpoint
 from lightsuite.registration.cord_affine import (
-    build_cord_z_transinit,
     fit_cord_affine_atlas_to_straightvol,
     warp_cord_atlas_to_straightvol,
+)
+from lightsuite.registration.cord_longitudinal import (
+    CORD_LONGITUDINAL_AXIS,
+    load_longitudinal_correspondence,
+    resolve_cord_z_transinit,
 )
 from lightsuite.registration.cord_paths import (
     cord_affine_transform_write_path,
@@ -129,7 +133,19 @@ def initialize_cord_registration(config: SpinalCordPipelineConfig) -> CordRegOpt
     _ = _reduce_points(samppts2, 10_000)
     _ = _reduce_points(tvpts, 10_000)
 
-    transinit = build_cord_z_transinit(nslices, tv.shape[2])
+    correspondence = load_longitudinal_correspondence(save_path)
+    if correspondence is None or not correspondence.has_confirmed_anchors(CORD_LONGITUDINAL_AXIS):
+        console.print(
+            "[yellow]No confirmed longitudinal_correspondence.json — using centered z-init. "
+            "Run 'lightsuite spinal align-longitudinal' for partial-cord samples.[/yellow]"
+        )
+    else:
+        console.print(
+            f"Using longitudinal correspondence "
+            f"({len(correspondence.confirmed_anchors(CORD_LONGITUDINAL_AXIS))} confirmed anchors)"
+        )
+
+    transinit = resolve_cord_z_transinit(nslices, tv.shape[2], correspondence)
 
     tvtemp = ndimage.median_filter(tv, size=3)
     atlasuse = warp_volume_affine(

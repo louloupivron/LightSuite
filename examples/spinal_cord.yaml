@@ -10,7 +10,7 @@ sample:
   name: example_spinal_cord
   source:
     format: tiff_stack
-    path: /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/Ex_488_Em_488F_Ch1_stitched
+    path: /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP93M1/Ex_561_Em_561F_Ch2_stitched
     # auto: detect plane-per-file (Terastitcher) vs channel-per-file (default)
     # planeperfile: one 2D TIFF per Z slice (large datasets)
     # channelperfile: one multi-page TIFF per channel
@@ -18,9 +18,8 @@ sample:
     tiff_type: auto
     # skip_corrupt_slices: true  # optional: drop unreadable plane TIFFs
   scratch: /media/gbm/NVME2/lightsuite_scratch
-  save_path: /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/Ex_488_Em_488F_Ch1_stitched/lightsuite
+  save_path: /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP93M1/registered_561
   # Native microscope voxel size in µm (NOT the registration grid).
-  # Terastitcher exports are often ~1.8×1.8×4 µm; registration uses 20 µm.
   voxel_um: [1.8, 1.8, 1.8]
 
 atlas:

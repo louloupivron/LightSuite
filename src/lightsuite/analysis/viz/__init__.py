@@ -7,12 +7,13 @@ from lightsuite.analysis.viz.io import (
     load_region_plot_table,
     resolve_region_stats_from_config,
 )
-from lightsuite.analysis.viz.plots import plot_division_bars, plot_lr_scatter
+from lightsuite.analysis.viz.plots import plot_division_bars, plot_lr_scatter, plot_top_region_bars
 
 __all__ = [
     "load_region_plot_table",
     "plot_division_bars",
     "plot_group_division_bars",
     "plot_lr_scatter",
+    "plot_top_region_bars",
     "resolve_region_stats_from_config",
 ]

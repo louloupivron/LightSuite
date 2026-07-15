@@ -19,9 +19,10 @@ from lightsuite.preprocess.cord_checkpoint import (
     CordRegOptsCheckpoint,
     CordTransformParamsCheckpoint,
 )
-from lightsuite.registration.cord_affine import (
-    build_cord_z_transinit,
-    warp_cord_atlas_to_straightvol,
+from lightsuite.registration.cord_affine import warp_cord_atlas_to_straightvol
+from lightsuite.registration.cord_longitudinal import (
+    load_longitudinal_correspondence,
+    resolve_cord_z_transinit,
 )
 from lightsuite.registration.cord_paths import (
     cord_affine_transform_path,
@@ -59,10 +60,9 @@ def run_spinal_registration(config: SpinalCordPipelineConfig) -> Path:
     tv = tifffile.imread(checkpoint.tv_path).astype(np.float32)
     av = tifffile.imread(checkpoint.av_path).astype(np.uint16)
     transaff = np.asarray(checkpoint.affine_atlas_to_samp, dtype=float)
-    transinit = build_cord_z_transinit(
-        checkpoint.ikeeprange[1] - checkpoint.ikeeprange[0] + 1,
-        tv.shape[2],
-    )
+    nslices = checkpoint.ikeeprange[1] - checkpoint.ikeeprange[0] + 1
+    correspondence = load_longitudinal_correspondence(save_path)
+    transinit = resolve_cord_z_transinit(nslices, tv.shape[2], correspondence)
     elastix_affine_path = cord_affine_transform_path(config)
     cpwt = config.registration.control_point_weight
 
@@ -82,7 +82,7 @@ def run_spinal_registration(config: SpinalCordPipelineConfig) -> Path:
                     cptsatlas,
                     np.linalg.inv(transaff),
                 )
-                transaff = fit_affine_transform(atlas_ori, cptshistology)
+                transaff, _ = fit_affine_transform(atlas_ori, cptshistology)
                 cpaffine = transform_points(atlas_ori, transaff)
                 use_point_aff = True
 

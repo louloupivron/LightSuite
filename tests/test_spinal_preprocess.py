@@ -10,7 +10,7 @@ import yaml
 
 from lightsuite.config.loader import load_spinal_config
 from lightsuite.gui.straighten_cord import run_spinal_straighten
-from lightsuite.preprocess.cord import preprocess_spinal_cord_sample
+from lightsuite.preprocess.cord import detect_tofliprc, preprocess_spinal_cord_sample
 from lightsuite.preprocess.cord_checkpoint import CordRegOptsCheckpoint, SpinalAlignmentCheckpoint
 
 
@@ -67,3 +67,13 @@ def test_spinal_preprocess_and_straighten_headless(tmp_path: Path) -> None:
     assert checkpoint.regvolpaths
     assert "1" in checkpoint.regvolpaths
     assert Path(checkpoint.regvolpaths["1"]).is_file()
+
+
+def test_detect_tofliprc_when_back_cross_section_is_larger() -> None:
+    """Caudorostral samples have thicker cord at the high-Z end (tofliprc=True)."""
+    regvol = np.zeros((20, 20, 100), dtype=np.uint16)
+    regvol[5:15, 5:15, 30:] = 1000
+    regvol[7:13, 7:13, :30] = 1000
+    tv = np.zeros((10, 10, 200), dtype=np.float32)
+    assert detect_tofliprc(regvol, tv) is True
+    assert detect_tofliprc(np.flip(regvol, axis=2), tv) is False

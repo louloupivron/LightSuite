@@ -153,6 +153,15 @@ _PERENS_PLOT_DIM_TO_CUT_AXIS: dict[int, int] = {1: 2, 2: 1, 3: 3}
 _PERENS_BRAINGLOBE_PLOT_DIM_TO_CUT_AXIS: dict[int, int] = {1: 1, 2: 3, 3: 2}
 _PRINCETON_BRAINGLOBE_PLOT_DIM_TO_CUT_AXIS: dict[int, int] = {1: 1, 2: 3, 3: 2}
 
+# Spinal cord (Fiederling): MATLAB matchControlPointsSpine uses raw volumeIdtoImage slices
+# with imagesc YDir reverse only — no rot90 / flips in the canonical QC map.
+_CORD_CUT_TRANSFORMS: dict[int, SliceDisplayTransform] = {
+    1: SliceDisplayTransform(rot90_k=0, flip_ud=False, flip_lr=False),
+    2: SliceDisplayTransform(rot90_k=0, flip_ud=False, flip_lr=False),
+    3: SliceDisplayTransform(rot90_k=0, flip_ud=False, flip_lr=False),
+}
+_CORD_PLOT_DIM_TO_CUT_AXIS: dict[int, int] = {1: 1, 2: 2, 3: 3}
+
 
 @dataclass(frozen=True)
 class AtlasDisplayProfile:
@@ -200,6 +209,12 @@ _DISPLAY_PROFILES: dict[str, AtlasDisplayProfile] = {
         axis_names=("AP", "DV", "LR"),
         plot_dim_to_cut_axis=_PRINCETON_BRAINGLOBE_PLOT_DIM_TO_CUT_AXIS,
         cut_transforms=_PRINCETON_BRAINGLOBE_CUT_TRANSFORMS,
+    ),
+    "cord": AtlasDisplayProfile(
+        provider="cord",
+        axis_names=("Y", "X", "Z"),
+        plot_dim_to_cut_axis=_CORD_PLOT_DIM_TO_CUT_AXIS,
+        cut_transforms=_CORD_CUT_TRANSFORMS,
     ),
 }
 
