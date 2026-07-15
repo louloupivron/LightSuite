@@ -48,6 +48,23 @@ uv run lightsuite spinal view                 -c my_spinal.yaml
 | `channelperfile` | One multi-page TIFF per channel |
 | `multichannel_single` | Single Bioformats-style stack |
 
+**Multi-channel Terastitcher (like brain):** when each channel is its own folder of plane TIFFs, list them under `sample.source.channels` (order = channel index). `path` is optional and defaults to the first folder. Requires `tiff_type: planeperfile` or `auto`.
+
+```yaml
+sample:
+  source:
+    tiff_type: planeperfile
+    channels:
+      - /data/OP93M1/Ex_488_Em_488F_Ch1_stitched
+      - /data/OP93M1/Ex_561_Em_561F_Ch2_stitched
+  save_path: /data/OP93M1/registered
+
+registration:
+  channel_primary: 2   # e.g. structural / autofluorescence channel
+```
+
+All channel folders must share the same `(ny, nx, nz)` and matching slice ordering. Preprocess caches every channel; registration uses `channel_primary`; export warps all channels with the same transform.
+
 **Important:** `sample.voxel_um` is the **native microscope voxel size**, not the registration grid. Registration always uses `registration.resolution_um` (default 20 µm). For Terastitcher exports (~1.8×1.8×4 µm), set e.g. `voxel_um: [1.8, 1.8, 4]` so plane-per-file stacks are downsampled while loading instead of loaded at full resolution.
 
 During **preprocess**, all channels are cached as `cache/chan_N_sample_register_20um.tif` (paths recorded in `regopts.json` → `regvolpaths`). **Export** loads these cached volumes, upsamples registered output to the native Fiederling template grid (10×10×20 µm), and writes `annotation_registered.tiff` and `template_registered.tiff` alongside the channel TIFFs under `volume_registered/`. **View** opens Napari with the template, all exported channels, and warped annotation labels in a shared axis layout — do not manually load the raw atlas `Template.tif` or pre-registration cached TIFFs into the same viewer (different grid and orientation).

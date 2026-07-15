@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -115,7 +116,23 @@ def looks_like_plane_per_file(files: list[Path]) -> bool:
     return True
 
 
-def resolve_cord_tiff_layout(folder: Path, layout: CordTiffLayout) -> CordTiffLayout:
+def resolve_cord_tiff_layout(
+    folder: Path,
+    layout: CordTiffLayout,
+    *,
+    channel_folders: Sequence[Path] | None = None,
+) -> CordTiffLayout:
+    if channel_folders:
+        if layout not in (CordTiffLayout.AUTO, CordTiffLayout.PLANE_PER_FILE):
+            msg = "source.channels requires tiff_type planeperfile (or auto)"
+            raise ValueError(msg)
+        for root in channel_folders:
+            files = _sorted_tiff_files(Path(root))
+            if not files:
+                msg = f"No .tif/.tiff files found in channel folder {root}"
+                raise FileNotFoundError(msg)
+        return CordTiffLayout.PLANE_PER_FILE
+
     files = _sorted_tiff_files(folder)
     if not files:
         msg = f"No .tif/.tiff files found in {folder}"
@@ -191,14 +208,15 @@ def _assert_plane_stack_loadable(
         raise ValueError(msg)
 
 
-def load_plane_per_file_stack(
+def _load_one_plane_per_file_channel(
     folder: Path,
     *,
     sampleres_um: np.ndarray,
     registrationres_um: np.ndarray,
     skip_corrupt_slices: bool = False,
-) -> tuple[np.ndarray, tuple[int, int, int], list[SkippedSlice], CordTiffLayout]:
-    """Load Terastitcher-style slice series with optional streaming XY/Z downsampling."""
+    channel_label: str | None = None,
+) -> tuple[np.ndarray, tuple[int, int, int], list[SkippedSlice]]:
+    """Load one Terastitcher-style folder into a (Y, X, Z) uint16 volume."""
     files = _sorted_tiff_files(folder)
     if not skip_corrupt_slices:
         files, skipped = filter_spinal_cord_slices(files, skip_corrupt=False)
@@ -211,10 +229,11 @@ def load_plane_per_file_stack(
     resfac, target_size = cord_volume_downsample_spec(native_listed, sampleres_um, registrationres_um)
     _assert_plane_stack_loadable(native_listed, sampleres_um, registrationres_um)
 
-    target_ny, target_nx, target_nz = target_size
+    target_ny, target_nx, _target_nz = target_size
     scale_xy = float(resfac[0])
+    label = channel_label or folder.name
 
-    console.print(f"Using planeperfile loading ({len(files)} slice TIFFs)")
+    console.print(f"Using planeperfile loading for {label} ({len(files)} slice TIFFs)")
     if skipped:
         console.print(f"  filtered out {len(skipped)} corrupt slice(s) before loading")
         for row in skipped[:5]:
@@ -230,11 +249,11 @@ def load_plane_per_file_stack(
         )
 
     if target_size == native_listed:
-        vol = np.zeros((ny0, nx0, nz_listed, 1), dtype=np.uint16)
+        vol = np.zeros((ny0, nx0, nz_listed), dtype=np.uint16)
         for iz, path in enumerate(files, start=1):
-            vol[:, :, iz - 1, 0] = read_plane_tiff(path)
+            vol[:, :, iz - 1] = read_plane_tiff(path)
             _print_slice_progress(iz, nz_listed)
-        return vol, (ny0, nx0, nz_listed), skipped, CordTiffLayout.PLANE_PER_FILE
+        return vol, (ny0, nx0, nz_listed), skipped
 
     backvol = np.zeros((target_ny, target_nx, 0), dtype=np.uint16)
     for iz, path in enumerate(files, start=1):
@@ -247,23 +266,72 @@ def load_plane_per_file_stack(
         _print_slice_progress(iz, len(files))
 
     if np.isclose(resfac[2], 1.0):
-        finvol = backvol[:, :, :, np.newaxis]
+        finvol = backvol
     else:
         _, target_loaded = cord_volume_downsample_spec(
             (ny0, nx0, backvol.shape[2]),
             sampleres_um,
             registrationres_um,
         )
-        resampled = resize(
+        finvol = resize(
             backvol,
             target_loaded,
             order=1,
             preserve_range=True,
             anti_aliasing=True,
         ).astype(np.uint16)
-        finvol = resampled[:, :, :, np.newaxis]
 
-    return finvol, native_listed, skipped, CordTiffLayout.PLANE_PER_FILE
+    return finvol, native_listed, skipped
+
+
+def load_plane_per_file_stack(
+    folder: Path,
+    *,
+    sampleres_um: np.ndarray,
+    registrationres_um: np.ndarray,
+    skip_corrupt_slices: bool = False,
+    channel_folders: Sequence[Path] | None = None,
+) -> tuple[np.ndarray, tuple[int, int, int], list[SkippedSlice], CordTiffLayout]:
+    """Load Terastitcher-style slice series with optional streaming XY/Z downsampling.
+
+    When ``channel_folders`` is set (brain-style multi-channel planeperfile), each
+    folder is loaded and stacked along the channel axis.
+    """
+    roots = [Path(p) for p in channel_folders] if channel_folders else [folder]
+    channel_vols: list[np.ndarray] = []
+    native_orisize: tuple[int, int, int] | None = None
+    all_skipped: list[SkippedSlice] = []
+
+    for ich, root in enumerate(roots, start=1):
+        label = f"channel {ich}/{len(roots)} ({root.name})" if len(roots) > 1 else None
+        vol, native, skipped = _load_one_plane_per_file_channel(
+            root,
+            sampleres_um=sampleres_um,
+            registrationres_um=registrationres_um,
+            skip_corrupt_slices=skip_corrupt_slices,
+            channel_label=label,
+        )
+        if native_orisize is None:
+            native_orisize = native
+        elif native != native_orisize:
+            msg = (
+                f"Channel folders have mismatched native dimensions: {root} is "
+                f"{native[0]}x{native[1]}x{native[2]}, expected "
+                f"{native_orisize[0]}x{native_orisize[1]}x{native_orisize[2]}."
+            )
+            raise ValueError(msg)
+        if channel_vols and vol.shape != channel_vols[0].shape:
+            msg = (
+                f"Channel folders have mismatched loaded shapes: {root} is "
+                f"{vol.shape}, expected {channel_vols[0].shape}."
+            )
+            raise ValueError(msg)
+        channel_vols.append(vol)
+        all_skipped.extend(skipped)
+
+    assert native_orisize is not None
+    volume = np.stack(channel_vols, axis=-1)
+    return volume, native_orisize, all_skipped, CordTiffLayout.PLANE_PER_FILE
 
 
 def load_channel_per_file_stack(

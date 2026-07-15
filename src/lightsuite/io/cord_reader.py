@@ -47,10 +47,20 @@ class CordSampleVolume:
 def read_spinal_cord_sample(config: SpinalCordPipelineConfig) -> CordSampleVolume:
     """Load a spinal cord volume, downsampling to the registration grid when needed."""
     folder = config.sample.source.path
+    if folder is None:
+        msg = "sample.source.path is required"
+        raise ValueError(msg)
+    channel_folders = config.sample.source.channel_roots
     requested = config.sample.source.tiff_type
-    layout = resolve_cord_tiff_layout(folder, requested)
+    layout = resolve_cord_tiff_layout(
+        folder,
+        requested,
+        channel_folders=channel_folders,
+    )
     if requested == CordTiffLayout.AUTO and layout != CordTiffLayout.AUTO:
         console.print(f"Auto-detected TIFF layout: {layout.value}")
+    if channel_folders and len(channel_folders) > 1:
+        console.print(f"Multi-channel planeperfile: {len(channel_folders)} folders")
     sampleres = normalize_res_um(config.sample.voxel_um)
     regres = normalize_res_um([config.registration.resolution_um] * 3)
     skip_corrupt = config.sample.source.skip_corrupt_slices
@@ -62,6 +72,7 @@ def read_spinal_cord_sample(config: SpinalCordPipelineConfig) -> CordSampleVolum
             sampleres_um=sampleres,
             registrationres_um=regres,
             skip_corrupt_slices=skip_corrupt,
+            channel_folders=channel_folders,
         )
     elif layout == CordTiffLayout.MULTICHANNEL_SINGLE:
         files = _sorted_tiff_files(folder)

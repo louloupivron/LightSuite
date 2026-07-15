@@ -278,19 +278,27 @@ def _check_spinal_sample_resolution(cfg: SpinalCordPipelineConfig) -> CheckResul
     )
 
     folder = cfg.sample.source.path
+    if folder is None:
+        return CheckResult("Spinal sample resolution", False, "sample.source.path is unset", required=False)
+    channel_folders = cfg.sample.source.channel_roots
     try:
-        layout = resolve_cord_tiff_layout(folder, cfg.sample.source.tiff_type)
-    except FileNotFoundError as exc:
+        layout = resolve_cord_tiff_layout(
+            folder,
+            cfg.sample.source.tiff_type,
+            channel_folders=channel_folders,
+        )
+    except (FileNotFoundError, ValueError) as exc:
         return CheckResult("Spinal sample resolution", False, str(exc), required=False)
 
     sampleres = normalize_res_um(cfg.sample.voxel_um)
     regres = normalize_res_um([cfg.registration.resolution_um] * 3)
     resfac = sampleres / regres
     if not np.allclose(resfac, 1.0):
+        nchan_note = f", {len(channel_folders)} channels" if channel_folders and len(channel_folders) > 1 else ""
         return CheckResult(
             "Spinal sample resolution",
             True,
-            f"Native voxel_um {sampleres.tolist()} → registration {regres.tolist()}",
+            f"Native voxel_um {sampleres.tolist()} → registration {regres.tolist()}{nchan_note}",
             required=False,
         )
 
@@ -302,14 +310,18 @@ def _check_spinal_sample_resolution(cfg: SpinalCordPipelineConfig) -> CheckResul
             required=False,
         )
 
-    files = _sorted_tiff_files(folder)
+    probe = Path(channel_folders[0]) if channel_folders else folder
+    files = _sorted_tiff_files(probe)
     if not files:
-        return CheckResult("Spinal sample resolution", False, f"No TIFFs in {folder}", required=False)
+        return CheckResult("Spinal sample resolution", False, f"No TIFFs in {probe}", required=False)
     ny, nx = read_plane_tiff(files[0]).shape
     native = (ny, nx, len(files))
     native_gb = float(np.prod(native)) * 2.0 / 1e9
+    nchan = len(channel_folders) if channel_folders else 1
+    chan_note = f", {nchan} channel(s)" if nchan > 1 else ""
     detail = (
-        f"Plane-per-file stack ({native[0]}×{native[1]}×{native[2]} px, ~{native_gb:.1f} GB) "
+        f"Plane-per-file stack ({native[0]}×{native[1]}×{native[2]} px{chan_note}, "
+        f"~{native_gb * nchan:.1f} GB) "
         f"but sample.voxel_um equals registration.resolution_um — no downsampling on load. "
         "Set sample.voxel_um to your native microscope voxel size (e.g. [1.8, 1.8, 4])."
     )
