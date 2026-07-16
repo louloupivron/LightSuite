@@ -86,6 +86,7 @@ def sample_points_to_registration_voxels(
         ori_voxel_um=transform_params.ori_voxel_um,
         registres_um=registres_um,
     )
+    # Legacy Python registrations may have VD-padded the sample grid before elastix.
     pad = transform_params.warp_canvas_pad_before
     if pad is not None and any(int(p) for p in pad):
         reg_yxz = reg_yxz.copy()

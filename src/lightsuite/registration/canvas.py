@@ -1,4 +1,10 @@
-"""Expanded warp canvas for registration when the sample grid is flush with the brain."""
+"""Optional warp-canvas helpers (not used by MATLAB-parity brain registration).
+
+Brain registration follows ``multiobjRegistration.m``: atlas volumes are warped onto
+the sample grid via ``imwarp`` / :func:`~lightsuite.registration.warp.imwarp_volume`
+with ``OutputView = size(volume)``. These utilities remain for tests and a future
+explicit crop/pad stage.
+"""
 
 from __future__ import annotations
 
