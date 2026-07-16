@@ -1,0 +1,66 @@
+# Rat brain lightsheet config — Waxholm Space (Sprague Dawley) via BrainGlobe.
+# Install atlas backend: uv sync --extra atlas
+# Then validate and run:
+#   uv run lightsuite doctor -c examples/config/rat/Simone.yaml
+#   uv run lightsuite brain validate-config -c examples/config/rat/Simone.yaml
+
+sample:
+  name: Simone
+  source:
+    path: /media/gbm/NVME2/ALICe-pipelines-data/rat
+    tiff_type: channelperfile
+  scratch: /media/gbm/NVME2/lightsuite_scratch
+  save_path: /media/gbm/NVME2/ALICe-pipelines-data/rat/Simone/registered_waxholm
+  voxel_um: [8.23, 8.23, 5]
+
+atlas:
+  provider: rat
+  source: brainglobe
+  resolution_um: 39
+  # brainglobe_name: whs_sd_rat_39um  # inferred from provider + resolution_um
+  atlas_dir: null
+
+registration:
+  channel_primary: 1
+  resolution_um: 39
+  channel_secondary: null
+  cloud_threshold: 3
+  sample_cloud_subsample: 0.25
+  bspline_spatial_scale_mm: 0.64
+  augment_points: true
+  control_point_weight: 0.2
+  orientation: [-1, -3, -2]
+  bcpd_path: /home/gbm/ALICe-pipelines/LightSuite/softwares/bcpd-master/
+
+detection:
+  enabled: false
+  backend: classical
+  cell_diameter_um: 14
+  thresholds: [0.5, 0.4]
+  channel: null
+  debug: false
+
+compute:
+  use_gpu: false
+  workers: 8
+
+export:
+  save_registered_volume: true
+  write_cells_csv: true
+  registered_volume_format: tiff
+  write_pyramid: true
+
+# Optional: import native sample-space annotations after register (see docs/annotation_import.md)
+# import:
+#   write_csv: true
+#   annotations:
+#     - format: points_csv
+#       path: /path/to/cells.csv
+#       label: cells
+
+# Step 2 — count imported points per atlas region
+# analysis:
+#   write_tidy_csv: true
+#   count_points: true
+#   point_labels:
+#     - cells

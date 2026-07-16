@@ -356,7 +356,7 @@ def load_region_table(
             raise FileNotFoundError(msg)
         return load_allen_region_table(csv_path)
 
-    if atlas.brain_atlas in ("perens", "princeton") or atlas.atlas_source == "brainglobe":
+    if atlas.brain_atlas in ("perens", "princeton", "rat") or atlas.atlas_source == "brainglobe":
         if atlas.structures_csv_path is None:
             msg = "Atlas structures CSV not found (ARA2 or BrainGlobe structures.csv)."
             raise FileNotFoundError(msg)

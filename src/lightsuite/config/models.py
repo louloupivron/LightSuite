@@ -26,6 +26,7 @@ class BrainAtlasId(str, Enum):
     ALLEN = "allen"
     PERENS = "perens"
     PRINCETON = "princeton"
+    RAT = "rat"
 
 
 class AtlasSource(str, Enum):

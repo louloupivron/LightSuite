@@ -210,6 +210,13 @@ _DISPLAY_PROFILES: dict[str, AtlasDisplayProfile] = {
         plot_dim_to_cut_axis=_PRINCETON_BRAINGLOBE_PLOT_DIM_TO_CUT_AXIS,
         cut_transforms=_PRINCETON_BRAINGLOBE_CUT_TRANSFORMS,
     ),
+    # BrainGlobe ``whs_sd_rat_39um`` (ASR): same panel→axis map as Princeton/Allen BG packs.
+    "rat_brainglobe": AtlasDisplayProfile(
+        provider="rat_brainglobe",
+        axis_names=("AP", "DV", "LR"),
+        plot_dim_to_cut_axis=_PRINCETON_BRAINGLOBE_PLOT_DIM_TO_CUT_AXIS,
+        cut_transforms=_PRINCETON_BRAINGLOBE_CUT_TRANSFORMS,
+    ),
     "cord": AtlasDisplayProfile(
         provider="cord",
         axis_names=("Y", "X", "Z"),

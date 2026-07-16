@@ -24,11 +24,15 @@ from lightsuite.registration.orientation import (
     permvec_from_indices,
     validate_permvec,
 )
+from skimage.transform import resize
+
 from lightsuite.registration.volume import load_registration_volume, resize_atlas_volume
 
 console = Console()
 
 PANEL_GAP_X = 24
+# Napari holds multiple float32 copies of each layer; cap preview volumes to avoid OOM.
+ORIENTATION_PREVIEW_MAX_BYTES = 256 * 1024 * 1024
 
 
 @dataclass
@@ -36,6 +40,39 @@ class OrientationCheckData:
     sample_volume: np.ndarray
     atlas_volume: np.ndarray
     permvec: list[int]
+
+
+def _downsample_for_orientation_preview(
+    volume: np.ndarray,
+    *,
+    max_bytes: int = ORIENTATION_PREVIEW_MAX_BYTES,
+) -> np.ndarray:
+    """Shrink a volume for Napari when the full registration grid is too large."""
+    vol = np.asarray(volume, dtype=np.float32)
+    if vol.nbytes <= max_bytes:
+        return vol
+    scale = (max_bytes / vol.nbytes) ** (1.0 / 3.0)
+    new_shape = tuple(max(1, int(dim * scale)) for dim in vol.shape)
+    return resize(
+        vol,
+        new_shape,
+        order=1,
+        preserve_range=True,
+        anti_aliasing=True,
+    ).astype(np.float32)
+
+
+def _atlas_for_orientation_check(template: np.ndarray, *, downfac: float) -> np.ndarray:
+    """Atlas volume for the orientation GUI (preview only).
+
+  When the atlas is coarser than the registration grid (``downfac > 1``), upscaling
+  to registration voxels is required later in init-registration but allocates far too
+  much memory for Napari (e.g. Waxholm 39 µm on a 20 µm grid ≈ 8 GiB float32).
+  Native atlas voxels are sufficient to verify axis permutations.
+    """
+    if downfac > 1.0 or np.isclose(downfac, 1.0):
+        return template.astype(np.float32, copy=False)
+    return resize_atlas_volume(template.astype(np.float32), downfac, nearest=False)
 
 
 def _atlas_for_display(atlas: np.ndarray) -> np.ndarray:
@@ -58,12 +95,28 @@ def load_orientation_check_data(config: BrainPipelineConfig) -> OrientationCheck
         raise FileNotFoundError(msg)
 
     checkpoint = RegOptsCheckpoint.load(regopts_path)
-    sample = load_registration_volume(Path(checkpoint.regvolpath)).astype(np.float32)
+    sample_full = load_registration_volume(Path(checkpoint.regvolpath)).astype(np.float32)
 
     atlas = resolve_brain_atlas_from_config(config.atlas)
     template = load_atlas_volume(atlas.template_path).astype(np.float32)
     downfac = config.atlas.resolution_um / checkpoint.registres_um
-    atlas_reg = resize_atlas_volume(template, downfac, nearest=False)
+    atlas_for_check = _atlas_for_orientation_check(template, downfac=downfac)
+    sample = _downsample_for_orientation_preview(sample_full)
+    atlas_reg = _downsample_for_orientation_preview(atlas_for_check)
+
+    if sample.shape != sample_full.shape or atlas_reg.shape != atlas_for_check.shape:
+        console.print(
+            "[yellow]Orientation preview downsampled for Napari "
+            f"(sample {sample_full.shape}→{sample.shape}, "
+            f"atlas {atlas_for_check.shape}→{atlas_reg.shape}).[/yellow]"
+        )
+    if downfac > 1.0:
+        console.print(
+            "[dim]Atlas shown at native "
+            f"{template.shape} @ {config.atlas.resolution_um:g} µm "
+            f"(not upscaled ×{downfac:.2f} onto the {checkpoint.registres_um:g} µm grid "
+            "for this preview).[/dim]"
+        )
 
     orient_file = orientation_path(save_path)
     if config.registration.orientation is not None:

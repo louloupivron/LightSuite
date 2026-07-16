@@ -7,7 +7,12 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from lightsuite.gui.orientation_brain import _atlas_for_display
+from lightsuite.gui.orientation_brain import (
+    ORIENTATION_PREVIEW_MAX_BYTES,
+    _atlas_for_display,
+    _atlas_for_orientation_check,
+    _downsample_for_orientation_preview,
+)
 from lightsuite.registration.orientation import (
     DEFAULT_PERMVEC,
     permute_for_atlas,
@@ -33,6 +38,26 @@ def test_permute_for_atlas_flip() -> None:
     assert out.shape == (2, 3, 4)
     assert np.allclose(out[0, :, :], vol[1, :, :])
     assert np.allclose(out[1, :, :], vol[0, :, :])
+
+
+def test_atlas_for_orientation_check_skips_upscale_for_coarse_atlas() -> None:
+    template = np.ones((1024, 512, 512), dtype=np.float32)
+    out = _atlas_for_orientation_check(template, downfac=39 / 20)
+    assert out.shape == template.shape
+    assert out is template
+
+
+def test_atlas_for_orientation_check_downscales_fine_atlas() -> None:
+    template = np.ones((100, 100, 100), dtype=np.float32)
+    out = _atlas_for_orientation_check(template, downfac=0.5)
+    assert out.shape == (50, 50, 50)
+
+
+def test_downsample_for_orientation_preview_caps_memory() -> None:
+    vol = np.ones((500, 500, 500), dtype=np.float32)
+    out = _downsample_for_orientation_preview(vol, max_bytes=ORIENTATION_PREVIEW_MAX_BYTES)
+    assert out.nbytes <= ORIENTATION_PREVIEW_MAX_BYTES
+    assert out.shape[0] < vol.shape[0]
 
 
 def test_atlas_for_display_preserves_native_shape() -> None:

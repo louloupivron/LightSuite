@@ -215,6 +215,7 @@ def _load_one_plane_per_file_channel(
     registrationres_um: np.ndarray,
     skip_corrupt_slices: bool = False,
     channel_label: str | None = None,
+    max_slices: int | None = None,
 ) -> tuple[np.ndarray, tuple[int, int, int], list[SkippedSlice]]:
     """Load one Terastitcher-style folder into a (Y, X, Z) uint16 volume."""
     files = _sorted_tiff_files(folder)
@@ -222,6 +223,9 @@ def _load_one_plane_per_file_channel(
         files, skipped = filter_spinal_cord_slices(files, skip_corrupt=False)
     else:
         files, skipped = filter_spinal_cord_slices(files, skip_corrupt=True)
+
+    if max_slices is not None and max_slices > 0:
+        files = files[:max_slices]
 
     ny0, nx0 = read_plane_tiff(files[0]).shape
     nz_listed = len(files)

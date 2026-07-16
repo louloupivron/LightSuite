@@ -131,7 +131,7 @@ def resolve_brain_atlas(
     """Resolve template and annotation paths for a brain atlas."""
     atlas_id = brain_atlas.lower().strip()
     if atlas_id not in ATLAS_FILES and source == "files":
-        brainglobe_only = ("princeton",)
+        brainglobe_only = ("princeton", "rat")
         hint = ""
         if atlas_id in brainglobe_only:
             hint = f" Atlas '{atlas_id}' is BrainGlobe-only; set atlas.source: brainglobe."
@@ -208,11 +208,13 @@ def uses_ccf_id_parcellation(atlas: AtlasPaths) -> bool:
 def atlas_resolution_um_for_cache(atlas: AtlasPaths, fallback: float) -> float:
     """Best-effort atlas voxel size in µm for cached division-map filenames."""
     if atlas.brainglobe_name:
-        for token in ("10um", "15um", "20um", "25um", "50um"):
+        for token in ("10um", "15um", "20um", "25um", "39um", "50um"):
             if token in atlas.brainglobe_name:
                 return float(token.replace("um", ""))
     if atlas.brain_atlas == "allen":
         return 10.0
+    if atlas.brain_atlas == "rat":
+        return 39.0
     if atlas.brain_atlas in ("perens", "princeton"):
         return 20.0
     return fallback

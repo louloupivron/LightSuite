@@ -56,6 +56,38 @@ def _volume_layout_from_shape(shape: tuple[int, ...]) -> tuple[int, int, int, st
     return y_dim, x_dim, z_dim, "memmap_zyx"
 
 
+def _volume_layout_from_labeled_axes(
+    shape: tuple[int, ...],
+    axes: str,
+) -> tuple[int, int, int, str] | None:
+    """Map a tifffile series ``axes`` label (e.g. ``ZYX``) to LightSuite Y/X/Z layout."""
+    if len(shape) != 3 or len(axes) != 3:
+        return None
+    labels = axes.upper()
+    if set(labels) != {"X", "Y", "Z"}:
+        return None
+    sizes = {label: int(shape[index]) for index, label in enumerate(labels)}
+    ny, nx, nz = sizes["Y"], sizes["X"], sizes["Z"]
+    z_axis = labels.index("Z")
+    if z_axis == 0:
+        mode = "memmap_zyx"
+    elif z_axis == 1:
+        mode = "memmap_xzy"
+    elif z_axis == 2:
+        mode = "memmap_yxz"
+    else:
+        return None
+    return ny, nx, nz, mode
+
+
+def _volume_layout_from_series(shape: tuple[int, ...], axes: str | None) -> tuple[int, int, int, str]:
+    if axes:
+        labeled = _volume_layout_from_labeled_axes(shape, axes)
+        if labeled is not None:
+            return labeled
+    return _volume_layout_from_shape(shape)
+
+
 def _single_tiff_stack_info(path: Path) -> tuple[int, int, int, bool, str]:
     """Return ny, nx, nz, use_native_pages, stack_read_mode for one stack file."""
     with tifffile.TiffFile(path) as tif:
@@ -75,9 +107,10 @@ def _single_tiff_stack_info(path: Path) -> tuple[int, int, int, bool, str]:
             return ny, nx, nz, False, mode
 
         if tif.series:
-            shape = tif.series[0].shape
+            series = tif.series[0]
+            shape = series.shape
             if len(shape) == 3:
-                ny, nx, nz, mode = _volume_layout_from_shape(shape)
+                ny, nx, nz, mode = _volume_layout_from_series(shape, series.axes)
                 return ny, nx, nz, False, mode
 
         ny, nx = int(arr0.shape[0]), int(arr0.shape[1])

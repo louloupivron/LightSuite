@@ -165,7 +165,20 @@ def preprocess_spinal_cord_sample(config: SpinalCordPipelineConfig) -> CordPrepr
     rstd = _robust_std(cordarea)
     ihigh = cordarea > (med + 3 * rstd)
     console.print(f"{100 * ihigh.mean():.2f}% of slices exceed expected cord area")
-    ikeep = _brain_trim_range(ihigh, tofliprc, regvol.shape[2])
+    nz = regvol.shape[2]
+    ikeep = _brain_trim_range(ihigh, tofliprc, nz)
+    n_kept = ikeep[1] - ikeep[0] + 1
+    n_removed = nz - n_kept
+    if n_removed <= 0:
+        console.print(
+            f"Longitudinal Z-trim: keeping all {nz} slices (range {ikeep[0]}–{ikeep[1]})"
+        )
+    else:
+        trim_end = "high-Z (caudal) end" if tofliprc else "low-Z (rostral) end"
+        console.print(
+            f"Longitudinal Z-trim: removed [bold]{n_removed}[/bold] slice(s) from the "
+            f"{trim_end}; keeping {n_kept}/{nz} slices (range {ikeep[0]}–{ikeep[1]})"
+        )
 
     y0 = max(int(voxset[:, 1].min()) - 1, 0)
     y1 = min(int(voxset[:, 1].max()) + 1, regvol.shape[0] - 1)
