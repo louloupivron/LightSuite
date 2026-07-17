@@ -30,9 +30,11 @@ def compute_preprocess_fingerprint(
     voxel_um: list[float],
     registres_um: float,
     tiff_type: str,
+    sample_content_crop: str = "off",
+    sample_content_box: list[int] | None = None,
 ) -> dict[str, Any]:
     """Inputs that determine registration TIFF downsampling; YAML-only changes do not affect this."""
-    return {
+    fp = {
         "ny": int(ny),
         "nx": int(nx),
         "nz": int(nz),
@@ -40,7 +42,11 @@ def compute_preprocess_fingerprint(
         "voxel_um": [float(v) for v in voxel_um],
         "registres_um": float(registres_um),
         "tiff_type": str(tiff_type),
+        "sample_content_crop": str(sample_content_crop),
     }
+    if sample_content_box is not None:
+        fp["sample_content_box"] = [int(v) for v in sample_content_box]
+    return fp
 
 
 @dataclass
@@ -71,6 +77,11 @@ class RegOptsCheckpoint:
     auto_points_mode: str | None = None
     auto_points_correspondence_path: str | None = None
     preprocess_fingerprint: dict[str, Any] | None = None
+    content_crop_start: list[int] | None = None
+    content_crop_size: list[int] | None = None
+    native_crop_offset_yxz: list[float] | None = None
+    atlas_crop_start_native: list[int] | None = None
+    atlas_native_shape: list[int] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

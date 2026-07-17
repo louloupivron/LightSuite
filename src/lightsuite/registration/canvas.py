@@ -1,16 +1,13 @@
-"""Optional warp-canvas helpers (not used by MATLAB-parity brain registration).
-
-Brain registration follows ``multiobjRegistration.m``: atlas volumes are warped onto
-the sample grid via ``imwarp`` / :func:`~lightsuite.registration.warp.imwarp_volume`
-with ``OutputView = size(volume)``. These utilities remain for tests and a future
-explicit crop/pad stage.
-"""
+"""Registration working-canvas helpers (Option A — working grid vs canonical atlas)."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
 import numpy as np
+
+from lightsuite.config.models import RegistrationCanvasMode
+from lightsuite.registration.content_bbox import ContentBox, crop_volume_yxz
 
 
 @dataclass(frozen=True)
@@ -112,3 +109,132 @@ def offset_volume_indices(
     out[:, 1] += pad_before[1]
     out[:, 2] += pad_before[2]
     return out
+
+
+@dataclass(frozen=True)
+class RegistrationCanvas:
+    """Working grid for elastix relative to the (possibly cropped) sample volume."""
+
+    mode: str
+    pad_before: tuple[int, int, int]
+    pad_after: tuple[int, int, int]
+    sample_crop_start: tuple[int, int, int]
+    working_shape: tuple[int, int, int]
+
+    @property
+    def is_identity(self) -> bool:
+        return (
+            self.pad_before == (0, 0, 0)
+            and self.pad_after == (0, 0, 0)
+            and self.sample_crop_start == (0, 0, 0)
+        )
+
+    def to_checkpoint_dict(self) -> dict:
+        return {
+            "mode": self.mode,
+            "pad_before": list(self.pad_before),
+            "pad_after": list(self.pad_after),
+            "sample_crop_start": list(self.sample_crop_start),
+            "working_shape": list(self.working_shape),
+        }
+
+    @classmethod
+    def from_checkpoint_dict(cls, raw: dict | None) -> RegistrationCanvas | None:
+        if raw is None:
+            return None
+        return cls(
+            mode=str(raw.get("mode", "off")),
+            pad_before=tuple(int(v) for v in raw["pad_before"]),
+            pad_after=tuple(int(v) for v in raw["pad_after"]),
+            sample_crop_start=tuple(int(v) for v in raw.get("sample_crop_start", [0, 0, 0])),
+            working_shape=tuple(int(v) for v in raw["working_shape"]),
+        )
+
+
+def _intersection_box(a_shape: tuple[int, int, int], b_shape: tuple[int, int, int]) -> ContentBox:
+    sy = min(a_shape[0], b_shape[0])
+    sx = min(a_shape[1], b_shape[1])
+    sz = min(a_shape[2], b_shape[2])
+    return ContentBox(0, sy - 1, 0, sx - 1, 0, sz - 1)
+
+
+def compute_registration_canvas(
+    sample_shape: tuple[int, int, int],
+    atlas_shape: tuple[int, int, int],
+    mode: RegistrationCanvasMode,
+) -> RegistrationCanvas:
+    """Choose elastix working grid given cropped sample and trimmed atlas shapes."""
+    if mode == RegistrationCanvasMode.OFF:
+        return RegistrationCanvas(
+            mode=mode.value,
+            pad_before=(0, 0, 0),
+            pad_after=(0, 0, 0),
+            sample_crop_start=(0, 0, 0),
+            working_shape=sample_shape,
+        )
+
+    if mode == RegistrationCanvasMode.PAD:
+        pad_before = [0, 0, 0]
+        pad_after = [0, 0, 0]
+        for axis, (s, a) in enumerate(zip(sample_shape, atlas_shape, strict=True)):
+            if a > s:
+                total = a - s
+                pad_before[axis] = total // 2
+                pad_after[axis] = total - pad_before[axis]
+        working = tuple(
+            s + b + a for s, b, a in zip(sample_shape, pad_before, pad_after, strict=True)
+        )
+        return RegistrationCanvas(
+            mode=mode.value,
+            pad_before=tuple(pad_before),
+            pad_after=tuple(pad_after),
+            sample_crop_start=(0, 0, 0),
+            working_shape=working,
+        )
+
+    if mode == RegistrationCanvasMode.CROP:
+        box = _intersection_box(sample_shape, atlas_shape)
+        return RegistrationCanvas(
+            mode=mode.value,
+            pad_before=(0, 0, 0),
+            pad_after=(0, 0, 0),
+            sample_crop_start=box.start_yxz,
+            working_shape=box.size_yxz,
+        )
+
+    if mode == RegistrationCanvasMode.UNION:
+        working = tuple(max(s, a) for s, a in zip(sample_shape, atlas_shape, strict=True))
+        pad_before = [0, 0, 0]
+        pad_after = [0, 0, 0]
+        for axis, (s, w) in enumerate(zip(sample_shape, working, strict=True)):
+            if w > s:
+                total = w - s
+                pad_before[axis] = total // 2
+                pad_after[axis] = total - pad_before[axis]
+        return RegistrationCanvas(
+            mode=mode.value,
+            pad_before=tuple(pad_before),
+            pad_after=tuple(pad_after),
+            sample_crop_start=(0, 0, 0),
+            working_shape=working,
+        )
+
+    msg = f"Unknown canvas mode {mode!r}"
+    raise ValueError(msg)
+
+
+def apply_canvas_sample_crop(volume: np.ndarray, canvas: RegistrationCanvas) -> np.ndarray:
+    if canvas.sample_crop_start == (0, 0, 0) and volume.shape == canvas.working_shape:
+        return volume
+    if canvas.sample_crop_start != (0, 0, 0):
+        box = ContentBox(
+            canvas.sample_crop_start[0],
+            canvas.sample_crop_start[0] + canvas.working_shape[0] - 1,
+            canvas.sample_crop_start[1],
+            canvas.sample_crop_start[1] + canvas.working_shape[1] - 1,
+            canvas.sample_crop_start[2],
+            canvas.sample_crop_start[2] + canvas.working_shape[2] - 1,
+        )
+        volume = crop_volume_yxz(volume, box)
+    padding = WarpCanvasPadding(canvas.pad_before, canvas.pad_after)
+    return pad_volume_for_warp_canvas(volume, padding)

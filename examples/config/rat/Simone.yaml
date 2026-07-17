@@ -17,9 +17,12 @@ atlas:
   provider: rat
   source: brainglobe
   resolution_um: 39
+  content_trim: manual
+  content_margin_vox: 8
   # brainglobe_name: whs_sd_rat_39um  # inferred from provider + resolution_um
   atlas_dir: null
 
+  content_box: [100, 813, 50, 370, 50, 480]
 registration:
   channel_primary: 1
   resolution_um: 39

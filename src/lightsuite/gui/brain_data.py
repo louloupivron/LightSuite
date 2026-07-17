@@ -9,7 +9,7 @@ import numpy as np
 from skimage.exposure import equalize_adapthist
 
 from lightsuite.atlas.io import load_atlas_volume
-from lightsuite.atlas.registry import atlas_display_provider_from_config, resolve_brain_atlas_from_config
+from lightsuite.atlas.registry import atlas_display_provider_from_config, resolve_brain_atlas_content
 from lightsuite.config.models import BrainPipelineConfig
 from lightsuite.gui.affine import transform_points_inverse
 from lightsuite.gui.chooselist import (
@@ -106,7 +106,10 @@ def _load_brain_registration_volumes(
     regvol = load_registration_volume(Path(checkpoint.regvolpath))
     regvol = permute_brain_volume(regvol.astype(np.float32), permvec)
 
-    atlas = resolve_brain_atlas_from_config(config.atlas)
+    atlas = resolve_brain_atlas_content(
+        config.atlas,
+        scratch=config.sample.scratch,
+    ).paths
     tv = load_atlas_volume(atlas.template_path).astype(np.float32)
     av = load_atlas_volume(atlas.annotation_path).astype(np.float32)
     tvreg = resize_atlas_volume(tv, downfac, nearest=False)

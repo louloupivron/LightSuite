@@ -6,10 +6,11 @@ import time
 from pathlib import Path
 
 from lightsuite.atlas.io import load_atlas_volume
+from lightsuite.atlas.trim import save_atlas_manifest_copy
 import numpy as np
 from rich.console import Console
 
-from lightsuite.atlas.registry import atlas_display_provider_from_config, resolve_brain_atlas_from_config
+from lightsuite.atlas.registry import atlas_display_provider_from_config, resolve_brain_atlas_content
 from lightsuite.config.models import BrainPipelineConfig
 from lightsuite.preprocess.checkpoint import RegOptsCheckpoint
 from lightsuite.registration.align import (
@@ -50,7 +51,11 @@ def initialize_brain_registration(config: BrainPipelineConfig) -> RegOptsCheckpo
     backvol = load_registration_volume(Path(checkpoint.regvolpath))
     downfac = config.atlas.resolution_um / checkpoint.registres_um
 
-    atlas = resolve_brain_atlas_from_config(config.atlas)
+    atlas_content = resolve_brain_atlas_content(
+        config.atlas,
+        scratch=config.sample.scratch,
+    )
+    atlas = atlas_content.paths
     tv = load_atlas_volume(atlas.template_path)
     av = load_atlas_volume(atlas.annotation_path)
     tvreg = resize_atlas_volume(tv.astype(np.float32), downfac, nearest=False)
@@ -190,5 +195,10 @@ def initialize_brain_registration(config: BrainPipelineConfig) -> RegOptsCheckpo
     checkpoint.auto_points_mode = None
     checkpoint.auto_points_correspondence_path = None
     checkpoint.brain_atlas = config.atlas.provider.value
+    if atlas_content.is_trimmed:
+        checkpoint.atlas_crop_start_native = list(atlas_content.crop_start_yxz)
+        checkpoint.atlas_native_shape = list(atlas_content.native_shape)
+        if atlas_content.manifest is not None:
+            save_atlas_manifest_copy(atlas_content.manifest, save_path)
     checkpoint.save(regopts_path)
     return checkpoint

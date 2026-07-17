@@ -1,0 +1,26 @@
+# Manifest-driven multiresolution registration — Julie Buron mesoSPIM example
+#
+# 1. Run the conversion notebook to publish a pair manifest:
+#      examples/notebooks/convert_mesospim_to_multires.ipynb
+# 2. Then:
+#      uv sync --extra registration
+#      uv run lightsuite multires validate-config -c examples/config/multiresolution/JulieBuron_multires_manifest.yaml
+#      uv run lightsuite multires check-geometry      -c examples/config/multiresolution/JulieBuron_multires_manifest.yaml
+#      uv run lightsuite multires register            -c examples/config/multiresolution/JulieBuron_multires_manifest.yaml
+
+sample:
+  name: JulieBuron
+  save_path: /media/gbm/NVME2/ALICe-pipelines-data/JulieBuron/multiresolution_results
+  scratch: /media/gbm/NVME2/lightsuite_scratch
+
+multires:
+  pair_manifest: /media/gbm/NVME2/ALICe-pipelines-data/JulieBuron/multiresolution_results/converted/baseline_561_TC_pair.json
+
+  geometry_mode: metadata
+
+  registration:
+    overlap_margin_um: 0.0
+    registration_bin: 1
+    experiment_name: baseline_561_TC
+    elastix_stages: [translation, rigid]
+    write_full_overview_canvas: true

@@ -17,10 +17,12 @@ app = typer.Typer(
 brain_app = typer.Typer(help="Brain lightsheet pipeline stages.")
 spinal_app = typer.Typer(help="Spinal cord lightsheet pipeline stages.")
 mesospim_app = typer.Typer(help="mesoSPIM overview ↔ ROI registration.")
+multires_app = typer.Typer(help="Manifest-driven overview ↔ ROI multiresolution registration.")
 analysis_app = typer.Typer(help="Post-registration analysis (region stats, cell counts).")
 app.add_typer(brain_app, name="brain")
 app.add_typer(spinal_app, name="spinal")
 app.add_typer(mesospim_app, name="mesospim")
+app.add_typer(multires_app, name="multires")
 app.add_typer(analysis_app, name="analysis")
 
 
@@ -71,6 +73,59 @@ def validate_config(
 
     cfg = load_config(config)
     typer.echo(f"Config valid for sample '{cfg.sample.name}' ({cfg.sample.source.format.value}).")
+
+
+@brain_app.command("probe-content-box")
+def brain_probe_content_box(
+    config: str = typer.Option(..., "--config", "-c", help="Pipeline YAML config."),
+    target: str = typer.Option(
+        "atlas",
+        "--target",
+        "-t",
+        help="Crop target: atlas (native BrainGlobe grid) or sample (registration TIFF).",
+    ),
+    headless: bool = typer.Option(
+        False,
+        "--headless",
+        help="Auto-detect and print the crop box without opening Napari.",
+    ),
+    write_config: bool = typer.Option(
+        False,
+        "--write-config",
+        help="Write manual crop mode and box into the YAML (works with --headless).",
+    ),
+) -> None:
+    """Probe or interactively pick atlas/sample content crop boxes."""
+    from lightsuite.config.loader import load_config, save_content_box_to_config
+    from lightsuite.gui.content_box_brain import run_content_box_picker
+    from lightsuite.registration.content_probe import (
+        ContentProbeTarget,
+        format_content_box_report,
+        load_content_probe_data,
+    )
+
+    config_path = Path(config).expanduser().resolve()
+    cfg = load_config(config_path)
+    probe_target = ContentProbeTarget(target)
+    if headless:
+        data = load_content_probe_data(cfg, target=probe_target)
+        typer.echo(format_content_box_report(data))
+        if write_config:
+            path = save_content_box_to_config(
+                config_path,
+                target=probe_target.value,
+                box=data.box.to_manual_list(),
+            )
+            typer.echo(f"Updated config: {path}")
+        return
+
+    box = run_content_box_picker(
+        cfg,
+        config_path,
+        target=probe_target,
+        write_config=write_config,
+    )
+    typer.echo(f"Selected box: {box.to_manual_list()}")
 
 
 @brain_app.command("check-orientation")
@@ -697,6 +752,44 @@ def mesospim_inspect(
     paths =     run_mesospim_inspect(cfg, headless=headless)
     typer.echo(f"Overview: {paths.overview_path}")
     typer.echo(f"Registered canvas: {paths.registered_full_overview_path}")
+
+
+@multires_app.command("validate-config")
+def multires_validate_config(
+    config: str = typer.Option(..., "--config", "-c", help="Multires pipeline YAML config."),
+) -> None:
+    """Load and validate a manifest-driven multiresolution YAML config."""
+    from lightsuite.config.loader import load_multires_config
+    from lightsuite.multires.manifest import load_pair_manifest
+
+    cfg = load_multires_config(config)
+    manifest = load_pair_manifest(cfg.multires.pair_manifest)
+    typer.echo(
+        f"Config valid: {cfg.sample.name} / {manifest.pair_label} "
+        f"({Path(manifest.overview.volume_path).name} → {Path(manifest.roi.volume_path).name})"
+    )
+
+
+@multires_app.command("check-geometry")
+def multires_check_geometry(
+    config: str = typer.Option(..., "--config", "-c", help="Multires pipeline YAML config."),
+) -> None:
+    """Validate FOV overlap and write geometry QA artifacts."""
+    from lightsuite.config.loader import load_multires_config
+    from lightsuite.multires.runner import check_multires_geometry
+
+    check_multires_geometry(load_multires_config(config))
+
+
+@multires_app.command("register")
+def multires_register(
+    config: str = typer.Option(..., "--config", "-c", help="Multires pipeline YAML config."),
+) -> None:
+    """Register ROI stack to overview using a pair manifest and elastix."""
+    from lightsuite.config.loader import load_multires_config
+    from lightsuite.multires.runner import run_multires_registration
+
+    run_multires_registration(load_multires_config(config))
 
 
 @spinal_app.command("validate-config")

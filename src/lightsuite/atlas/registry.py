@@ -187,6 +187,18 @@ def resolve_brain_atlas_from_config(cfg: AtlasConfig) -> AtlasPaths:
     )
 
 
+def resolve_brain_atlas_content(
+    cfg: AtlasConfig,
+    *,
+    scratch: Path,
+) -> "ResolvedAtlasContent":
+    """Resolve atlas paths and optional trimmed working copies (Option A)."""
+    from lightsuite.atlas.trim import ResolvedAtlasContent, trim_atlas_to_cache
+
+    base = resolve_brain_atlas_from_config(cfg)
+    return trim_atlas_to_cache(base, cfg, scratch=scratch)
+
+
 def resolve_brain_atlas_with_config(brain_atlas: str, cfg: AtlasConfig) -> AtlasPaths:
     """Resolve atlas using a stored ``brain_atlas`` id and current atlas config."""
     return resolve_brain_atlas(

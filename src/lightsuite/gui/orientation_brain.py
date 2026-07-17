@@ -9,7 +9,7 @@ import numpy as np
 from rich.console import Console
 
 from lightsuite.atlas.io import load_atlas_volume
-from lightsuite.atlas.registry import resolve_brain_atlas_from_config
+from lightsuite.atlas.registry import resolve_brain_atlas_content
 from lightsuite.config.loader import save_orientation_to_config
 from lightsuite.config.models import BrainPipelineConfig
 from lightsuite.gui.brain_data import _normalize_display
@@ -97,7 +97,10 @@ def load_orientation_check_data(config: BrainPipelineConfig) -> OrientationCheck
     checkpoint = RegOptsCheckpoint.load(regopts_path)
     sample_full = load_registration_volume(Path(checkpoint.regvolpath)).astype(np.float32)
 
-    atlas = resolve_brain_atlas_from_config(config.atlas)
+    atlas = resolve_brain_atlas_content(
+        config.atlas,
+        scratch=config.sample.scratch,
+    ).paths
     template = load_atlas_volume(atlas.template_path).astype(np.float32)
     downfac = config.atlas.resolution_um / checkpoint.registres_um
     atlas_for_check = _atlas_for_orientation_check(template, downfac=downfac)

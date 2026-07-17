@@ -10,7 +10,7 @@ sample:
     path: /media/gbm/NVME2/ALICe-pipelines-data/Inssia/49H/All_Channels/Ch1
     tiff_type: planeperfile
   scratch: /media/gbm/NVME2/lightsuite_scratch
-  save_path: /media/gbm/NVME2/ALICe-pipelines-data/Inssia/49H/registration_Ch1
+  save_path: /media/gbm/NVME2/ALICe-pipelines-data/Inssia/49H/registration_Ch1_cropped
   voxel_um: [1.8, 1.8, 4]
 
 atlas:

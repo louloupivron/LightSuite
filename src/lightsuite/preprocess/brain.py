@@ -20,6 +20,7 @@ from lightsuite.preprocess.checkpoint import (
     RegOptsCheckpoint,
     compute_preprocess_fingerprint,
 )
+from lightsuite.preprocess.sample_crop import apply_sample_content_crop
 from lightsuite.preprocess.slice_ops import (
     SliceLoadJob,
     SliceProcessResult,
@@ -346,6 +347,8 @@ def preprocess_lightsheet_volume(
         voxel_um=[vx, vy, vz],
         registres_um=registres,
         tiff_type=config.sample.source.tiff_type.value,
+        sample_content_crop=config.registration.sample_content_crop.value,
+        sample_content_box=config.registration.sample_content_box,
     )
     existing = _load_existing_checkpoint(config.sample.save_path)
     fingerprint_unchanged = _fingerprint_matches(
@@ -438,6 +441,25 @@ def preprocess_lightsheet_volume(
             max_in_memory_bytes=max_ram_bytes,
         )
 
+    crop_meta: tuple[list[int], list[int], list[float]] | None = None
+    needs_crop = config.registration.sample_content_crop.value != "off"
+    if needs_crop and (
+        not skip_downsample
+        or existing is None
+        or existing.content_crop_start is None
+    ):
+        crop_meta = apply_sample_content_crop(
+            config,
+            regvolpaths,
+            primary_channel=config.registration.channel_primary,
+        )
+    elif existing is not None and existing.content_crop_start is not None:
+        crop_meta = (
+            existing.content_crop_start,
+            existing.content_crop_size or [],
+            existing.native_crop_offset_yxz or [],
+        )
+
     reader.close()
 
     checkpoint = _build_preprocess_checkpoint(
@@ -453,6 +475,11 @@ def preprocess_lightsheet_volume(
     )
     if existing is not None and (skip_downsample or fingerprint_unchanged):
         checkpoint = checkpoint.merge_downstream_from(existing)
+    if crop_meta is not None:
+        crop_start, crop_size, native_off = crop_meta
+        checkpoint.content_crop_start = crop_start
+        checkpoint.content_crop_size = crop_size
+        checkpoint.native_crop_offset_yxz = native_off
     regopts_path = config.sample.save_path / "regopts.json"
     checkpoint.save(regopts_path)
     console.print(f"Wrote checkpoint [bold]{regopts_path}[/bold]")

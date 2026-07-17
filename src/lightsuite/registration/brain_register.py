@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import shutil
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 
 import numpy as np
@@ -13,7 +13,7 @@ from rich.console import Console
 from scipy.spatial.distance import cdist
 
 from lightsuite.atlas.io import load_atlas_volume
-from lightsuite.atlas.registry import atlas_display_provider_from_config, resolve_brain_atlas_from_config
+from lightsuite.atlas.registry import atlas_display_provider_from_config, resolve_brain_atlas_content
 from lightsuite.config.models import BrainPipelineConfig
 from lightsuite.gui.affine import (
     affine_point_errors,
@@ -57,10 +57,38 @@ from lightsuite.registration.volume import (
     permute_brain_volume,
     resize_atlas_volume,
 )
+from lightsuite.registration.canvas import (
+    RegistrationCanvas,
+    WarpCanvasPadding,
+    apply_canvas_sample_crop,
+    compute_registration_canvas,
+    crop_from_warp_canvas,
+    offset_volume_indices,
+    pad_volume_for_warp_canvas,
+)
+from lightsuite.registration.coordinates import affine_with_source_offset
+
 from lightsuite.registration.warp import warp_volume_affine
 
 console = Console()
 REGISTRATION_DIAGNOSTICS_FILENAME = "registration_diagnostics.json"
+
+
+def _atlas_control_points_native(
+    points_xyz: np.ndarray,
+    *,
+    downfac: float,
+    crop_start_native: list[int] | None,
+) -> np.ndarray:
+    """Map GUI / triage atlas points to full native atlas (Y, X, Z) indices."""
+    pts = np.asarray(points_xyz, dtype=float)
+    if pts.size == 0:
+        return pts.reshape(0, 3)
+    yxz = cloud_xyz_to_volume_indices(pts)
+    native = yxz / downfac
+    if crop_start_native and any(int(v) for v in crop_start_native):
+        native = native + np.asarray(crop_start_native, dtype=float)
+    return native
 
 
 @dataclass
@@ -110,6 +138,8 @@ class TransformParamsCheckpoint:
     channel_secondary: int | None = None
     # Legacy: set only by older Python registrations that VD-padded the sample grid.
     warp_canvas_pad_before: list[int] | None = None
+    atlas_crop_start_native: list[int] | None = None
+    registration_canvas: dict | None = None
 
     def save(self, path: Path) -> None:
         path = path.expanduser()
@@ -119,7 +149,9 @@ class TransformParamsCheckpoint:
     @classmethod
     def load(cls, path: Path) -> TransformParamsCheckpoint:
         raw = json.loads(path.expanduser().read_text(encoding="utf-8"))
-        return cls(**raw)
+        known = {field.name for field in fields(cls)}
+        filtered = {key: value for key, value in raw.items() if key in known}
+        return cls(**filtered)
 
 
 def validate_registration_inputs(
@@ -245,13 +277,19 @@ def _prepare_control_points(
     autocpsample = cloud_xyz_to_volume_indices(
         np.asarray(checkpoint.autocpsample or [], dtype=float)
     )
-    autocpatlas = cloud_xyz_to_volume_indices(
-        np.asarray(checkpoint.autocpatlas or [], dtype=float)
-    ) / downfac
+    autocpatlas = _atlas_control_points_native(
+        np.asarray(checkpoint.autocpatlas or [], dtype=float),
+        downfac=downfac,
+        crop_start_native=checkpoint.atlas_crop_start_native,
+    )
 
     cptsatlas, cptshistology = session.paired_points_xyz()
     cptshistology = transform_points_inverse(cptshistology, original_trans_vol)
-    cptsatlas = cptsatlas / downfac
+    cptsatlas = _atlas_control_points_native(
+        cptsatlas,
+        downfac=downfac,
+        crop_start_native=checkpoint.atlas_crop_start_native,
+    )
 
     if cptsatlas.shape[0] > 0 and autocpatlas.shape[0] > 0:
         distances = cdist(cptsatlas, autocpatlas)
@@ -339,9 +377,23 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
     )
     affine_diag.save(save_path / "affine_fit_stats.json")
 
-    atlas = resolve_brain_atlas_from_config(config.atlas)
+    atlas_content = resolve_brain_atlas_content(
+        config.atlas,
+        scratch=config.sample.scratch,
+    )
+    atlas = atlas_content.paths
     tv = load_atlas_volume(atlas.template_path).astype(np.float32)
     av = load_atlas_volume(atlas.annotation_path).astype(np.float32)
+    atlas_native_shape = atlas_content.native_shape
+    atlas_crop_start = atlas_content.crop_start_yxz
+    if atlas_content.is_trimmed and atlas_content.manifest is not None:
+        from lightsuite.atlas.trim import save_atlas_manifest_copy
+
+        save_atlas_manifest_copy(atlas_content.manifest, save_path)
+        console.print(
+            f"[dim]Atlas content trim:[/dim] working {tv.shape} · "
+            f"native {atlas_native_shape} · offset {atlas_crop_start}"
+        )
 
     downfac = float(
         checkpoint.downfac_reg or (config.atlas.resolution_um / checkpoint.registres_um)
@@ -421,35 +473,64 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
             f" ({corr_landmark_stats.skip_reason}).[/dim]"
         )
 
-    # Match multiobjRegistration.m: affine is fit in full-atlas index space (points / downfac_reg),
-    # imwarp warps full-resolution atlas onto the sample grid (OutputView = size(volume)), and
-    # elastix uses fixed=sample / moving=tvaffine with no extra canvas padding.
-    sample_shape = tuple(volume.shape)
+    # Match multiobjRegistration.m: warp trimmed atlas onto the sample working grid.
+    reg_canvas = compute_registration_canvas(
+        tuple(volume.shape),
+        tuple(tv.shape),
+        config.registration.canvas_mode,
+    )
+    if not reg_canvas.is_identity:
+        console.print(
+            f"[dim]Registration canvas ({reg_canvas.mode}):[/dim] "
+            f"{volume.shape} → {reg_canvas.working_shape}"
+        )
+
+    volume_work = apply_canvas_sample_crop(volume, reg_canvas)
+    volume_secondary_work = (
+        apply_canvas_sample_crop(volume_secondary, reg_canvas)
+        if volume_secondary is not None
+        else None
+    )
+    warp_pad = WarpCanvasPadding(reg_canvas.pad_before, reg_canvas.pad_after)
+    volume_padded = pad_volume_for_warp_canvas(volume_work, warp_pad)
+    volume_secondary_padded = (
+        pad_volume_for_warp_canvas(volume_secondary_work, warp_pad)
+        if volume_secondary_work is not None
+        else None
+    )
+    working_shape = warp_pad.padded_shape(volume_work.shape)
+
+    tform_warp = affine_with_source_offset(tform_aff, atlas_crop_start)
     t0 = time.perf_counter()
-    tvaffine = warp_volume_affine(tv, tform_aff, sample_shape, order=1)
-    avaffine = warp_volume_affine(av, tform_aff, sample_shape, order=0)
+    tvaffine = warp_volume_affine(tv, tform_warp, working_shape, order=1)
+    avaffine = warp_volume_affine(av, tform_warp, working_shape, order=0)
     affine_warp_elapsed = time.perf_counter() - t0
 
-    hi = float(np.quantile(volume, 0.999))
-    voltoshow = np.clip(volume / max(hi, 1e-6) * 255.0, 0, 255).astype(np.uint8)
+    hi = float(np.quantile(volume_work, 0.999))
+    voltoshow = np.clip(volume_work / max(hi, 1e-6) * 255.0, 0, 255).astype(np.uint8)
+    voltoshow_padded = pad_volume_for_warp_canvas(voltoshow, warp_pad)
     save_registration_stage_previews(
         save_path,
         config.sample.name,
-        voltoshow,
+        voltoshow_padded,
         avaffine,
         "affine_registration",
         atlas_provider=atlas_display_provider_from_config(config.atlas),
     )
 
     elastix_temp = save_path / "elastix_temp"
+    cptshistology_work = cptshistology
+    if reg_canvas.sample_crop_start != (0, 0, 0):
+        cptshistology_work = cptshistology_work - np.asarray(reg_canvas.sample_crop_start, float)
+    cptshistology_padded = offset_volume_indices(cptshistology_work, warp_pad.pad_before)
     moving_pts_mm = volume_indices_to_elastix_physical(cpaffine, spacing_mm)
-    fixed_pts_mm = volume_indices_to_elastix_physical(cptshistology, spacing_mm)
+    fixed_pts_mm = volume_indices_to_elastix_physical(cptshistology_padded, spacing_mm)
 
     t0 = time.perf_counter()
     bspline_result = run_bspline_registration(
-        fixed_volume=volume,
+        fixed_volume=volume_padded,
         moving_volume=tvaffine,
-        fixed_secondary=volume_secondary,
+        fixed_secondary=volume_secondary_padded,
         moving_points_mm=moving_pts_mm,
         fixed_points_mm=fixed_pts_mm,
         output_dir=elastix_temp,
@@ -465,7 +546,7 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
     bspline_elapsed = time.perf_counter() - t0
 
     t0 = time.perf_counter()
-    avreg = run_transformix(
+    avreg_padded = run_transformix(
         moving_volume=np.rint(avaffine).astype(np.int32),
         transform_path=bspline_result.transform_path,
         output_dir=save_path / "transformix_annotation_temp",
@@ -473,6 +554,7 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
         nearest=True,
     )
     transformix_elapsed = time.perf_counter() - t0
+    avreg = crop_from_warp_canvas(avreg_padded, warp_pad, volume_work.shape)
     annotation_label_voxels = int(np.sum(np.rint(avreg) > 1))
     final_landmark_mm = read_elastix_landmark_metric_mm(bspline_result.output_dir)
     final_landmark_vox = (
@@ -484,8 +566,8 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
     save_registration_stage_previews(
         save_path,
         config.sample.name,
-        voltoshow,
-        avreg,
+        voltoshow_padded,
+        avreg_padded,
         "bspline_registration",
         atlas_provider=atlas_display_provider_from_config(config.atlas),
     )
@@ -509,7 +591,7 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
     )
     diagnostics = RegistrationDiagnostics(
         sample_shape=regvolsize,
-        atlas_shape=list(tv.shape),
+        atlas_shape=list(atlas_native_shape),
         orientation=list(perm),
         registration_resolution_um=float(checkpoint.registres_um),
         n_manual_pairs=affine_diag.n_manual,
@@ -545,7 +627,7 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
     transform_params = TransformParamsCheckpoint(
         atlas_resolution_um=config.atlas.resolution_um,
         regvolsize=regvolsize,
-        atlassize=list(tv.shape),
+        atlassize=list(atlas_native_shape),
         brain_atlas=config.atlas.provider.value,
         ori_voxel_um=checkpoint.voxel_um,
         ori_size=[checkpoint.ny, checkpoint.nx, checkpoint.nz],
@@ -563,7 +645,9 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
         if use_dual
         else None,
         channel_secondary=checkpoint.channel_secondary,
-        warp_canvas_pad_before=None,
+        warp_canvas_pad_before=list(warp_pad.pad_before) if not warp_pad.is_zero else None,
+        atlas_crop_start_native=list(atlas_crop_start) if any(atlas_crop_start) else None,
+        registration_canvas=reg_canvas.to_checkpoint_dict() if not reg_canvas.is_identity else None,
     )
     out_json = save_path / "transform_params.json"
     transform_params.save(out_json)

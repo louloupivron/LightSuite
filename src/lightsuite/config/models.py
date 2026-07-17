@@ -34,6 +34,25 @@ class AtlasSource(str, Enum):
     BRAINGLOBE = "brainglobe"
 
 
+class ContentTrimMode(str, Enum):
+    OFF = "off"
+    AUTO = "auto"
+    MANUAL = "manual"
+
+
+class SampleContentCropMode(str, Enum):
+    OFF = "off"
+    AUTO = "auto"
+    MANUAL = "manual"
+
+
+class RegistrationCanvasMode(str, Enum):
+    OFF = "off"
+    PAD = "pad"
+    CROP = "crop"
+    UNION = "union"
+
+
 class SampleSourceConfig(BaseModel):
     format: SourceFormat = SourceFormat.AUTO
     path: Path | None = None
@@ -119,6 +138,19 @@ class AtlasConfig(BaseModel):
             "Inferred from provider and resolution_um when omitted."
         ),
     )
+    content_trim: ContentTrimMode = Field(
+        default=ContentTrimMode.OFF,
+        description="Trim atlas black padding for registration (export stays native atlas).",
+    )
+    content_margin_vox: int = Field(
+        default=8,
+        ge=0,
+        description="Margin added around auto-detected atlas foreground bbox.",
+    )
+    content_box: Annotated[list[int], Field(min_length=6, max_length=6)] | None = Field(
+        default=None,
+        description="Manual atlas crop [y0, y1, x0, x1, z0, z1] inclusive when content_trim=manual.",
+    )
 
     @field_validator("atlas_dir")
     @classmethod
@@ -188,6 +220,30 @@ class RegistrationConfig(BaseModel):
         default=96,
         ge=4,
         description="Maximum total B-spline landmark pairs after merging correspondence anchors.",
+    )
+    sample_content_crop: SampleContentCropMode = Field(
+        default=SampleContentCropMode.OFF,
+        description="Crop registration TIFFs to sample foreground after preprocess.",
+    )
+    sample_content_margin_vox: int = Field(
+        default=8,
+        ge=0,
+        description="Margin around auto-detected sample foreground crop.",
+    )
+    sample_content_box: Annotated[list[int], Field(min_length=6, max_length=6)] | None = Field(
+        default=None,
+        description="Manual sample crop [y0, y1, x0, x1, z0, z1] when sample_content_crop=manual.",
+    )
+    sample_content_trim_z: bool = Field(
+        default=True,
+        description="Remove sparse high-Z slices during auto sample crop (cord-style trim).",
+    )
+    canvas_mode: RegistrationCanvasMode = Field(
+        default=RegistrationCanvasMode.OFF,
+        description=(
+            "Reconcile sample/atlas working grids before elastix: off=MATLAB parity "
+            "(atlas warped to sample shape), pad/crop/union adjust the working canvas."
+        ),
     )
 
 

@@ -1,10 +1,12 @@
 # mesoSPIM 1× overview ↔ 3.2× ROI — Julie Buron sample
-#   uv sync --extra registration
-#   uv run lightsuite mesospim validate-config -c examples/JulieBuron_multires.yaml
-#   uv run lightsuite mesospim check-geometry      -c examples/JulieBuron_multires.yaml
-#   uv run lightsuite mesospim register            -c examples/JulieBuron_multires.yaml
-#   uv sync --extra gui
-#   uv run lightsuite mesospim inspect             -c examples/JulieBuron_multires.yaml
+#
+# Legacy direct-mesoSPIM path (reads TIFF + meta in-pipeline):
+#   uv run lightsuite mesospim validate-config -c examples/config/multiresolution/JulieBuron_multires.yaml
+#
+# Recommended manifest-driven path (run convert_mesospim_to_multires.ipynb first):
+#   uv run lightsuite multires validate-config -c examples/config/multiresolution/JulieBuron_multires_manifest.yaml
+#   uv run lightsuite multires check-geometry      -c examples/config/multiresolution/JulieBuron_multires_manifest.yaml
+#   uv run lightsuite multires register            -c examples/config/multiresolution/JulieBuron_multires_manifest.yaml
 
 sample:
   name: JulieBuron

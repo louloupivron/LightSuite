@@ -9,6 +9,8 @@ from scipy.interpolate import interpn
 
 from lightsuite.gui.affine import transform_points
 from lightsuite.registration.brain_register import TransformParamsCheckpoint
+from lightsuite.registration.canvas import RegistrationCanvas, offset_volume_indices
+from lightsuite.registration.coordinates import registration_indices_uncropped_to_cropped
 from lightsuite.registration.elastix.runner import run_transformix_deformation_field
 from lightsuite.registration.points import volume_indices_to_cloud_xyz
 
@@ -68,6 +70,7 @@ def sample_points_to_registration_voxels(
     transform_params: TransformParamsCheckpoint,
     *,
     registres_um: float,
+    content_crop_start: list[int] | None = None,
 ) -> np.ndarray:
     """Map native sample ``x,y,z`` (1-based) to permuted registration ``y,x,z`` (0-based).
 
@@ -86,18 +89,27 @@ def sample_points_to_registration_voxels(
         ori_voxel_um=transform_params.ori_voxel_um,
         registres_um=registres_um,
     )
-    # Legacy Python registrations may have VD-padded the sample grid before elastix.
-    pad = transform_params.warp_canvas_pad_before
-    if pad is not None and any(int(p) for p in pad):
-        reg_yxz = reg_yxz.copy()
-        reg_yxz[:, 0] += float(pad[0])
-        reg_yxz[:, 1] += float(pad[1])
-        reg_yxz[:, 2] += float(pad[2])
-    return permute_registration_indices_yxz(
+    crop = content_crop_start
+    if crop is not None and any(int(v) for v in crop):
+        reg_yxz = registration_indices_uncropped_to_cropped(reg_yxz, crop)
+    reg_yxz = permute_registration_indices_yxz(
         reg_yxz,
         unperm_shape,
         transform_params.permute_sample_to_atlas,
     )
+    canvas = RegistrationCanvas.from_checkpoint_dict(transform_params.registration_canvas)
+    if canvas is not None and canvas.sample_crop_start != (0, 0, 0):
+        reg_yxz = registration_indices_uncropped_to_cropped(reg_yxz, canvas.sample_crop_start)
+    pad_before: tuple[int, int, int] | None = None
+    if canvas is not None and not canvas.is_identity:
+        pad_before = canvas.pad_before
+    elif transform_params.warp_canvas_pad_before is not None and any(
+        int(p) for p in transform_params.warp_canvas_pad_before
+    ):
+        pad_before = tuple(int(v) for v in transform_params.warp_canvas_pad_before)
+    if pad_before is not None:
+        reg_yxz = offset_volume_indices(reg_yxz, pad_before)
+    return reg_yxz
 
 
 def _displacement_field_registration_voxels(
