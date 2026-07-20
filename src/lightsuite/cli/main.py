@@ -929,6 +929,146 @@ def spinal_export(
     typer.echo(f"Registered volumes in {result.output_dir} ({len(result.channel_paths)} channels)")
 
 
+@spinal_app.command("import-annotations")
+def spinal_import_annotations(
+    config: str = typer.Option(..., "--config", "-c", help="Spinal cord pipeline YAML config."),
+    write_csv: bool = typer.Option(
+        None,
+        "--write-csv/--no-write-csv",
+        help="Write atlas coordinate CSVs for point imports.",
+    ),
+) -> None:
+    """Register native sample-space annotations into Fiederling atlas space."""
+    from lightsuite.config.loader import load_spinal_config
+    from lightsuite.import_.cord_import import run_cord_import_annotations
+
+    cfg = load_spinal_config(config)
+    results = run_cord_import_annotations(cfg, write_csv=write_csv)
+    for item in results:
+        typer.echo(f"{item.label}: {item.kind} — {item.n_atlas} atlas features")
+
+
+@spinal_app.command("convert-imaris-spots")
+def spinal_convert_imaris_spots(
+    source: str = typer.Option(..., "--source", "-s", help="Imaris Spot_*_Detailed.csv export."),
+    output_dir: str = typer.Option(..., "--output-dir", "-o", help="Directory for points.csv files."),
+    voxel_um: str = typer.Option(
+        ...,
+        "--voxel-um",
+        help=(
+            "Size of one LightSuite native voxel in the same units as Imaris Position columns, "
+            "as comma-separated x,y,z. Use the microscope voxel size when Position is true µm; "
+            "use 1,1,1 when the .ims was calibrated at 1 µm/voxel or Position values are indices."
+        ),
+    ),
+    label_prefix: str = typer.Option("imaris", help="Filename prefix for converted CSVs."),
+    shape_yxz: str | None = typer.Option(
+        None,
+        "--shape-yxz",
+        help="Optional native grid Y,X,Z (e.g. from sample_reference.json) to warn on unit mismatch.",
+    ),
+) -> None:
+    """Convert Imaris multi-component spot CSV to LightSuite points.csv files."""
+    from pathlib import Path
+
+    from lightsuite.import_.imaris import (
+        convert_imaris_spots_by_component,
+        list_imaris_component_names,
+        warn_if_positions_look_like_voxel_indices,
+    )
+
+    parts = [float(v.strip()) for v in voxel_um.split(",")]
+    if len(parts) != 3:
+        msg = "--voxel-um must have exactly three values: x,y,z"
+        raise typer.BadParameter(msg)
+
+    source_path = Path(source).expanduser()
+    if not source_path.is_file():
+        msg = f"Source CSV not found: {source_path}"
+        raise typer.BadParameter(msg)
+
+    shape: tuple[int, int, int] | None = None
+    if shape_yxz is not None:
+        shape_parts = [int(v.strip()) for v in shape_yxz.split(",")]
+        if len(shape_parts) != 3:
+            msg = "--shape-yxz must have exactly three integers: Y,X,Z"
+            raise typer.BadParameter(msg)
+        shape = (shape_parts[0], shape_parts[1], shape_parts[2])
+
+    warning = warn_if_positions_look_like_voxel_indices(
+        source_path, voxel_um=parts, shape_yxz=shape
+    )
+    if warning:
+        typer.echo(f"WARNING: {warning}", err=True)
+
+    components = list_imaris_component_names(source_path)
+    if not components:
+        msg = f"No component labels found in {source_path}"
+        raise typer.BadParameter(msg)
+
+    written = convert_imaris_spots_by_component(
+        source_path,
+        Path(output_dir),
+        voxel_um=parts,
+        label_prefix=label_prefix,
+    )
+    for component, path in written.items():
+        typer.echo(f"{component}: {path}")
+    typer.echo(f"Wrote {len(written)} component CSV(s) to {output_dir}")
+
+
+@spinal_app.command("region-stats")
+def spinal_region_stats(
+    config: str = typer.Option(..., "--config", "-c", help="Spinal cord pipeline YAML config."),
+    count_points: bool = typer.Option(
+        None,
+        "--count-points/--no-count-points",
+        help="Bin imported atlas-space points into cell counts (default: analysis.count_points).",
+    ),
+) -> None:
+    """Assemble region_stats.csv with per-region, per-segment cell counts."""
+    from lightsuite.analysis.cord_runner import run_cord_region_stats
+    from lightsuite.config.loader import load_spinal_config
+
+    cfg = load_spinal_config(config)
+    result = run_cord_region_stats(cfg, count_points=count_points)
+    if result.combined_path is not None:
+        typer.echo(f"Region stats: {result.combined_path} ({result.n_rows} rows)")
+    else:
+        typer.echo("No region stats produced (run import-annotations first).")
+
+
+@spinal_app.command("inspect-imports")
+def spinal_inspect_imports(
+    config: str = typer.Option(..., "--config", "-c", help="Spinal cord pipeline YAML config."),
+    headless: bool = typer.Option(
+        False,
+        "--headless",
+        help="Validate inspect inputs without opening Napari.",
+    ),
+    recompute_annotation: bool = typer.Option(
+        False,
+        "--recompute-annotation",
+        help="Rebuild annotation_registered.tiff from transform_params.json.",
+    ),
+) -> None:
+    """Napari QC: registered channels, atlas, and imported points in atlas space."""
+    from lightsuite.config.loader import load_spinal_config
+    from lightsuite.gui.inspect_cord_imports import run_cord_inspect_imports
+
+    cfg = load_spinal_config(config)
+    paths = run_cord_inspect_imports(
+        cfg,
+        headless=headless,
+        recompute_annotation=recompute_annotation,
+    )
+    typer.echo(f"volume_registered: {paths.volume_registered_dir}")
+    if paths.registered_channels:
+        typer.echo(f"  channels: {sorted(paths.registered_channels)}")
+    if paths.point_npz_paths:
+        typer.echo(f"  point layers: {list(paths.point_npz_paths)}")
+
+
 @spinal_app.command("view")
 def spinal_view(
     config: str = typer.Option(..., "--config", "-c", help="Spinal cord pipeline YAML config."),

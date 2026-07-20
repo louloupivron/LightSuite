@@ -28,8 +28,64 @@ uv run lightsuite spinal init-registration    -c my_spinal.yaml
 uv run lightsuite spinal match-points         -c my_spinal.yaml
 uv run lightsuite spinal register             -c my_spinal.yaml
 uv run lightsuite spinal export               -c my_spinal.yaml
+uv run lightsuite spinal import-annotations   -c my_spinal.yaml
+uv run lightsuite spinal region-stats         -c my_spinal.yaml
+uv run lightsuite spinal inspect-imports      -c my_spinal.yaml
 uv run lightsuite spinal view                 -c my_spinal.yaml
 ```
+
+Convert Imaris spot exports before import:
+
+```bash
+uv run lightsuite spinal convert-imaris-spots \
+  -s /path/to/Spot_OnePageMultiComponent_Detailed.csv \
+  -o /path/to/converted \
+  --voxel-um 1.8,1.8,1.8 \
+  --shape-yxz 8793,2004,1931
+```
+
+`--voxel-um` is the size of one LightSuite native voxel **in the same units as the
+Imaris Position columns**. If the `.ims` was calibrated at 1 µm/voxel (or Position
+values are already voxel indices despite a `[µm]` header), use `--voxel-um 1,1,1`.
+Pass `--shape-yxz` from `sample_reference.json` to get a warning when the units look wrong.
+
+### Cell counts from imported spots
+
+After `import-annotations`, bin atlas-space points into Fiederling regions and
+rostrocaudal segments (`Segments.csv`):
+
+```bash
+uv run lightsuite spinal region-stats -c my_spinal.yaml
+```
+
+Configure which import labels to count (optional):
+
+```yaml
+analysis:
+  count_points: true
+  point_labels:
+    - imaris_TAyellow
+    - imaris_MG_cyan
+```
+
+Outputs under `volume_registered/`:
+
+- `region_stats.csv` — combined long-form table (`cell_count`, `cell_density` per region × segment)
+- `{label}_region_counts.csv` — per-import-label table
+
+Each row includes `segment` (e.g. `C5`, `L3`), `parcellation_index`, region name/acronym,
+and `hemisphere` = `whole` (cord has no left/right split).
+
+### Inspect imports (Napari QC)
+
+After `import-annotations`, open a Napari viewer with registered channels, atlas
+annotation, and imported point layers overlaid:
+
+```bash
+uv run lightsuite spinal inspect-imports -c my_spinal.yaml
+```
+
+Use `--headless` to validate inputs without opening the GUI.
 
 ### Key differences from brain
 
@@ -87,6 +143,10 @@ Under `<sample.save_path>/`:
 | `longitudinal_correspondence.json` | align-longitudinal |
 | `corresponding_points.json` | match-points |
 | `transform_params.json` | register |
+| `sample_reference.json` | preprocess |
+| `{label}_atlas_coords.npz` | import-annotations |
+| `region_stats.csv` | region-stats |
+| `{label}_region_counts.csv` | region-stats |
 | `cache/` | preprocess + init-registration intermediates (registration-grid TIFFs, straightened volume, resampled atlas) |
 | `transforms/` | elastix affine + inverted B-spline parameter files |
 | `qc/` | registration overlay PNGs |

@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from lightsuite.registration.cord_affine import (
+    apply_elastix_affine_volume_indices,
     build_cord_z_transinit,
     warp_cord_atlas_to_straightvol,
     write_inverse_elastix_affine,
@@ -70,6 +71,31 @@ def test_write_inverse_elastix_affine_inverts_matrix_and_translation(tmp_path: P
     assert np.allclose(t_inv, -np.linalg.inv(a_mat) @ t_vec)
     # grid metadata is preserved so transformix resamples onto the same physical extent
     assert "(Size 161 126 1052)" in out.read_text()
+
+
+def test_apply_elastix_affine_forward_and_inverse_files_differ(tmp_path: Path) -> None:
+    """``apply_elastix_affine_volume_indices`` inverts the file; forward vs inverse paths differ."""
+    a_mat = np.eye(3)
+    t_vec = np.array([1.0, -2.0, 3.0])
+    params = " ".join(f"{v:.16g}" for v in np.concatenate([a_mat.reshape(-1), t_vec]))
+    forward = tmp_path / "fwd.txt"
+    forward.write_text(
+        '(Transform "AffineTransform")\n'
+        "(NumberOfParameters 12)\n"
+        f"(TransformParameters {params})\n"
+        "(CenterOfRotationPoint 0 0 0)\n"
+        "(Size 161 126 1052)\n",
+        encoding="utf-8",
+    )
+    inverse = write_inverse_elastix_affine(forward, tmp_path / "inv.txt")
+    spacing = 0.02
+    pts = np.array([[40.0, 55.0, 300.0]])
+    via_forward = apply_elastix_affine_volume_indices(pts, forward, spacing)
+    via_inverse_file = apply_elastix_affine_volume_indices(pts, inverse, spacing)
+    assert not np.allclose(via_forward, via_inverse_file)
+    # Volume export uses transformix on the inverse file; the analytical helper on the
+    # forward file is the matching sample→atlas direction for that step alone.
+    assert not np.allclose(via_inverse_file, pts)
 
 
 def test_parse_elastix_affine_has_proper_homogeneous_row() -> None:

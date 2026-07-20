@@ -18,7 +18,10 @@ from lightsuite.registration.elastix.mhd import (
     write_mhd,
 )
 from lightsuite.registration.elastix.params import build_bspline_params, write_parameter_file
-from lightsuite.registration.elastix.points import write_landmark_file
+from lightsuite.registration.elastix.points import (
+    volume_indices_to_elastix_physical,
+    write_landmark_file,
+)
 
 
 @dataclass
@@ -389,6 +392,76 @@ def _read_mhd_vector_field(mhd_path: Path) -> np.ndarray:
     # MetaIO vector image: components vary fastest, then X, Y, Z (ITK x,y,z DimSize).
     vol = flat.reshape((nz, ny, nx, nc), order="C")
     return np.transpose(vol, (1, 2, 0, 3)).astype(np.float32, copy=False)
+
+
+def run_transformix_points(
+    *,
+    points_yxz: np.ndarray,
+    transform_path: Path,
+    output_dir: Path,
+    spacing_mm: float,
+) -> np.ndarray:
+    """Transform 0-based (Y, X, Z) points with ``transformix -def`` (physical mm I/O).
+
+    Elastix transforms map fixed→moving for volume resampling. Applying the same
+    parameter file to points with ``-def`` maps feature coordinates in the moving
+    image to the fixed domain — the inverse relationship of volume resampling.
+    """
+    if shutil.which("transformix") is None:
+        msg = "transformix not found on PATH"
+        raise RuntimeError(msg)
+
+    pts = np.asarray(points_yxz, dtype=float)
+    if pts.size == 0:
+        return pts.reshape(0, 3)
+    if pts.ndim != 2 or pts.shape[1] != 3:
+        msg = f"points_yxz must be Nx3, got {pts.shape}"
+        raise ValueError(msg)
+
+    output_dir = Path(output_dir).expanduser()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    for pattern in ("inputPoints.txt", "outputpoints.txt", "transformix.log"):
+        path = output_dir / pattern
+        if path.is_file():
+            path.unlink()
+
+    input_path = output_dir / "inputPoints.txt"
+    phys = volume_indices_to_elastix_physical(pts, spacing_mm, zero_based=True)
+    write_landmark_file(input_path, phys)
+    cmd = [
+        "transformix",
+        "-def",
+        str(input_path),
+        "-out",
+        str(output_dir),
+        "-tp",
+        str(Path(transform_path).expanduser()),
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    (output_dir / "transformix.stdout.txt").write_text(proc.stdout or "", encoding="utf-8")
+    (output_dir / "transformix.stderr.txt").write_text(proc.stderr or "", encoding="utf-8")
+    if proc.returncode != 0:
+        msg = f"transformix -def points failed (exit {proc.returncode}):\n{proc.stdout}\n{proc.stderr}"
+        raise RuntimeError(msg)
+
+    out_path = output_dir / "outputpoints.txt"
+    if not out_path.is_file():
+        msg = f"transformix did not write {out_path}"
+        raise FileNotFoundError(msg)
+
+    sp = float(spacing_mm)
+    mapped: list[list[float]] = []
+    for line in out_path.read_text(encoding="utf-8").splitlines():
+        match = re.search(r"OutputPoint\s*=\s*\[([^\]]+)\]", line)
+        if match is None:
+            continue
+        x_mm, y_mm, z_mm = (float(v) for v in match.group(1).split())
+        # ITK physical (x,y,z) mm → volume indices (Y,X,Z)
+        mapped.append([y_mm / sp, x_mm / sp, z_mm / sp])
+    if len(mapped) != pts.shape[0]:
+        msg = f"Expected {pts.shape[0]} transformed points, got {len(mapped)} in {out_path}"
+        raise RuntimeError(msg)
+    return np.asarray(mapped, dtype=float)
 
 
 def run_transformix(

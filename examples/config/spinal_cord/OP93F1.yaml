@@ -15,15 +15,15 @@ sample:
     # Multi-channel Terastitcher (one folder per channel) — same as brain:
     tiff_type: planeperfile
     channels:
-      - /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP93M1/Ex_488_Em_488F_Ch1_stitched
-      - /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP93M1/Ex_561_Em_561F_Ch2_stitched
+      - /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP93F1/All_Channels/Ch0
+      - /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP93F1/All_Channels/Ch1
     # auto: detect plane-per-file (Terastitcher) vs channel-per-file (default for single path)
     # planeperfile: one 2D TIFF per Z slice (large datasets)
     # channelperfile: one multi-page TIFF per channel
     # multichannel_single: single stack with interleaved channels (Bioformats layout)
     # skip_corrupt_slices: true  # optional: drop unreadable plane TIFFs
   scratch: /media/gbm/NVME2/lightsuite_scratch
-  save_path: /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP93M1/registered
+  save_path: /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP93F1/registered
   # Native microscope voxel size in µm (NOT the registration grid).
   voxel_um: [1.8, 1.8, 1.8]
 
@@ -42,20 +42,25 @@ registration:
 compute:
   workers: 4
 
-# Optional: import native sample-space annotations after register (see docs/annotation_import.md)
-# import:
-#   write_csv: true
-#   annotations:
-#     - format: points_csv
-#       path: /path/to/imaris_TAyellow_points.csv
-#       label: imaris_TAyellow
-#     - format: points_csv
-#       path: /path/to/imaris_MG_cyan_points.csv
-#       label: imaris_MG_cyan
+# Imaris spots: Position columns are labeled µm but this .ims was effectively
+# calibrated at 1 µm/voxel (values match native voxel indices). Convert with:
+#   uv run lightsuite spinal convert-imaris-spots \
+#     -s /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP93F1/Spot_OnePageMultiComponent_Detailed.csv \
+#     -o /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP93F1/converted \
+#     --voxel-um 1,1,1 \
+#     --shape-yxz 8793,2004,1931
+import:
+  write_csv: true
+  annotations:
+    - format: points_csv
+      path: /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP93F1/converted/imaris_TAyellow_points.csv
+      label: imaris_TAyellow
+    - format: points_csv
+      path: /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP93F1/converted/imaris_MG_cyan_points.csv
+      label: imaris_MG_cyan
 
-# Step 2 — count imported points per Fiederling region and segment
-# analysis:
-#   count_points: true
-#   point_labels:
-#     - imaris_TAyellow
-#     - imaris_MG_cyan
+analysis:
+  count_points: true
+  point_labels:
+    - imaris_TAyellow
+    - imaris_MG_cyan

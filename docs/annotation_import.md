@@ -21,6 +21,11 @@ flowchart LR
 4. **`lightsuite brain register`** — produces `transform_params.json`.
 5. **`lightsuite brain import-annotations`** — warps annotations into atlas space.
 
+The **spinal cord** pipeline uses the same native `points.csv` / `mask.tif` contract. After
+`lightsuite spinal register`, run `lightsuite spinal import-annotations`. Cord preprocess
+writes `sample_reference.json`; convert Imaris spot CSVs with
+`lightsuite spinal convert-imaris-spots` (see [Spinal cord usage](usage_spinal_cord.md)).
+
 ---
 
 ## Native sample-space reference
@@ -107,6 +112,7 @@ Run:
 
 ```bash
 uv run lightsuite brain import-annotations -c my_mouse.yaml
+uv run lightsuite spinal import-annotations -c my_spinal.yaml
 ```
 
 ---
@@ -120,6 +126,9 @@ Written to `<save_path>/volume_registered/`:
 | Points | `{label}_atlas_coords.npz`, optional `{label}_atlas_coords.csv` |
 | Mask | `{label}_registered_atlas.tif` |
 | Summary | `import_annotations_summary.json` |
+
+For spinal cord samples, run `lightsuite spinal region-stats` to bin imported points
+into Fiederling regions and rostrocaudal segments (`region_stats.csv`).
 
 NPZ arrays:
 
@@ -137,7 +146,7 @@ Each site maintains a small converter script. Common translations:
 | **0-based indices** | Add 1 to each coordinate |
 | **`[z, y, x]` order** | Reorder to `[x, y, z]` |
 | **Arivis Blob Finder CSV** | Use COM columns as `x,y,z`; add 1 if 0-based |
-| **Imaris Statistics CSV** | `Position X/Y/Z` in µm → `int(pos / voxel_um) + 1` per axis; see `examples/notebooks/convert_imaris_to_lightsuite.ipynb` |
+| **Imaris Spot_OnePageMultiComponent_Detailed.csv** | Filter by `Component Name`; use `lightsuite spinal convert-imaris-spots`. Set `--voxel-um` to match Position units (microscope µm, or `1,1,1` if the `.ims` is 1 µm/voxel / index-valued) |
 | **Imaris mask TIFF series** | One label slice per Z (`*_Z####.tif`, 0-based in filename); binarize `(plane > 0)` and stack to multi-page TIFF |
 | **LCT JSON** `[[z,y,x],…]` | Reorder to `x,y,z`; add 1 |
 | **Downsampled segmentation** | Resample mask/coordinates to native `shape_yxz` before import |

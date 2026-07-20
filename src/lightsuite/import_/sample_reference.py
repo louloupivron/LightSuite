@@ -91,8 +91,8 @@ def load_sample_reference(save_path: Path) -> SampleReference:
     path = sample_reference_path(save_path)
     if not path.is_file():
         msg = (
-            f"Missing {path}. Run 'lightsuite brain preprocess' first to publish "
-            "the native sample-space reference."
+            f"Missing {path}. Run 'lightsuite brain preprocess' or "
+            "'lightsuite spinal preprocess' first to publish the native sample-space reference."
         )
         raise FileNotFoundError(msg)
     return SampleReference.load(path)

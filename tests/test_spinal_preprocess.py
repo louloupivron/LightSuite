@@ -55,6 +55,7 @@ def test_spinal_preprocess_and_straighten_headless(tmp_path: Path) -> None:
 
     result = preprocess_spinal_cord_sample(cfg)
     assert (Path(result.checkpoint.lsfolder) / "regopts.json").is_file()
+    assert (Path(result.checkpoint.lsfolder) / "sample_reference.json").is_file()
     assert result.checkpoint.tofliprc is True
     regvol = tifffile.imread(result.checkpoint.regvol_path)
     assert regvol.ndim == 3

@@ -458,10 +458,14 @@ class CordSampleConfig(BaseModel):
 class SpinalCordPipelineConfig(BaseModel):
     """Top-level spinal cord lightsheet pipeline configuration."""
 
+    model_config = ConfigDict(populate_by_name=True)
+
     sample: CordSampleConfig
     atlas: CordAtlasConfig
     registration: CordRegistrationConfig = Field(default_factory=CordRegistrationConfig)
     compute: ComputeConfig = Field(default_factory=ComputeConfig)
+    analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
+    import_config: ImportConfig | None = Field(default=None, alias="import")
 
     @property
     def data_folder(self) -> Path:

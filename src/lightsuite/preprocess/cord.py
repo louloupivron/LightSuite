@@ -231,4 +231,21 @@ def preprocess_spinal_cord_sample(config: SpinalCordPipelineConfig) -> CordPrepr
     )
     checkpoint.save(save_path / "regopts.json")
     console.print(f"Wrote checkpoint: {save_path / 'regopts.json'}")
+
+    from lightsuite.import_.sample_reference import write_sample_reference
+
+    ny, nx, nz = native_y, native_x, native_z
+    ref_path = write_sample_reference(
+        save_path,
+        sample_name=config.sample.name,
+        ny=ny,
+        nx=nx,
+        nz=nz,
+        voxel_um=list(config.sample.voxel_um),
+    )
+    console.print(
+        f"Wrote native sample-space reference [bold]{ref_path}[/bold] "
+        "(use for external segmentation exports)"
+    )
+
     return CordPreprocessResult(checkpoint=checkpoint)
