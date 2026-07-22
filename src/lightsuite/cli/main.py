@@ -773,12 +773,61 @@ def multires_validate_config(
 @multires_app.command("check-geometry")
 def multires_check_geometry(
     config: str = typer.Option(..., "--config", "-c", help="Multires pipeline YAML config."),
+    level: str = typer.Option(
+        "full",
+        "--level",
+        help="Geometry QA depth: metadata-only, slice-qc, or full (loads overlap crop).",
+    ),
 ) -> None:
     """Validate FOV overlap and write geometry QA artifacts."""
     from lightsuite.config.loader import load_multires_config
+    from lightsuite.multires.config_models import MultiresGeometryCheckLevel
     from lightsuite.multires.runner import check_multires_geometry
 
-    check_multires_geometry(load_multires_config(config))
+    try:
+        check_level = MultiresGeometryCheckLevel(level)
+    except ValueError as exc:
+        allowed = ", ".join(item.value for item in MultiresGeometryCheckLevel)
+        raise typer.BadParameter(f"level must be one of: {allowed}") from exc
+
+    check_multires_geometry(load_multires_config(config), level=check_level)
+
+
+@multires_app.command("export-preview")
+def multires_export_preview(
+    config: str = typer.Option(..., "--config", "-c", help="Multires pipeline YAML config."),
+    output_dir: str | None = typer.Option(
+        None,
+        "--output-dir",
+        help="Directory for preview TIFF crops (default: save_path/geometry/alignment_preview/<pair>).",
+    ),
+    n_slices: int = typer.Option(5, "--n-slices", min=1, help="Number of Z slices to export per volume."),
+    margin_um: float = typer.Option(
+        100.0,
+        "--margin-um",
+        help="Extra XY margin around the overlap crop (µm).",
+    ),
+    projection: str = typer.Option(
+        "slices",
+        "--projection",
+        help="Export mode: 'slices' (small Z stacks) or 'max' (XY max projection over overlap Z).",
+    ),
+) -> None:
+    """Export small overview / ROI TIFF crops around the overlap for visual QC."""
+    from lightsuite.config.loader import load_multires_config
+    from lightsuite.multires.preview import export_alignment_preview_crops
+
+    if projection not in ("slices", "max"):
+        msg = f"Unsupported projection {projection!r}; use 'slices' or 'max'"
+        raise typer.BadParameter(msg)
+    out = Path(output_dir).expanduser() if output_dir is not None else None
+    export_alignment_preview_crops(
+        load_multires_config(config),
+        output_dir=out,
+        n_slices=n_slices,
+        margin_um=margin_um,
+        projection=projection,  # type: ignore[arg-type]
+    )
 
 
 @multires_app.command("register")

@@ -8,14 +8,31 @@ from pathlib import Path
 import numpy as np
 
 from lightsuite.multires.checkpoint import MultiresRegOptsCheckpoint, multires_checkpoint_path
-from lightsuite.multires.config_models import MultiresGeometryMode, MultiresPipelineConfig
-from lightsuite.multires.geometry import physical_bounds, transformed_bounds_in_target_space
+from lightsuite.multires.config_models import (
+    MultiresGeometryCheckLevel,
+    MultiresGeometryMode,
+    MultiresPipelineConfig,
+)
+from lightsuite.multires.geometry import transformed_bounds_in_target_space
+from lightsuite.multires.landmarks import fit_landmark_transform
 from lightsuite.multires.manifest import load_pair_manifest
 from lightsuite.multires.models import MultiresPairManifest, serialize_report
-from lightsuite.multires.plots import save_fov_overlap_plot, save_geometry_overlap_qc_plot
-from lightsuite.multires.prepare import prepare_multires_registration_pair
+from lightsuite.multires.plots import (
+    save_fov_overlap_plot,
+    save_geometry_overlap_qc_plot,
+    save_geometry_slice_qc_plot,
+)
+from lightsuite.multires.prepare import load_landmark_session, prepare_multires_registration_pair
 from lightsuite.multires.registration import register_roi_to_overview, sanitize_experiment_name
-from lightsuite.multires.volume import manifest_geometry_report, write_sitk_hyperstack_tiff
+from lightsuite.multires.spec_geometry import (
+    crop_index_range_from_physical_box,
+    manifest_geometry_report_from_spec,
+    overlap_box_from_landmark_specs,
+    overlap_physical_bounds_from_specs,
+    sitk_geometry_from_spec,
+    transformed_bounds_from_spec,
+)
+from lightsuite.multires.volume import load_manifest_xy_slice, write_sitk_hyperstack_tiff
 
 
 def _status(message: str) -> None:
@@ -31,8 +48,8 @@ def _volume_stem(path: Path) -> str:
     return path.stem
 
 
-def _landmark_roi_report(roi, fit) -> dict[str, object]:
-    roi_min, roi_max = transformed_bounds_in_target_space(roi, fit.roi_to_overview_tform)
+def _landmark_roi_report_from_spec(roi_spec, fit) -> dict[str, object]:
+    roi_min, roi_max = transformed_bounds_from_spec(roi_spec, fit.roi_to_overview_tform)
     center = 0.5 * (roi_min + roi_max)
     return {
         "label": "roi_in_overview_space",
@@ -44,51 +61,94 @@ def _landmark_roi_report(roi, fit) -> dict[str, object]:
     }
 
 
-def _manifest_geometry_report(label: str, spec, *, manifest_dir: Path) -> dict[str, object]:
-    return manifest_geometry_report(label, spec, manifest_dir=manifest_dir)
-
-
-def check_multires_geometry(cfg: MultiresPipelineConfig) -> MultiresRegOptsCheckpoint:
-    """Validate FOV overlap and write geometry QA artifacts."""
-    manifest_path = cfg.multires.pair_manifest
-    manifest = load_pair_manifest(manifest_path)
-    manifest_dir = manifest_path.parent
+def _lightweight_geometry_context(
+    cfg: MultiresPipelineConfig,
+    manifest: MultiresPairManifest,
+):
+    """Compute overlap and optional landmark fit without loading full stacks."""
     mode = cfg.multires.geometry_mode
+    margin_um = cfg.multires.registration.overlap_margin_um
+    overview_spec = manifest.overview
+    roi_spec = manifest.roi
+    landmark_fit = None
 
-    prepared = prepare_multires_registration_pair(cfg, manifest=manifest)
-    overlap_min, overlap_max = prepared.overlap_box
-
-    rep_overview = _manifest_geometry_report("overview", manifest.overview, manifest_dir=manifest_dir)
-    if prepared.landmark_fit is not None:
-        rep_roi = _landmark_roi_report(prepared.roi, prepared.landmark_fit)
+    if mode == MultiresGeometryMode.METADATA:
+        overlap_min, overlap_max = overlap_physical_bounds_from_specs(
+            overview_spec,
+            roi_spec,
+            margin_um=margin_um,
+        )
     else:
-        rep_roi = _manifest_geometry_report("roi", manifest.roi, manifest_dir=manifest_dir)
+        session_path = cfg.multires.resolved_landmark_session_path(cfg.sample.save_path, manifest)
+        session = load_landmark_session(session_path)
+        overview_geo = sitk_geometry_from_spec(overview_spec)
+        roi_geo = sitk_geometry_from_spec(roi_spec)
+        landmark_fit = fit_landmark_transform(
+            overview=overview_geo,
+            roi=roi_geo,
+            session=session,
+            fit_mode=cfg.multires.landmarks.fit_mode,
+            min_pairs=cfg.multires.landmarks.min_pairs,
+        )
+        overlap_min, overlap_max = overlap_box_from_landmark_specs(
+            overview_spec,
+            roi_spec,
+            landmark_fit.roi_to_overview_tform,
+            margin_um=margin_um,
+        )
 
-    geometry_dir = cfg.sample.save_path / "geometry"
+    crop_start_index, _crop_size = crop_index_range_from_physical_box(
+        overview_spec,
+        overlap_min,
+        overlap_max,
+    )
+    return overlap_min, overlap_max, crop_start_index, landmark_fit
+
+
+def _write_geometry_artifacts(
+    *,
+    cfg: MultiresPipelineConfig,
+    manifest: MultiresPairManifest,
+    manifest_dir: Path,
+    overlap_min: np.ndarray,
+    overlap_max: np.ndarray,
+    crop_start_index: list[int],
+    landmark_fit,
+    level: MultiresGeometryCheckLevel,
+    prepared=None,
+) -> MultiresRegOptsCheckpoint:
+    mode = cfg.multires.geometry_mode
+    rep_overview = manifest_geometry_report_from_spec("overview", manifest.overview)
+    if landmark_fit is not None:
+        rep_roi = _landmark_roi_report_from_spec(manifest.roi, landmark_fit)
+    else:
+        rep_roi = manifest_geometry_report_from_spec("roi", manifest.roi)
+
+    geometry_dir = cfg.sample.save_path / "geometry" / manifest.pair_label
     geometry_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = cfg.multires.pair_manifest
 
     report_path = geometry_dir / "geometry_report.json"
     serializable = {
         "geometry_mode": mode.value,
+        "geometry_check_level": level.value,
         "pair_label": manifest.pair_label,
         "pair_manifest_path": str(manifest_path),
         "overview": serialize_report(rep_overview),
         "roi": serialize_report(rep_roi),
         "overlap_box_um": [overlap_min.tolist(), overlap_max.tolist()],
     }
-    if prepared.landmark_fit is not None:
+    if landmark_fit is not None:
         serializable["landmark_fit"] = {
-            "rms_error_um": prepared.landmark_fit.rms_error_um,
-            "fit_stats": prepared.landmark_fit.fit_stats,
-            "roi_to_overview_tform": prepared.landmark_fit.roi_to_overview_tform.tolist(),
+            "rms_error_um": landmark_fit.rms_error_um,
+            "fit_stats": landmark_fit.fit_stats,
+            "roi_to_overview_tform": landmark_fit.roi_to_overview_tform.tolist(),
         }
     report_path.write_text(json.dumps(serializable, indent=2), encoding="utf-8")
 
     overview_path = Path(manifest.overview.volume_path)
     roi_path = Path(manifest.roi.volume_path)
     overview_stem = _volume_stem(overview_path)
-    cropped_path = geometry_dir / f"{overview_stem}_cropped_overlap.tif"
-
     title = f"{manifest.pair_label} — {overview_stem} vs {_volume_stem(roi_path)} ({mode.value})"
     fov_plot_path = geometry_dir / "fov_overlap.png"
     save_fov_overlap_plot(
@@ -101,18 +161,56 @@ def check_multires_geometry(cfg: MultiresPipelineConfig) -> MultiresRegOptsCheck
     )
 
     qc_plot_path = geometry_dir / "geometry_overlap_qc.png"
-    roi_tform = prepared.landmark_fit.roi_to_overview_tform if prepared.landmark_fit else None
-    save_geometry_overlap_qc_plot(
-        overview=prepared.overview,
-        roi=prepared.roi,
-        overlap_min=overlap_min,
-        overlap_max=overlap_max,
-        output_path=qc_plot_path,
-        geometry_mode=mode.value,
-        roi_to_overview=roi_tform,
-    )
+    cropped_path = geometry_dir / f"{overview_stem}_cropped_overlap.tif"
+    geometry_report_paths = {
+        "geometry_report_json": str(report_path),
+        "fov_overlap_png": str(fov_plot_path),
+        "geometry_overlap_qc_png": str(qc_plot_path),
+    }
 
-    write_sitk_hyperstack_tiff(cropped_path, prepared.fixed_cropped)
+    roi_tform = landmark_fit.roi_to_overview_tform if landmark_fit is not None else None
+    if level == MultiresGeometryCheckLevel.SLICE_QC:
+        center_um = tuple(float(v) for v in 0.5 * (overlap_min + overlap_max))
+        sl_overview = load_manifest_xy_slice(
+            manifest.overview,
+            physical_um=center_um,
+            manifest_dir=manifest_dir,
+        )
+        if roi_tform is None:
+            sl_roi = load_manifest_xy_slice(
+                manifest.roi,
+                physical_um=center_um,
+                manifest_dir=manifest_dir,
+            )
+        else:
+            roi_center = (
+                np.linalg.inv(roi_tform) @ np.array([*center_um, 1.0], dtype=float)
+            )[:3]
+            sl_roi = load_manifest_xy_slice(
+                manifest.roi,
+                physical_um=tuple(float(v) for v in roi_center),
+                manifest_dir=manifest_dir,
+            )
+        save_geometry_slice_qc_plot(
+            sl_overview=sl_overview,
+            sl_roi=sl_roi,
+            center_um=center_um,
+            output_path=qc_plot_path,
+            geometry_mode=mode.value,
+        )
+    elif level == MultiresGeometryCheckLevel.FULL:
+        assert prepared is not None
+        save_geometry_overlap_qc_plot(
+            overview=prepared.overview,
+            roi=prepared.roi,
+            overlap_min=overlap_min,
+            overlap_max=overlap_max,
+            output_path=qc_plot_path,
+            geometry_mode=mode.value,
+            roi_to_overview=roi_tform,
+        )
+        write_sitk_hyperstack_tiff(cropped_path, prepared.fixed_cropped)
+        geometry_report_paths["cropped_overview_preview"] = str(cropped_path)
 
     experiment_slug = sanitize_experiment_name(cfg.multires.registration.experiment_name)
     landmark_session_path = None
@@ -131,24 +229,62 @@ def check_multires_geometry(cfg: MultiresPipelineConfig) -> MultiresRegOptsCheck
         geometry_mode=mode.value,
         landmark_session_path=landmark_session_path,
         overlap_box_um=[overlap_min.tolist(), overlap_max.tolist()],
-        crop_start_index=prepared.crop_start_index,
-        roi_to_overview_tform=prepared.landmark_fit.roi_to_overview_tform.tolist()
-        if prepared.landmark_fit
+        crop_start_index=crop_start_index,
+        roi_to_overview_tform=landmark_fit.roi_to_overview_tform.tolist()
+        if landmark_fit is not None
         else None,
-        landmark_rms_error_um=prepared.landmark_fit.rms_error_um if prepared.landmark_fit else None,
-        geometry_report_paths={
-            "geometry_report_json": str(report_path),
-            "fov_overlap_png": str(fov_plot_path),
-            "geometry_overlap_qc_png": str(qc_plot_path),
-            "cropped_overview_preview": str(cropped_path),
-        },
+        landmark_rms_error_um=landmark_fit.rms_error_um if landmark_fit is not None else None,
+        geometry_report_paths=geometry_report_paths,
     )
     checkpoint.save(multires_checkpoint_path(cfg.sample.save_path))
-    _status(f"Geometry QA ({mode.value}): {geometry_dir}")
-    _status(f"Overlap QC plot: {qc_plot_path}")
-    if prepared.landmark_fit is not None:
-        _status(f"Landmark RMS error: {prepared.landmark_fit.rms_error_um:.2f} µm")
+    _status(f"Geometry QA ({mode.value}, {level.value}): {geometry_dir}")
+    _status(f"FOV overlap plot: {fov_plot_path}")
+    if level in (MultiresGeometryCheckLevel.SLICE_QC, MultiresGeometryCheckLevel.FULL):
+        _status(f"Overlap QC plot: {qc_plot_path}")
+    if landmark_fit is not None:
+        _status(f"Landmark RMS error: {landmark_fit.rms_error_um:.2f} µm")
     return checkpoint
+
+
+def check_multires_geometry(
+    cfg: MultiresPipelineConfig,
+    *,
+    level: MultiresGeometryCheckLevel = MultiresGeometryCheckLevel.FULL,
+) -> MultiresRegOptsCheckpoint:
+    """Validate FOV overlap and write geometry QA artifacts."""
+    manifest_path = cfg.multires.pair_manifest
+    manifest = load_pair_manifest(manifest_path)
+    manifest_dir = manifest_path.parent
+
+    if level in (MultiresGeometryCheckLevel.METADATA_ONLY, MultiresGeometryCheckLevel.SLICE_QC):
+        overlap_min, overlap_max, crop_start_index, landmark_fit = _lightweight_geometry_context(
+            cfg,
+            manifest,
+        )
+        return _write_geometry_artifacts(
+            cfg=cfg,
+            manifest=manifest,
+            manifest_dir=manifest_dir,
+            overlap_min=overlap_min,
+            overlap_max=overlap_max,
+            crop_start_index=crop_start_index,
+            landmark_fit=landmark_fit,
+            level=level,
+        )
+
+    prepared = prepare_multires_registration_pair(cfg, manifest=manifest)
+    overlap_min, overlap_max = prepared.overlap_box
+    return _write_geometry_artifacts(
+        cfg=cfg,
+        manifest=manifest,
+        manifest_dir=manifest_dir,
+        overlap_min=overlap_min,
+        overlap_max=overlap_max,
+        crop_start_index=prepared.crop_start_index,
+        landmark_fit=prepared.landmark_fit,
+        level=MultiresGeometryCheckLevel.FULL,
+        prepared=prepared,
+    )
 
 
 def run_multires_registration(cfg: MultiresPipelineConfig) -> MultiresRegOptsCheckpoint:

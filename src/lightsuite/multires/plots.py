@@ -75,31 +75,56 @@ def save_fov_overlap_plot(
     output_path: Path,
     title: str,
 ) -> None:
-    """Draw axis-aligned FOV boxes for overview, ROI, and overlap."""
+    """Draw axis-aligned FOV boxes (XY + XZ) with volume centers marked."""
     output_path = output_path.expanduser()
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    def _xy_box(report: dict[str, object], color: str, label: str) -> None:
-        pmin = np.asarray(report["phys_min"], dtype=float)
-        pmax = np.asarray(report["phys_max"], dtype=float)
-        xs = [pmin[0], pmax[0], pmax[0], pmin[0], pmin[0]]
-        ys = [pmin[1], pmin[1], pmax[1], pmax[1], pmin[1]]
-        plt.plot(xs, ys, color=color, label=label)
+    def _as_vec(report: dict[str, object], key: str) -> np.ndarray:
+        return np.asarray(report[key], dtype=float)
 
-    plt.figure(figsize=(8, 8))
-    _xy_box(rep_overview, "C0", str(rep_overview.get("label", "overview")))
-    _xy_box(rep_roi, "C1", str(rep_roi.get("label", "roi")))
-    ox0, oy0 = float(overlap_min[0]), float(overlap_min[1])
-    ox1, oy1 = float(overlap_max[0]), float(overlap_max[1])
-    plt.plot([ox0, ox1, ox1, ox0, ox0], [oy0, oy0, oy1, oy1, oy0], "k--", label="overlap")
-    plt.gca().set_aspect("equal")
-    plt.xlabel("x (µm)")
-    plt.ylabel("y (µm)")
-    plt.title(title)
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=150)
-    plt.close()
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+
+    def rect_xy(ax, pmin: np.ndarray, pmax: np.ndarray, **kwargs) -> None:
+        w, h = float(pmax[0] - pmin[0]), float(pmax[1] - pmin[1])
+        ax.add_patch(plt.Rectangle((float(pmin[0]), float(pmin[1])), w, h, fill=False, **kwargs))
+
+    def rect_xz(ax, pmin: np.ndarray, pmax: np.ndarray, **kwargs) -> None:
+        w, h = float(pmax[0] - pmin[0]), float(pmax[2] - pmin[2])
+        ax.add_patch(plt.Rectangle((float(pmin[0]), float(pmin[2])), w, h, fill=False, **kwargs))
+
+    o_min, o_max = _as_vec(rep_overview, "phys_min"), _as_vec(rep_overview, "phys_max")
+    r_min, r_max = _as_vec(rep_roi, "phys_min"), _as_vec(rep_roi, "phys_max")
+    o_center = _as_vec(rep_overview, "phys_center")
+    r_center = _as_vec(rep_roi, "phys_center")
+
+    ax = axes[0]
+    rect_xy(ax, o_min, o_max, color="C0", lw=2, label=str(rep_overview.get("label", "overview")))
+    rect_xy(ax, r_min, r_max, color="C1", lw=2, label=str(rep_roi.get("label", "roi")))
+    rect_xy(ax, overlap_min, overlap_max, color="C2", lw=2, ls="--", label="overlap")
+    ax.scatter(float(o_center[0]), float(o_center[1]), c="C0", s=40, zorder=5)
+    ax.scatter(float(r_center[0]), float(r_center[1]), c="C1", s=40, zorder=5)
+    ax.set_xlabel("x (µm)")
+    ax.set_ylabel("y (µm)")
+    ax.set_title("Lateral (XY)")
+    ax.set_aspect("equal")
+    ax.legend(loc="best")
+
+    ax = axes[1]
+    rect_xz(ax, o_min, o_max, color="C0", lw=2, label=str(rep_overview.get("label", "overview")))
+    rect_xz(ax, r_min, r_max, color="C1", lw=2, label=str(rep_roi.get("label", "roi")))
+    rect_xz(ax, overlap_min, overlap_max, color="C2", lw=2, ls="--", label="overlap")
+    ax.scatter(float(o_center[0]), float(o_center[2]), c="C0", s=40, zorder=5)
+    ax.scatter(float(r_center[0]), float(r_center[2]), c="C1", s=40, zorder=5)
+    ax.set_xlabel("x (µm)")
+    ax.set_ylabel("z (µm)")
+    ax.set_title("Sagittal (XZ)")
+    ax.set_aspect("equal")
+    ax.legend(loc="best")
+
+    fig.suptitle(title)
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=150)
+    plt.close(fig)
 
 
 def save_geometry_overlap_qc_plot(
@@ -113,9 +138,6 @@ def save_geometry_overlap_qc_plot(
     roi_to_overview: np.ndarray | None = None,
 ) -> None:
     """Side-by-side XY slices at overlap center."""
-    output_path = output_path.expanduser()
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
     sl_overview, sl_roi, center = _overlap_center_from_sitk(
         overview,
         roi,
@@ -123,6 +145,27 @@ def save_geometry_overlap_qc_plot(
         overlap_max,
         roi_to_overview=roi_to_overview,
     )
+    save_geometry_slice_qc_plot(
+        sl_overview=sl_overview,
+        sl_roi=sl_roi,
+        center_um=center,
+        output_path=output_path,
+        geometry_mode=geometry_mode,
+    )
+
+
+def save_geometry_slice_qc_plot(
+    *,
+    sl_overview: np.ndarray,
+    sl_roi: np.ndarray,
+    center_um: tuple[float, float, float],
+    output_path: Path,
+    geometry_mode: str,
+) -> None:
+    """Side-by-side XY slices from pre-loaded 2D panels."""
+    output_path = output_path.expanduser()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
     fig, axes = plt.subplots(1, 2, figsize=(10, 5))
     axes[0].imshow(_normalize_panel(sl_overview), cmap="gray")
     axes[0].set_title("Overview")
@@ -130,7 +173,7 @@ def save_geometry_overlap_qc_plot(
     axes[1].imshow(_normalize_panel(sl_roi), cmap="gray")
     axes[1].set_title("ROI")
     axes[1].axis("off")
-    cx, cy, cz = center
+    cx, cy, cz = center_um
     fig.suptitle(f"{geometry_mode} overlap @ ({cx:.0f}, {cy:.0f}, {cz:.0f}) µm")
     plt.tight_layout()
     plt.savefig(output_path, dpi=150)

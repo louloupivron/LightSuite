@@ -17,6 +17,14 @@ class MultiresGeometryMode(StrEnum):
     HYBRID = "hybrid"
 
 
+class MultiresGeometryCheckLevel(StrEnum):
+    """How much voxel data ``check-geometry`` loads."""
+
+    METADATA_ONLY = "metadata-only"
+    SLICE_QC = "slice-qc"
+    FULL = "full"
+
+
 class MultiresSampleConfig(BaseModel):
     name: str = Field(min_length=1)
     save_path: Path

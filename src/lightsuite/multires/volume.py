@@ -203,21 +203,57 @@ def manifest_geometry_report(
     manifest_dir: Path | None = None,
 ) -> dict[str, object]:
     """Build a diagnostic geometry report from manifest fields."""
-    from lightsuite.multires.geometry import physical_bounds, physical_center
+    from lightsuite.multires.spec_geometry import manifest_geometry_report_from_spec
 
-    image = load_manifest_volume(spec, load_pixels=False, manifest_dir=manifest_dir)
-    pmin, pmax = physical_bounds(image)
-    center = physical_center(image)
-    z, y, x = spec.shape_zyx
-    spacing = tuple(float(s) for s in image.GetSpacing())
-    return {
-        "label": label,
-        "shape_zyx": tuple(spec.shape_zyx),
-        "shape_xyz": (x, y, z),
-        "spacing_um": spacing,
-        "origin_um": tuple(image.GetOrigin()),
-        "phys_min": pmin,
-        "phys_max": pmax,
-        "phys_center": center,
-        "extent_um": tuple(float(v) for v in (pmax - pmin)),
-    }
+    _ = manifest_dir
+    return manifest_geometry_report_from_spec(label, spec)
+
+
+def _resolve_volume_path(spec: ManifestVolumeSpec, manifest_dir: Path | None) -> Path:
+    volume_path = Path(spec.volume_path).expanduser()
+    if not volume_path.is_absolute() and manifest_dir is not None:
+        volume_path = (manifest_dir / volume_path).resolve()
+    return volume_path
+
+
+def load_manifest_xy_slice(
+    spec: ManifestVolumeSpec,
+    *,
+    physical_um: tuple[float, float, float],
+    manifest_dir: Path | None = None,
+) -> np.ndarray:
+    """Load one XY plane at a physical point without reading the full stack."""
+    from lightsuite.multires.spec_geometry import physical_to_continuous_index_xyz
+
+    volume_path = _resolve_volume_path(spec, manifest_dir)
+    index_xyz = physical_to_continuous_index_xyz(spec, physical_um)
+    ix, iy, iz = (int(round(float(v))) for v in index_xyz)
+    nz, ny, nx = (int(v) for v in spec.shape_zyx)
+    ix = int(np.clip(ix, 0, nx - 1))
+    iy = int(np.clip(iy, 0, ny - 1))
+    iz = int(np.clip(iz, 0, nz - 1))
+
+    if volume_path.is_file():
+        with tifffile.TiffFile(volume_path) as tf:
+            series = tf.series[0]
+            if series.shape[0] == nz:
+                plane = series.asarray(key=iz)
+            else:
+                plane = tf.pages[iz].asarray()
+        plane = _normalize_tiff_array(np.asarray(plane), volume_path)
+        if plane.ndim == 3:
+            return np.asarray(plane[0], dtype=np.float32)
+        return np.asarray(plane, dtype=np.float32)
+
+    if volume_path.is_dir():
+        planes = _sorted_plane_files(volume_path)
+        if iz >= len(planes):
+            msg = f"Z index {iz} out of range for {len(planes)} planes in {volume_path}"
+            raise IndexError(msg)
+        plane = _normalize_tiff_array(np.asarray(tifffile.imread(str(planes[iz]))), planes[iz])
+        if plane.ndim == 3:
+            return np.asarray(plane[0], dtype=np.float32)
+        return np.asarray(plane, dtype=np.float32)
+
+    msg = f"Volume path not found: {volume_path}"
+    raise FileNotFoundError(msg)

@@ -1,0 +1,47 @@
+# SmartSPIM 1.6× overview ↔ 9× single-FOV ROI — Multi_RES_SCANs geometry test
+#
+# Prerequisite: publish the pair manifest (once):
+#   uv run python -c "
+#   from pathlib import Path
+#   from lightsuite.multires.vendor.smartspim import SmartspimGeometryConfig, build_smartspim_pair_manifest
+#   root = Path('/media/gbm/NVME2/ALICe-pipelines-data/Multi_RES_SCANs')
+#   out = root / 'registration_results/converted'
+#   overview_tiles = [(463160,430080,1489),(535160,430080,1489),(463160,487680,1489),(535160,487680,1489)]
+#   build_smartspim_pair_manifest(
+#       sample_name='Multi_RES_SCANs', pair_label='single_fov_561',
+#       overview_path=root/'1_6X/All_Channels',
+#       roi_path=root/'9X/20260710_11_03_38_9X_single__FOV/Ex_561_Em_561F',
+#       overview_meta_path=root/'1_6X/metadata.txt',
+#       roi_meta_path=root/'9X/20260710_11_03_38_9X_single__FOV/metadata.txt',
+#       overview_tile_centers_stage=overview_tiles,
+#       overview_geometry=SmartspimGeometryConfig(lateral_flip=(1, -1)),
+#       roi_geometry=SmartspimGeometryConfig(
+#           stage_xy_is_center=False,
+#           stage_origin_offset_um=(2000.0, 587.5, 0.0),
+#       ),
+#       output_manifest_path=out/'single_fov_561_pair.json',
+#   )"
+#
+# Then:
+#   uv sync --extra registration
+#   uv run lightsuite multires validate-config -c examples/config/multiresolution/Multi_RES_SCANs_single_fov_manifest.yaml
+#   uv run lightsuite multires check-geometry --level metadata-only -c examples/config/multiresolution/Multi_RES_SCANs_single_fov_manifest.yaml
+#   uv run lightsuite multires check-geometry --level slice-qc      -c examples/config/multiresolution/Multi_RES_SCANs_single_fov_manifest.yaml
+#   uv run lightsuite multires export-preview                         -c examples/config/multiresolution/Multi_RES_SCANs_single_fov_manifest.yaml
+
+sample:
+  name: Multi_RES_SCANs
+  save_path: /media/gbm/NVME2/ALICe-pipelines-data/Multi_RES_SCANs/registration_results
+  scratch: /media/gbm/NVME2/lightsuite_scratch
+
+multires:
+  pair_manifest: /media/gbm/NVME2/ALICe-pipelines-data/Multi_RES_SCANs/registration_results/converted/single_fov_561_pair.json
+
+  geometry_mode: metadata
+
+  registration:
+    overlap_margin_um: 0.0
+    registration_bin: 2
+    experiment_name: single_fov_561
+    elastix_stages: [translation, rigid]
+    write_full_overview_canvas: true
