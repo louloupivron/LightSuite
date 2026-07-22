@@ -12,7 +12,7 @@ from skimage.transform import resize
 
 from lightsuite.atlas.fiederling import load_fiederling_atlas_volumes, resize_fiederling_atlas
 from lightsuite.config.models import SpinalCordPipelineConfig
-from lightsuite.io.cord_reader import read_spinal_cord_sample
+from lightsuite.io.cord_registration_cache import load_or_cache_cord_registration
 from lightsuite.preprocess.cord_checkpoint import CordRegOptsCheckpoint
 from lightsuite.registration.cord_orientation import (
     CAUDOROSTRAL,
@@ -96,21 +96,9 @@ def _load_atlas_template(config: SpinalCordPipelineConfig) -> np.ndarray:
 
 def load_cord_orientation_check_data(config: SpinalCordPipelineConfig) -> CordOrientationData:
     """Load sample + atlas longitudinal max projections for orientation picking."""
-    save_path = cord_save_path(config)
-    regopts_path = save_path / "regopts.json"
-
-    regvol: np.ndarray | None = None
-    if regopts_path.is_file():
-        checkpoint = CordRegOptsCheckpoint.load(regopts_path)
-        regchan = _primary_channel_index(config, checkpoint.nchans)
-        cached = (checkpoint.regvolpaths or {}).get(str(regchan))
-        if cached and Path(cached).is_file():
-            regvol = _longitudinal_last(tifffile.imread(cached).astype(np.float32))
-
-    if regvol is None:
-        sample = read_spinal_cord_sample(config)
-        regchan = _primary_channel_index(config, sample.n_channels)
-        regvol = _longitudinal_last(sample.volume[:, :, :, regchan - 1].astype(np.float32))
+    registration = load_or_cache_cord_registration(config)
+    regchan = _primary_channel_index(config, registration.n_channels)
+    regvol = _longitudinal_last(registration.volume[:, :, :, regchan - 1].astype(np.float32))
 
     atlas_vol = _load_atlas_template(config)
     atlas_longitudinal = _longitudinal_max_projection(atlas_vol)
@@ -119,6 +107,7 @@ def load_cord_orientation_check_data(config: SpinalCordPipelineConfig) -> CordOr
         atlas_longitudinal.shape[1],
     )
 
+    save_path = cord_save_path(config)
     stored = load_cord_orientation(save_path)
     if stored is None and config.registration.longitudinal_direction is not None:
         stored = config.registration.longitudinal_direction

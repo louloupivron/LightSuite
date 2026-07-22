@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass
 
 import numpy as np
@@ -19,12 +18,8 @@ from lightsuite.atlas.fiederling import (
     resolve_fiederling_paths,
 )
 from lightsuite.config.models import SpinalCordPipelineConfig
-from lightsuite.io.cord_reader import read_spinal_cord_sample
-from lightsuite.io.cord_volume import (
-    cord_downsample_volume,
-    normalize_res_um,
-    registration_volume_path,
-)
+from lightsuite.io.cord_registration_cache import load_or_cache_cord_registration
+from lightsuite.io.cord_volume import normalize_res_um
 from lightsuite.preprocess.cord_checkpoint import CordRegOptsCheckpoint
 from lightsuite.registration.cord_orientation import (
     resolve_cord_orientation,
@@ -87,38 +82,24 @@ def preprocess_spinal_cord_sample(config: SpinalCordPipelineConfig) -> CordPrepr
     console.print(
         f"Loading sample [bold]{config.sample.name}[/bold] from {config.sample.source.path}..."
     )
-    sample = read_spinal_cord_sample(config)
+    registration = load_or_cache_cord_registration(config)
+    finvol = registration.volume
     sampleres = normalize_res_um(config.sample.voxel_um)
     regres = normalize_res_um([config.registration.resolution_um] * 3)
-
-    t0 = time.perf_counter()
-    finvol = cord_downsample_volume(
-        sample.volume,
-        sampleres,
-        regres,
-        native_orisize=sample.native_orisize,
-    )
-    if finvol.shape != sample.volume.shape:
-        console.print(f"Resampled to registration grid in {time.perf_counter() - t0:.2f}s")
-
-    regvolpaths: dict[str, str] = {}
-    for ich in range(finvol.shape[3]):
-        out_path = registration_volume_path(cache_dir, ich + 1, config.registration.resolution_um)
-        if out_path.is_file():
-            out_path.unlink()
-        tifffile.imwrite(out_path, finvol[:, :, :, ich].astype(np.uint16))
-        regvolpaths[str(ich + 1)] = str(out_path)
-    console.print(f"Cached {len(regvolpaths)} channel registration TIFF(s)")
+    regvolpaths = registration.regvolpaths
+    sample_n_channels = registration.n_channels
+    sample_native_orisize = registration.native_orisize
+    sample_layout = registration.layout
 
     atlas_volumes = load_fiederling_atlas_volumes(config.atlas)
     tv, av = resize_fiederling_atlas(atlas_volumes, config.registration.resolution_um)
     tvpts = extract_atlas_point_cloud(tv, av, atlas_volumes.regions)
 
     regchan = config.registration.channel_primary
-    if sample.n_channels == 1:
+    if sample_n_channels == 1:
         regchan = 1
-    if regchan > sample.n_channels:
-        msg = f"Registration channel {regchan} out of range (Nchan={sample.n_channels})"
+    if regchan > sample_n_channels:
+        msg = f"Registration channel {regchan} out of range (Nchan={sample_n_channels})"
         raise ValueError(msg)
 
     regvolsize = finvol.shape[:3]
@@ -202,14 +183,14 @@ def preprocess_spinal_cord_sample(config: SpinalCordPipelineConfig) -> CordPrepr
     np.save(smpts_path, smpts)
     np.save(tvpts_path, tvpts)
 
-    native_y, native_x, native_z = sample.native_orisize
+    native_y, native_x, native_z = sample_native_orisize
     atlas_paths = resolve_fiederling_paths(config.atlas.atlas_dir)
     checkpoint = CordRegOptsCheckpoint(
         sample_name=config.sample.name,
         data_folder=str(config.sample.source.path),
         lsfolder=str(save_path),
         orisize=[native_y, native_x, native_z],
-        nchans=sample.n_channels,
+        nchans=sample_n_channels,
         sampleres_um=sampleres.tolist(),
         registrationres_um=regres.tolist(),
         reg_channel=regchan,
@@ -226,7 +207,7 @@ def preprocess_spinal_cord_sample(config: SpinalCordPipelineConfig) -> CordPrepr
         atlas_res_um=list(atlas_volumes.atlas_res_um),
         segments_path=str(atlas_paths.segments_csv),
         regions_path=str(atlas_paths.regions_csv),
-        tiff_type=sample.layout.value,
+        tiff_type=sample_layout.value,
         regvolpaths=regvolpaths,
     )
     checkpoint.save(save_path / "regopts.json")
