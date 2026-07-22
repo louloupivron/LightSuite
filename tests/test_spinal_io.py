@@ -131,3 +131,54 @@ def test_plane_per_file_multi_channel_folders(tmp_path: Path) -> None:
     assert sample.volume.shape == (8, 6, 4, 2)
     assert int(sample.volume[0, 0, 2, 0]) == 3
     assert int(sample.volume[0, 0, 2, 1]) == 30
+
+
+def test_plane_per_file_multi_channel_aligns_by_plane_index(tmp_path: Path) -> None:
+    import tifffile
+
+    ch0 = tmp_path / "Ch0"
+    ch1 = tmp_path / "Ch1"
+    ch0.mkdir()
+    ch1.mkdir()
+    plane = np.arange(12, dtype=np.uint16).reshape(3, 4)
+    tifffile.imwrite(ch0 / "scan_000040_Ch0.tif", plane)
+    tifffile.imwrite(ch0 / "scan_000060_Ch0.tif", plane + 1)
+    tifffile.imwrite(ch0 / "scan_000080_Ch0.tif", plane + 2)
+    tifffile.imwrite(ch1 / "scan_000040_Ch1.tif", plane + 10)
+    tifffile.imwrite(ch1 / "scan_000060_Ch1.tif", plane + 11)
+
+    atlas = tmp_path / "atlas"
+    atlas.mkdir()
+    (atlas / "Template.tif").write_bytes(b"")
+    (atlas / "Annotation.tif").write_bytes(b"")
+    (atlas / "Segments.csv").write_text("Segment,Start,End\nC1,0,1\n", encoding="utf-8")
+    (atlas / "Regions.csv").write_text("id,name,children_IDs\n1,gm,1\n", encoding="utf-8")
+
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    save = tmp_path / "results"
+    save.mkdir()
+    config_data = {
+        "sample": {
+            "name": "smartspim_plane",
+            "source": {
+                "tiff_type": "planeperfile",
+                "channels": [str(ch0), str(ch1)],
+            },
+            "scratch": str(scratch),
+            "save_path": str(save),
+            "voxel_um": [20.0, 20.0, 20.0],
+        },
+        "atlas": {"atlas_dir": str(atlas)},
+        "registration": {"resolution_um": 20, "channel_primary": 1},
+    }
+    config_path = tmp_path / "spinal_smartspim.yaml"
+    config_path.write_text(yaml.dump(config_data), encoding="utf-8")
+    cfg = load_spinal_config(config_path)
+
+    sample = read_spinal_cord_sample(cfg)
+    assert sample.native_orisize == (3, 4, 2)
+    assert sample.volume.shape == (3, 4, 2, 2)
+    assert int(sample.volume[0, 0, 0, 0]) == 0
+    assert int(sample.volume[0, 0, 1, 0]) == 1
+    assert int(sample.volume[0, 0, 0, 1]) == 10

@@ -106,7 +106,7 @@ Use `--headless` to validate inputs without opening the GUI.
 | `channelperfile` | One multi-page TIFF per channel |
 | `multichannel_single` | Single Bioformats-style stack |
 
-**Multi-channel Terastitcher (like brain):** when each channel is its own folder of plane TIFFs, list them under `sample.source.channels` (order = channel index). `path` is optional and defaults to the first folder. Requires `tiff_type: planeperfile` or `auto`.
+**Multi-channel Terastitcher (like brain):** when each channel is its own folder of plane TIFFs, list them under `sample.source.channels` (order = channel index). `path` is optional and defaults to the first folder. Requires `tiff_type: planeperfile` or `auto`. When channels have different slice counts, LightSuite intersects planes by the numeric index embedded in each TIFF filename (Terastitcher trailing `_NNNNN.tif`, SmartSPIM `_NNNNN_ChN.tif`, etc.) and loads only planes present in every channel.
 
 ```yaml
 sample:

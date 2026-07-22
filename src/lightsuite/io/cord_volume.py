@@ -208,6 +208,78 @@ def _assert_plane_stack_loadable(
         raise ValueError(msg)
 
 
+def _plane_z_key(path: Path) -> int:
+    """Parse a sortable plane index from common lightsheet / SmartSPIM TIFF names."""
+    name = path.name
+    for pattern in (
+        r"_(\d+)_Ch\d+\.tif$",  # SmartSPIM: ..._000040_Ch0.tif
+        r"_(\d+)\.tif$",  # Terastitcher / plane_003.tif
+    ):
+        match = re.search(pattern, name, re.IGNORECASE)
+        if match:
+            return int(match.group(1))
+    stem_match = re.search(r"(\d+)(?:\D*)$", path.stem)
+    if stem_match:
+        return int(stem_match.group(1))
+    msg = f"Could not parse plane index from TIFF filename: {name}"
+    raise ValueError(msg)
+
+
+def _channel_plane_key_map(
+    folder: Path,
+    *,
+    skip_corrupt_slices: bool,
+) -> tuple[dict[int, Path], list[SkippedSlice]]:
+    files = _sorted_tiff_files(folder)
+    if skip_corrupt_slices:
+        files, skipped = filter_spinal_cord_slices(files, skip_corrupt=True)
+    else:
+        files, skipped = filter_spinal_cord_slices(files, skip_corrupt=False)
+    key_map: dict[int, Path] = {}
+    for path in files:
+        key = _plane_z_key(path)
+        if key in key_map:
+            msg = (
+                f"Duplicate plane index {key} in {folder}: "
+                f"{key_map[key].name} and {path.name}"
+            )
+            raise ValueError(msg)
+        key_map[key] = path
+    return key_map, skipped
+
+
+def align_multi_channel_plane_files(
+    roots: Sequence[Path],
+    *,
+    skip_corrupt_slices: bool = False,
+) -> tuple[list[list[Path]], list[SkippedSlice], dict[str, int]]:
+    """Intersect plane indices across channel folders and return aligned file lists."""
+    if len(roots) < 2:
+        msg = "align_multi_channel_plane_files expects at least two channel folders."
+        raise ValueError(msg)
+
+    key_maps: list[dict[int, Path]] = []
+    all_skipped: list[SkippedSlice] = []
+    for root in roots:
+        key_map, skipped = _channel_plane_key_map(root, skip_corrupt_slices=skip_corrupt_slices)
+        key_maps.append(key_map)
+        all_skipped.extend(skipped)
+
+    common_keys = set.intersection(*(set(key_map) for key_map in key_maps))
+    if not common_keys:
+        msg = "No common plane indices across channel folders."
+        raise ValueError(msg)
+
+    sorted_keys = sorted(common_keys)
+    aligned = [[key_map[key] for key in sorted_keys] for key_map in key_maps]
+    dropped = {
+        root.name: len(key_map) - len(common_keys)
+        for root, key_map in zip(roots, key_maps, strict=True)
+        if len(key_map) != len(common_keys)
+    }
+    return aligned, all_skipped, dropped
+
+
 def _load_one_plane_per_file_channel(
     folder: Path,
     *,
@@ -216,13 +288,18 @@ def _load_one_plane_per_file_channel(
     skip_corrupt_slices: bool = False,
     channel_label: str | None = None,
     max_slices: int | None = None,
+    files: Sequence[Path] | None = None,
 ) -> tuple[np.ndarray, tuple[int, int, int], list[SkippedSlice]]:
     """Load one Terastitcher-style folder into a (Y, X, Z) uint16 volume."""
-    files = _sorted_tiff_files(folder)
-    if not skip_corrupt_slices:
-        files, skipped = filter_spinal_cord_slices(files, skip_corrupt=False)
+    skipped: list[SkippedSlice] = []
+    if files is None:
+        files = _sorted_tiff_files(folder)
+        if not skip_corrupt_slices:
+            files, skipped = filter_spinal_cord_slices(files, skip_corrupt=False)
+        else:
+            files, skipped = filter_spinal_cord_slices(files, skip_corrupt=True)
     else:
-        files, skipped = filter_spinal_cord_slices(files, skip_corrupt=True)
+        files = list(files)
 
     if max_slices is not None and max_slices > 0:
         files = files[:max_slices]
@@ -306,14 +383,34 @@ def load_plane_per_file_stack(
     native_orisize: tuple[int, int, int] | None = None
     all_skipped: list[SkippedSlice] = []
 
+    aligned_files: list[list[Path]] | None = None
+    if len(roots) > 1:
+        aligned_files, all_skipped, dropped = align_multi_channel_plane_files(
+            roots,
+            skip_corrupt_slices=skip_corrupt_slices,
+        )
+        if dropped:
+            common_nz = len(aligned_files[0])
+            console.print(
+                f"Multi-channel plane alignment: using [bold]{common_nz}[/bold] common plane(s)"
+            )
+            for root in roots:
+                if dropped.get(root.name, 0):
+                    console.print(
+                        f"  {root.name}: dropped {dropped[root.name]} slice(s) without a match "
+                        "in all channels"
+                    )
+
     for ich, root in enumerate(roots, start=1):
         label = f"channel {ich}/{len(roots)} ({root.name})" if len(roots) > 1 else None
+        channel_files = aligned_files[ich - 1] if aligned_files is not None else None
         vol, native, skipped = _load_one_plane_per_file_channel(
             root,
             sampleres_um=sampleres_um,
             registrationres_um=registrationres_um,
             skip_corrupt_slices=skip_corrupt_slices,
             channel_label=label,
+            files=channel_files,
         )
         if native_orisize is None:
             native_orisize = native

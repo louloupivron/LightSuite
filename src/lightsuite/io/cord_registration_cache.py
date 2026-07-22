@@ -17,6 +17,7 @@ from lightsuite.io.cord_volume import (
     SkippedSlice,
     _single_tiff_stack_info,
     _sorted_tiff_files,
+    align_multi_channel_plane_files,
     cord_volume_downsample_spec,
     filter_spinal_cord_slices,
     normalize_res_um,
@@ -81,6 +82,19 @@ def probe_cord_source(config: SpinalCordPipelineConfig) -> CordSourceProbe:
 
     if layout == CordTiffLayout.PLANE_PER_FILE:
         roots = list(channel_folders) if channel_folders else [folder]
+        if len(roots) > 1:
+            aligned, skipped, _dropped = align_multi_channel_plane_files(
+                roots,
+                skip_corrupt_slices=skip_corrupt,
+            )
+            files = aligned[0]
+            ny, nx = read_plane_tiff(files[0]).shape
+            return CordSourceProbe(
+                native_orisize=(ny, nx, len(files)),
+                n_channels=len(roots),
+                layout=layout,
+                n_skipped_slices=len(skipped),
+            )
         files, skipped = filter_spinal_cord_slices(
             _sorted_tiff_files(roots[0]),
             skip_corrupt=skip_corrupt,
