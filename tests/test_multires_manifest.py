@@ -9,11 +9,11 @@ import tifffile
 import yaml
 
 from lightsuite.config.loader import load_multires_config
+from lightsuite.mesospim.meta import meta_path_for_tiff
 from lightsuite.multires.manifest import load_pair_manifest, save_pair_manifest
 from lightsuite.multires.models import MANIFEST_FORMAT, ManifestVolumeSpec, MultiresPairManifest
 from lightsuite.multires.prepare import prepare_multires_registration_pair
 from lightsuite.multires.vendor.mesospim import build_mesospim_pair_manifest
-from lightsuite.mesospim.meta import meta_path_for_tiff
 
 
 def _write_stack(path: Path, shape_zyx: tuple[int, int, int]) -> None:

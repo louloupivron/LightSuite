@@ -8,9 +8,13 @@ from pathlib import Path
 
 import SimpleITK as sitk
 
-from lightsuite.multires.geometry import embed_crop_in_full_overview, resample_to_reference_grid, voxel_count_gb
+from lightsuite.multires.geometry import voxel_count_gb
 from lightsuite.multires.prepare import MultiresPreparedPair
-from lightsuite.multires.volume import sitk_to_itk, write_sitk_hyperstack_tiff
+from lightsuite.multires.volume import (
+    sitk_to_itk,
+    write_embedded_crop_canvas,
+    write_sitk_hyperstack_tiff,
+)
 
 
 def sanitize_experiment_name(name: str) -> str:
@@ -60,16 +64,33 @@ def apply_elastix_transforms(
 ) -> sitk.Image:
     """Apply saved elastix transform parameter files to *moving* on *reference* grid."""
     import itk
+    import numpy as np
 
     parameter_object = itk.ParameterObject.New()
     for path in transform_paths:
         parameter_object.AddParameterFile(str(path))
+
+    # Point the final transform's output grid at the full-resolution reference.
+    # Transforms estimated at registration_bin>1 store the binned Size/Spacing;
+    # without this update transformix writes a coarse grid whose geometry is then
+    # lost by array round-trips, producing an all-zero resample.
+    last = parameter_object.GetNumberOfParameterMaps() - 1
+    parameter_object.SetParameter(last, "Size", [str(int(v)) for v in reference.GetSize()])
+    parameter_object.SetParameter(last, "Spacing", [str(float(v)) for v in reference.GetSpacing()])
+    parameter_object.SetParameter(last, "Origin", [str(float(v)) for v in reference.GetOrigin()])
+    parameter_object.SetParameter(
+        last,
+        "Direction",
+        [str(float(v)) for v in reference.GetDirection()],
+    )
+
     result_itk = itk.transformix_filter(
         sitk_to_itk(moving),
         transform_parameter_object=parameter_object,
     )
-    result_sitk = sitk.GetImageFromArray(itk.GetArrayFromImage(result_itk))
-    return resample_to_reference_grid(result_sitk, reference)
+    result_sitk = sitk.GetImageFromArray(itk.GetArrayFromImage(result_itk).astype(np.float32))
+    result_sitk.CopyInformation(reference)
+    return result_sitk
 
 
 def register_roi_to_overview(
@@ -89,7 +110,6 @@ def register_roi_to_overview(
     output_dir = output_dir.expanduser()
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    fixed = prepared.overview
     fixed_cropped = prepared.fixed_cropped
     moving = prepared.moving
     overlap_box = prepared.overlap_box
@@ -121,6 +141,8 @@ def register_roi_to_overview(
         msg = f"No elastix transform files written under {output_dir}"
         raise RuntimeError(msg)
     if registration_bin > 1:
+        # Prefer re-applying transforms on the full-res moving image; if that
+        # fails, upsample the binned elastix result in physical space.
         result_sitk = apply_elastix_transforms(
             moving,
             transform_paths,
@@ -136,12 +158,16 @@ def register_roi_to_overview(
 
     registered_roi_full_overview_path: Path | None = None
     if write_full_overview_canvas:
-        full_canvas = embed_crop_in_full_overview(fixed, result_sitk, crop_start_index)
         registered_roi_full_overview_path = (
             output_dir
             / f"{experiment_slug}_{roi_stem}_registered_to_{overview_stem}_in_full_overview.tif"
         )
-        sitk.WriteImage(full_canvas, str(registered_roi_full_overview_path), useCompression=True)
+        write_embedded_crop_canvas(
+            prepared.overview_spec,
+            result_sitk,
+            crop_start_index,
+            registered_roi_full_overview_path,
+        )
 
     overlap_min, overlap_max = overlap_box
     roi_tform = None

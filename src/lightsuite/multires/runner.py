@@ -13,7 +13,10 @@ from lightsuite.multires.config_models import (
     MultiresGeometryMode,
     MultiresPipelineConfig,
 )
-from lightsuite.multires.geometry import physical_corners, transform_physical_points, transformed_bounds_in_target_space
+from lightsuite.multires.geometry import (
+    physical_corners,
+    transform_physical_points,
+)
 from lightsuite.multires.landmarks import fit_landmark_transform
 from lightsuite.multires.manifest import load_pair_manifest
 from lightsuite.multires.models import MultiresPairManifest, serialize_report
@@ -229,7 +232,10 @@ def _write_geometry_artifacts(
         try:
             from lightsuite.multires.plots import _normalize_panel, _resample_to_shape
 
-            roi_panel = _resample_to_shape(_normalize_panel(sl_roi), _normalize_panel(sl_overview).shape)
+            roi_panel = _resample_to_shape(
+                _normalize_panel(sl_roi),
+                _normalize_panel(sl_overview).shape,
+            )
             alignment_metrics["slice_ncc"] = normalized_cross_correlation(
                 roi_panel,
                 _normalize_panel(sl_overview),
@@ -248,8 +254,8 @@ def _write_geometry_artifacts(
     elif level == MultiresGeometryCheckLevel.FULL:
         assert prepared is not None
         save_geometry_overlap_qc_plot(
-            overview=prepared.overview,
-            roi=prepared.roi,
+            overview=prepared.fixed_cropped,
+            roi=prepared.moving,
             overlap_min=overlap_min,
             overlap_max=overlap_max,
             output_path=qc_plot_path,

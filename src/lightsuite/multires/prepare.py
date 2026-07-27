@@ -5,42 +5,38 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
 import SimpleITK as sitk
 
 from lightsuite.multires.config_models import MultiresGeometryMode, MultiresPipelineConfig
-from lightsuite.multires.geometry import prepare_registration_pair
 from lightsuite.multires.landmark_session import MultiresLandmarkSession
 from lightsuite.multires.landmarks import (
     LandmarkFitResult,
-    prepare_registration_pair_from_landmarks,
+    fit_landmark_transform,
     update_landmark_session_fit,
 )
 from lightsuite.multires.manifest import load_pair_manifest
-from lightsuite.multires.models import MultiresPairManifest
-from lightsuite.multires.volume import load_manifest_volume
+from lightsuite.multires.models import ManifestVolumeSpec, MultiresPairManifest
+from lightsuite.multires.spec_geometry import (
+    crop_index_range_from_physical_box,
+    overlap_box_from_landmark_specs,
+    overlap_physical_bounds_from_specs,
+    sitk_geometry_from_spec,
+)
+from lightsuite.multires.volume import load_manifest_xyz_crop, stream_resample_to_reference
 
 
 @dataclass
 class MultiresPreparedPair:
-    overview: sitk.Image
-    roi: sitk.Image
+    """Overlap crops ready for elastix — full stacks are never held in memory."""
+
     fixed_cropped: sitk.Image
     moving: sitk.Image
-    overlap_box: tuple
+    overlap_box: tuple[np.ndarray, np.ndarray]
     crop_start_index: list[int]
+    overview_spec: ManifestVolumeSpec
     landmark_fit: LandmarkFitResult | None = None
     landmark_session: MultiresLandmarkSession | None = None
-
-
-def load_pair_volumes(
-    manifest: MultiresPairManifest,
-    *,
-    manifest_path: Path,
-) -> tuple[sitk.Image, sitk.Image]:
-    manifest_dir = manifest_path.parent
-    overview = load_manifest_volume(manifest.overview, manifest_dir=manifest_dir)
-    roi = load_manifest_volume(manifest.roi, manifest_dir=manifest_dir)
-    return overview, roi
 
 
 def load_landmark_session(path: Path) -> MultiresLandmarkSession:
@@ -57,60 +53,80 @@ def prepare_multires_registration_pair(
     cfg: MultiresPipelineConfig,
     *,
     manifest: MultiresPairManifest | None = None,
-    overview: sitk.Image | None = None,
-    roi: sitk.Image | None = None,
     landmark_session: MultiresLandmarkSession | None = None,
 ) -> MultiresPreparedPair:
-    """Load manifest volumes and build the fixed/moving pair for elastix."""
+    """Build fixed/moving overlap crops by streaming planes from disk.
+
+    Neither the overview nor the ROI full stack is materialised. Only the
+    shared physical overlap (plus a small Z chunk of the ROI at a time while
+    resampling) is held in RAM.
+    """
     manifest_path = cfg.multires.pair_manifest
     if manifest is None:
         manifest = load_pair_manifest(manifest_path)
-    if overview is None or roi is None:
-        overview, roi = load_pair_volumes(manifest, manifest_path=manifest_path)
-
+    manifest_dir = manifest_path.parent
     margin_um = cfg.multires.registration.overlap_margin_um
     mode = cfg.multires.geometry_mode
+    overview_spec = manifest.overview
+    roi_spec = manifest.roi
+
+    landmark_fit: LandmarkFitResult | None = None
+    session: MultiresLandmarkSession | None = None
+    reference_to_moving: np.ndarray | None = None
 
     if mode == MultiresGeometryMode.METADATA:
-        fixed_cropped, moving, overlap_box, crop_start_index = prepare_registration_pair(
-            overview,
-            roi,
+        overlap_min, overlap_max = overlap_physical_bounds_from_specs(
+            overview_spec,
+            roi_spec,
             margin_um=margin_um,
         )
-        return MultiresPreparedPair(
-            overview=overview,
-            roi=roi,
-            fixed_cropped=fixed_cropped,
-            moving=moving,
-            overlap_box=overlap_box,
-            crop_start_index=crop_start_index,
-        )
-
-    session_path = cfg.multires.resolved_landmark_session_path(cfg.sample.save_path, manifest)
-    session = landmark_session or load_landmark_session(session_path)
-    fit_mode = cfg.multires.landmarks.fit_mode
-    min_pairs = cfg.multires.landmarks.min_pairs
-
-    fixed_cropped, moving, overlap_box, crop_start_index, fit = (
-        prepare_registration_pair_from_landmarks(
-            overview,
-            roi,
+    else:
+        session_path = cfg.multires.resolved_landmark_session_path(cfg.sample.save_path, manifest)
+        session = landmark_session or load_landmark_session(session_path)
+        # Geometry-only 1-voxel images carry spacing/origin/direction for point maps.
+        overview_geo = sitk_geometry_from_spec(overview_spec)
+        roi_geo = sitk_geometry_from_spec(roi_spec)
+        landmark_fit = fit_landmark_transform(
+            overview=overview_geo,
+            roi=roi_geo,
             session=session,
-            fit_mode=fit_mode,
-            min_pairs=min_pairs,
+            fit_mode=cfg.multires.landmarks.fit_mode,
+            min_pairs=cfg.multires.landmarks.min_pairs,
+        )
+        overlap_min, overlap_max = overlap_box_from_landmark_specs(
+            overview_spec,
+            roi_spec,
+            landmark_fit.roi_to_overview_tform,
             margin_um=margin_um,
         )
+        reference_to_moving = np.linalg.inv(landmark_fit.roi_to_overview_tform)
+        update_landmark_session_fit(session, landmark_fit)
+        session.save(session_path)
+
+    crop_start_index, crop_size = crop_index_range_from_physical_box(
+        overview_spec,
+        overlap_min,
+        overlap_max,
     )
-    update_landmark_session_fit(session, fit)
-    session.save(session_path)
+    fixed_cropped = load_manifest_xyz_crop(
+        overview_spec,
+        start_xyz=crop_start_index,
+        crop_size_xyz=crop_size,
+        manifest_dir=manifest_dir,
+    )
+    moving = stream_resample_to_reference(
+        roi_spec,
+        fixed_cropped,
+        manifest_dir=manifest_dir,
+        reference_to_moving=reference_to_moving,
+    )
 
     return MultiresPreparedPair(
-        overview=overview,
-        roi=roi,
         fixed_cropped=fixed_cropped,
         moving=moving,
-        overlap_box=overlap_box,
+        overlap_box=(overlap_min, overlap_max),
         crop_start_index=crop_start_index,
-        landmark_fit=fit,
+        overview_spec=overview_spec,
+        landmark_fit=landmark_fit,
         landmark_session=session,
     )

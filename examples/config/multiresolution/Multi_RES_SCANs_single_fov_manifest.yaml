@@ -25,4 +25,4 @@ multires:
     registration_bin: 2
     experiment_name: single_fov_561
     elastix_stages: [translation, rigid]
-    write_full_overview_canvas: true
+    write_full_overview_canvas: false

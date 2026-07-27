@@ -304,3 +304,200 @@ def load_manifest_xy_crop(
 
     msg = f"Volume path not found: {volume_path}"
     raise FileNotFoundError(msg)
+
+
+def load_manifest_xyz_crop(
+    spec: ManifestVolumeSpec,
+    *,
+    start_xyz: list[int],
+    crop_size_xyz: list[int],
+    manifest_dir: Path | None = None,
+) -> sitk.Image:
+    """Load a 3D XYZ crop plane-by-plane without materialising the full stack."""
+    from lightsuite.multires.spec_geometry import index_xyz_to_physical
+
+    ix0, iy0, iz0 = (int(v) for v in start_xyz)
+    sx, sy, sz = (int(v) for v in crop_size_xyz)
+    if min(sx, sy, sz) <= 0:
+        msg = f"Invalid crop size {crop_size_xyz}"
+        raise ValueError(msg)
+
+    stack = np.empty((sz, sy, sx), dtype=np.float32)
+    for dz in range(sz):
+        stack[dz] = load_manifest_xy_crop(
+            spec,
+            z_index=iz0 + dz,
+            start_xyz=[ix0, iy0, iz0],
+            crop_size_xyz=[sx, sy, 1],
+            manifest_dir=manifest_dir,
+        )
+
+    image = sitk.GetImageFromArray(stack)
+    origin = index_xyz_to_physical(spec, (float(ix0), float(iy0), float(iz0)))
+    image.SetSpacing(tuple(float(v) for v in spec.spacing_um))
+    image.SetOrigin(tuple(float(v) for v in origin))
+    image.SetDirection(tuple(float(v) for v in spec.direction))
+    return image
+
+
+def stream_resample_to_reference(
+    moving_spec: ManifestVolumeSpec,
+    reference: sitk.Image,
+    *,
+    manifest_dir: Path | None = None,
+    reference_to_moving: np.ndarray | None = None,
+    z_chunk: int | None = None,
+    max_slab_bytes: int = 1_500_000_000,
+) -> sitk.Image:
+    """Resample a manifest volume onto ``reference`` without loading the full moving stack.
+
+    For each Z chunk of the reference grid, only the moving voxels that can
+    contribute to that chunk are loaded from disk, then SimpleITK resamples
+    the slab onto the chunk. Chunk size is chosen so each moving slab stays
+    near ``max_slab_bytes`` (default 1.5 GB).
+    """
+    from lightsuite.multires.geometry import physical_corners
+    from lightsuite.multires.spec_geometry import crop_index_range_from_physical_box
+
+    ref_size = reference.GetSize()  # x, y, z
+    sx, sy, sz = (int(v) for v in ref_size)
+    out = np.zeros((sz, sy, sx), dtype=np.float32)
+    if reference_to_moving is None:
+        transform: sitk.Transform = sitk.Transform(3, sitk.sitkIdentity)
+        moving_from_ref = None
+    else:
+        moving_from_ref = np.asarray(reference_to_moving, dtype=float)
+        transform = _sitk_affine_from_matrix(moving_from_ref)
+
+    if z_chunk is None:
+        # Estimate moving XY footprint from the full reference physical extent.
+        ref_min = np.array(reference.TransformIndexToPhysicalPoint((0, 0, 0)), dtype=float)
+        ref_max = np.array(
+            reference.TransformIndexToPhysicalPoint((sx - 1, sy - 1, max(sz - 1, 0))),
+            dtype=float,
+        )
+        phys_min = np.minimum(ref_min, ref_max)
+        phys_max = np.maximum(ref_min, ref_max)
+        if moving_from_ref is not None:
+            corners = physical_corners(phys_min, phys_max)
+            ones = np.ones((corners.shape[0], 1), dtype=float)
+            moving_corners = (np.hstack([corners, ones]) @ moving_from_ref.T)[:, :3]
+            phys_min = moving_corners.min(axis=0)
+            phys_max = moving_corners.max(axis=0)
+        _start, est_size = crop_index_range_from_physical_box(moving_spec, phys_min, phys_max)
+        est_yx = max(1, int(est_size[0]) * int(est_size[1]))
+        bytes_per_plane = est_yx * 4
+        max_moving_planes = max(2, int(max_slab_bytes / max(bytes_per_plane, 1)))
+        ref_dz = float(reference.GetSpacing()[2])
+        mov_dz = float(moving_spec.spacing_um[2])
+        planes_per_ref = max(1.0, ref_dz / max(mov_dz, 1e-6))
+        z_chunk = max(1, int(max_moving_planes / planes_per_ref))
+
+    chunk = max(1, int(z_chunk))
+    for z0 in range(0, sz, chunk):
+        z1 = min(sz, z0 + chunk)
+        chunk_size = [sx, sy, z1 - z0]
+        chunk_ref = sitk.RegionOfInterest(reference, chunk_size, [0, 0, z0])
+
+        chunk_min = np.array(chunk_ref.TransformIndexToPhysicalPoint((0, 0, 0)), dtype=float)
+        chunk_max = np.array(
+            chunk_ref.TransformIndexToPhysicalPoint((sx - 1, sy - 1, z1 - z0 - 1)),
+            dtype=float,
+        )
+        phys_min = np.minimum(chunk_min, chunk_max)
+        phys_max = np.maximum(chunk_min, chunk_max)
+
+        if moving_from_ref is not None:
+            corners = physical_corners(phys_min, phys_max)
+            ones = np.ones((corners.shape[0], 1), dtype=float)
+            moving_corners = (np.hstack([corners, ones]) @ moving_from_ref.T)[:, :3]
+            phys_min = moving_corners.min(axis=0)
+            phys_max = moving_corners.max(axis=0)
+
+        # Pad by one voxel so linear interpolation has neighbours at the edges.
+        pad = np.asarray(moving_spec.spacing_um, dtype=float)
+        phys_min = phys_min - pad
+        phys_max = phys_max + pad
+        start, crop_size = crop_index_range_from_physical_box(moving_spec, phys_min, phys_max)
+        if min(crop_size) <= 0:
+            continue
+
+        moving_slab = load_manifest_xyz_crop(
+            moving_spec,
+            start_xyz=start,
+            crop_size_xyz=crop_size,
+            manifest_dir=manifest_dir,
+        )
+        resampled = sitk.Resample(
+            moving_slab,
+            chunk_ref,
+            transform,
+            sitk.sitkLinear,
+            0.0,
+            sitk.sitkFloat32,
+        )
+        out[z0:z1] = sitk.GetArrayFromImage(resampled)
+        del moving_slab, resampled
+
+    result = sitk.GetImageFromArray(out)
+    result.CopyInformation(reference)
+    return result
+
+
+def _sitk_affine_from_matrix(matrix: np.ndarray) -> sitk.AffineTransform:
+    transform = sitk.AffineTransform(3)
+    transform.SetMatrix(matrix[:3, :3].reshape(-1).tolist())
+    transform.SetTranslation(matrix[:3, 3].tolist())
+    return transform
+
+
+def write_embedded_crop_canvas(
+    overview_spec: ManifestVolumeSpec,
+    crop: sitk.Image,
+    crop_start_index: list[int],
+    output_path: Path,
+) -> None:
+    """Write a full-overview canvas with ``crop`` pasted in, plane-by-plane.
+
+    Avoids allocating a float32 buffer the size of the overview (tens of GB).
+    """
+    output_path = output_path.expanduser()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    nz, ny, nx = (int(v) for v in overview_spec.shape_zyx)
+    cx, cy, cz = (int(v) for v in crop.GetSize())
+    ix0, iy0, iz0 = (int(v) for v in crop_start_index)
+    crop_arr = np.asarray(sitk.GetArrayViewFromImage(crop), dtype=np.float32)
+    sx, sy, sz = (float(v) for v in overview_spec.spacing_um)
+
+    # Multi-page BigTIFF; ImageJ hyperstack metadata is set on the first page.
+    with tifffile.TiffWriter(output_path, bigtiff=True) as tif:
+        for iz in range(nz):
+            plane = np.zeros((ny, nx), dtype=np.float32)
+            if iz0 <= iz < iz0 + cz:
+                y1 = min(iy0 + cy, ny)
+                x1 = min(ix0 + cx, nx)
+                yy0 = max(iy0, 0)
+                xx0 = max(ix0, 0)
+                src_y0 = yy0 - iy0
+                src_x0 = xx0 - ix0
+                plane[yy0:y1, xx0:x1] = crop_arr[
+                    iz - iz0,
+                    src_y0 : src_y0 + (y1 - yy0),
+                    src_x0 : src_x0 + (x1 - xx0),
+                ]
+            metadata = None
+            if iz == 0:
+                metadata = {
+                    "axes": "ZYX",
+                    "spacing": sz,
+                    "unit": "um",
+                    "loop": False,
+                }
+            tif.write(
+                plane,
+                compression="zlib",
+                photometric="minisblack",
+                metadata=metadata,
+                resolution=(1.0 / sx, 1.0 / sy),
+            )
