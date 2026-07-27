@@ -3,12 +3,11 @@
 # Prerequisite: publish the pair manifests (once, rebuilds all three Multi_RES_SCANs pairs):
 #   uv run python scripts/rebuild_multi_res_manifests.py
 #
-# Manual landmarks workflow (default for this single-FOV config):
+# Hybrid workflow (metadata overlap crops in match-points + manual landmarks):
 #   uv sync --extra gui --extra registration
-#   uv run lightsuite multires match-points     -c examples/config/multiresolution/Multi_RES_SCANs_single_fov_manifest.yaml
-#   uv run lightsuite multires check-geometry   -c examples/config/multiresolution/Multi_RES_SCANs_single_fov_manifest.yaml
-#   uv run lightsuite multires export-preview   -c examples/config/multiresolution/Multi_RES_SCANs_single_fov_manifest.yaml
-#   uv run lightsuite multires register         -c examples/config/multiresolution/Multi_RES_SCANs_single_fov_manifest.yaml
+#   uv run lightsuite multires match-points   -c examples/config/multiresolution/Multi_RES_SCANs_single_fov_manifest.yaml
+#   uv run lightsuite multires check-geometry -c examples/config/multiresolution/Multi_RES_SCANs_single_fov_manifest.yaml
+#   uv run lightsuite multires register       -c examples/config/multiresolution/Multi_RES_SCANs_single_fov_manifest.yaml
 #
 # Automatic metadata-only mode: set geometry_mode: metadata below.
 
@@ -20,7 +19,7 @@ sample:
 multires:
   pair_manifest: /media/gbm/NVME2/ALICe-pipelines-data/Multi_RES_SCANs/registration_results/converted/single_fov_561_pair.json
 
-  geometry_mode: landmarks
+  geometry_mode: hybrid
   landmarks:
     # Keep the existing single-FOV session (pre-pair-label default path).
     session_path: /media/gbm/NVME2/ALICe-pipelines-data/Multi_RES_SCANs/registration_results/multires_landmarks.json
@@ -30,6 +29,6 @@ multires:
   registration:
     overlap_margin_um: 0.0
     registration_bin: 2
-    experiment_name: single_fov_561_landmarks
+    experiment_name: single_fov_561_hybrid
     elastix_stages: [translation, rigid]
     write_full_overview_canvas: false

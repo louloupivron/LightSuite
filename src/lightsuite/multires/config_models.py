@@ -6,14 +6,13 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Annotated
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator
 
 from lightsuite.multires.landmark_session import LandmarkFitMode, default_landmark_session_path
 
 
 class MultiresGeometryMode(StrEnum):
     METADATA = "metadata"
-    LANDMARKS = "landmarks"
     HYBRID = "hybrid"
 
 
@@ -78,11 +77,12 @@ class MultiresConfig(BaseModel):
             raise ValueError(msg)
         return value
 
-    @model_validator(mode="after")
-    def validate_landmark_mode(self) -> MultiresConfig:
-        if self.geometry_mode in (MultiresGeometryMode.LANDMARKS, MultiresGeometryMode.HYBRID):
-            return self
-        return self
+    @field_validator("geometry_mode", mode="before")
+    @classmethod
+    def normalize_legacy_landmarks_mode(cls, value: object) -> object:
+        if value == "landmarks":
+            return MultiresGeometryMode.HYBRID
+        return value
 
     def resolved_landmark_session_path(self, save_path: Path, manifest: object) -> Path:
         if self.landmarks.session_path is not None:

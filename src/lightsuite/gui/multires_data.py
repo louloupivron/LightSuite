@@ -7,7 +7,7 @@ from pathlib import Path
 
 import numpy as np
 
-from lightsuite.multires.config_models import MultiresPipelineConfig
+from lightsuite.multires.config_models import MultiresGeometryMode, MultiresPipelineConfig
 from lightsuite.multires.landmark_session import MultiresLandmarkSession
 from lightsuite.multires.manifest import load_pair_manifest
 from lightsuite.multires.models import ManifestVolumeSpec, MultiresPairManifest
@@ -333,11 +333,13 @@ def load_multires_match_points_data(
 
     session.fit_mode = cfg.multires.landmarks.fit_mode
     margin_um = _match_points_margin_um(cfg)
-    crops = _overlap_crops_from_metadata(
-        manifest.overview,
-        manifest.roi,
-        margin_um=margin_um,
-    )
+    crops = None
+    if cfg.multires.geometry_mode == MultiresGeometryMode.HYBRID:
+        crops = _overlap_crops_from_metadata(
+            manifest.overview,
+            manifest.roi,
+            margin_um=margin_um,
+        )
 
     if crops is not None:
         overview_start, overview_size, roi_start, roi_size = crops

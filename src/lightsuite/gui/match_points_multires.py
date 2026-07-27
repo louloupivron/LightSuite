@@ -418,7 +418,7 @@ def run_multires_match_points(cfg: MultiresPipelineConfig, *, headless: bool = F
         f"{'metadata overlap crop' if data.crop_mode else 'full volumes'} "
         "(overview left, ROI right). "
         "Landmarks are stored as full-volume [Z, Y, X] indices. "
-        "After saving, set [bold]geometry_mode: landmarks[/bold] (or hybrid) then "
+        "After saving, set [bold]geometry_mode: hybrid[/bold] then "
         "run check-geometry / register. "
         "Shortcuts: [bold]←[/bold]/[bold]→[/bold] overview Z, "
         "[bold]PgUp[/bold]/[bold]PgDn[/bold] ROI Z, [bold]Backspace[/bold] undo last point."

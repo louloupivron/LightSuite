@@ -17,7 +17,7 @@ sample:
 multires:
   pair_manifest: /media/gbm/NVME2/ALICe-pipelines-data/Multi_RES_SCANs/registration_results/converted/cortex_9x_561_pair.json
 
-  geometry_mode: metadata
+  geometry_mode: hybrid
   landmarks:
     session_path: null       # default: save_path/multires_landmarks_<pair_label>.json
     fit_mode: similarity

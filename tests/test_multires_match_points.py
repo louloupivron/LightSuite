@@ -71,7 +71,7 @@ def _write_pair_config(
                 "sample": {"name": "s", "save_path": str(tmp_path / "out")},
                 "multires": {
                     "pair_manifest": str(manifest_path),
-                    "geometry_mode": "metadata",
+                    "geometry_mode": "hybrid",
                     "landmarks": {"fit_mode": "similarity", "min_pairs": 3},
                 },
             }
@@ -97,7 +97,8 @@ def test_prepare_multires_match_points_session_headless(tmp_path: Path) -> None:
     config_path = _write_pair_config(tmp_path, overview, roi)
     cfg = load_multires_config(config_path)
     path = prepare_multires_match_points_session(cfg)
-    assert path == default_landmark_session_path(tmp_path / "out")
+    expected = default_landmark_session_path(tmp_path / "out", "p")
+    assert path == expected
     assert path.is_file()
     assert path == prepare_multires_match_points_session(cfg)
 
@@ -132,8 +133,59 @@ def test_default_z_indices_use_overlap_center(tmp_path: Path) -> None:
     assert rz == 2
 
 
-def test_match_points_uses_metadata_overlap_crop(tmp_path: Path) -> None:
+def test_match_points_hybrid_uses_metadata_overlap_crop(tmp_path: Path) -> None:
     # Overview spacing like SmartSPIM (~4 µm): 200 µm margin ≈ 50 voxels, not full FOV.
+    overview = np.arange(6 * 400 * 400, dtype=np.uint16).reshape(6, 400, 400)
+    roi = np.arange(4 * 40 * 40, dtype=np.uint16).reshape(4, 40, 40)
+    ov_dir = tmp_path / "overview"
+    roi_dir = tmp_path / "roi"
+    _write_plane_stack(ov_dir, overview)
+    _write_plane_stack(roi_dir, roi)
+    manifest = MultiresPairManifest(
+        format=MANIFEST_FORMAT,
+        sample_name="s",
+        pair_label="p",
+        overview=_spec(ov_dir, overview, spacing=(4.0, 4.0, 4.0), origin=(0.0, 0.0, 0.0)),
+        roi=_spec(roi_dir, roi, spacing=(1.0, 1.0, 1.0), origin=(200.0, 200.0, 4.0)),
+    )
+    manifest_path = tmp_path / "pair.json"
+    save_pair_manifest(manifest, manifest_path)
+    config_path = tmp_path / "cfg.yaml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "sample": {"name": "s", "save_path": str(tmp_path / "out")},
+                "multires": {
+                    "pair_manifest": str(manifest_path),
+                    "geometry_mode": "hybrid",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    cfg = load_multires_config(config_path)
+    data = load_multires_match_points_data(cfg)
+    assert data.crop_mode is True
+    assert data.overview.is_xy_cropped is True
+    assert data.overview.crop_size_yx[0] < 400
+    assert data.overview.crop_size_yx[1] < 400
+
+    plane = data.overview.read_display_slice(data.initial_overview_z)
+    assert plane.shape == data.overview.crop_size_yx
+
+    iy0, ix0 = data.overview.xy_origin_yx
+    volume_pts = [[float(data.initial_overview_z), float(iy0 + 3), float(ix0 + 4)]]
+    display = data.overview.display_xy_from_volume_zyx(volume_pts, data.initial_overview_z)
+    assert np.allclose(display[0], [3.0, 4.0])
+    restored = data.overview.volume_zyx_from_display_xy(
+        display,
+        data.initial_overview_z,
+        [],
+    )
+    assert restored == volume_pts
+
+
+def test_match_points_metadata_mode_uses_full_volumes(tmp_path: Path) -> None:
     overview = np.arange(6 * 400 * 400, dtype=np.uint16).reshape(6, 400, 400)
     roi = np.arange(4 * 40 * 40, dtype=np.uint16).reshape(4, 40, 40)
     ov_dir = tmp_path / "overview"
@@ -164,21 +216,19 @@ def test_match_points_uses_metadata_overlap_crop(tmp_path: Path) -> None:
     )
     cfg = load_multires_config(config_path)
     data = load_multires_match_points_data(cfg)
-    assert data.crop_mode is True
-    assert data.overview.is_xy_cropped is True
-    assert data.overview.crop_size_yx[0] < 400
-    assert data.overview.crop_size_yx[1] < 400
+    assert data.crop_mode is False
+    assert data.overview.is_xy_cropped is False
+    assert data.overview.crop_size_yx == (400, 400)
 
-    plane = data.overview.read_display_slice(data.initial_overview_z)
-    assert plane.shape == data.overview.crop_size_yx
 
-    iy0, ix0 = data.overview.xy_origin_yx
-    volume_pts = [[float(data.initial_overview_z), float(iy0 + 3), float(ix0 + 4)]]
-    display = data.overview.display_xy_from_volume_zyx(volume_pts, data.initial_overview_z)
-    assert np.allclose(display[0], [3.0, 4.0])
-    restored = data.overview.volume_zyx_from_display_xy(
-        display,
-        data.initial_overview_z,
-        [],
-    )
-    assert restored == volume_pts
+def test_legacy_landmarks_geometry_mode_maps_to_hybrid(tmp_path: Path) -> None:
+    overview = np.zeros((6, 12, 12), dtype=np.uint16)
+    roi = np.zeros((4, 8, 8), dtype=np.uint16)
+    config_path = _write_pair_config(tmp_path, overview, roi)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw["multires"]["geometry_mode"] = "landmarks"
+    config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    cfg = load_multires_config(config_path)
+    from lightsuite.multires.config_models import MultiresGeometryMode
+
+    assert cfg.multires.geometry_mode == MultiresGeometryMode.HYBRID
