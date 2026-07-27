@@ -1,25 +1,7 @@
 # SmartSPIM 1.6× overview ↔ 9× cortex (4×2 mosaic) ROI — Multi_RES_SCANs geometry test
 #
-# Publish pair manifest (once):
-#   uv run python -c "
-#   from pathlib import Path
-#   from lightsuite.multires.vendor.smartspim import SmartspimGeometryConfig, build_smartspim_pair_manifest, parse_smartspim_metadata
-#   root = Path('/media/gbm/NVME2/ALICe-pipelines-data/Multi_RES_SCANs')
-#   out = root / 'registration_results/converted'
-#   cortex_tiles = parse_smartspim_metadata(root/'9X/20260710_11_05_27_9X_4x2_cortex_cc/metadata.txt').tile_centers_stage
-#   build_smartspim_pair_manifest(
-#       sample_name='Multi_RES_SCANs', pair_label='cortex_9x_561',
-#       overview_path=root/'1_6X/All_Channels',
-#       roi_path=root/'9X/20260710_11_05_27_9X_4x2_cortex_cc/All_Channels',
-#       overview_meta_path=root/'1_6X/metadata.txt',
-#       roi_meta_path=root/'9X/20260710_11_05_27_9X_4x2_cortex_cc/metadata.txt',
-#       roi_tile_centers_stage=cortex_tiles,
-#       overview_geometry=SmartspimGeometryConfig(
-#           lateral_flip=(1, -1), apply_mosaic_pitch_correction=True,
-#       ),
-#       roi_geometry=SmartspimGeometryConfig(lateral_flip=(1, -1)),
-#       output_manifest_path=out/'cortex_9x_561_pair.json',
-#   )"
+# Publish pair manifests (once, rebuilds all three Multi_RES_SCANs pairs):
+#   uv run python scripts/rebuild_multi_res_manifests.py
 #
 #   uv run lightsuite multires validate-config -c examples/config/multiresolution/Multi_RES_SCANs_cortex_9x_manifest.yaml
 #   uv run lightsuite multires check-geometry --level metadata-only -c examples/config/multiresolution/Multi_RES_SCANs_cortex_9x_manifest.yaml

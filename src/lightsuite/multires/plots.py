@@ -65,17 +65,6 @@ def normalized_cross_correlation(image_a: np.ndarray, image_b: np.ndarray) -> fl
     return float((a * b).sum() / denom)
 
 
-def _checkerboard_overlay(image_a: np.ndarray, image_b: np.ndarray, *, tile: int = 32) -> np.ndarray:
-    """Alternate tiles from two normalized panels."""
-    rows, cols = image_a.shape
-    yy, xx = np.mgrid[0:rows, 0:cols]
-    mask = ((yy // tile) + (xx // tile)) % 2 == 0
-    overlay = np.empty_like(image_a, dtype=np.float32)
-    overlay[mask] = image_a[mask]
-    overlay[~mask] = image_b[~mask]
-    return overlay
-
-
 def _overlap_center_from_sitk(
     overview: sitk.Image,
     roi: sitk.Image,
@@ -142,7 +131,8 @@ def save_fov_overlap_plot(
     ax.scatter(float(r_center[0]), float(r_center[1]), c="C1", s=40, zorder=5)
     ax.set_xlabel("x (µm)")
     ax.set_ylabel("y (µm)")
-    ax.set_title("Lateral (XY)")
+    ax.set_title("Axial (XY)")
+    ax.invert_yaxis()
     ax.set_aspect("equal")
     ax.legend(loc="best")
 
@@ -154,7 +144,7 @@ def save_fov_overlap_plot(
     ax.scatter(float(r_center[0]), float(r_center[2]), c="C1", s=40, zorder=5)
     ax.set_xlabel("x (µm)")
     ax.set_ylabel("z (µm)")
-    ax.set_title("Sagittal (XZ)")
+    ax.set_title("Coronal (XZ)")
     ax.set_aspect("equal")
     ax.legend(loc="best")
 
@@ -209,40 +199,22 @@ def save_geometry_slice_qc_plot(
     geometry_mode: str,
     alignment_metrics: dict[str, object] | None = None,
 ) -> None:
-    """ROI / overview overlap crops with a resampled checkerboard overlay."""
+    """Side-by-side ROI and overview slices at the shared overlap center."""
+    _ = (center_um, geometry_mode, alignment_metrics)
     output_path = output_path.expanduser()
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     roi_norm = _normalize_panel(sl_roi)
     overview_norm = _normalize_panel(sl_overview)
-    target_shape = overview_norm.shape
-    roi_resampled = _resample_to_shape(roi_norm, target_shape)
-    overlay = _checkerboard_overlay(roi_resampled, overview_norm)
 
-    fig, axes = plt.subplots(1, 3, figsize=(14, 5))
+    fig, axes = plt.subplots(1, 2, figsize=(10, 5))
     axes[0].imshow(roi_norm, cmap="gray")
-    axes[0].set_title("ROI (overlap crop)")
+    axes[0].set_title("ROI")
     axes[0].axis("off")
     axes[1].imshow(overview_norm, cmap="gray")
     axes[1].set_title("Overview (overlap crop)")
     axes[1].axis("off")
-    axes[2].imshow(overlay, cmap="gray")
-    axes[2].set_title("Checkerboard overlay")
-    axes[2].axis("off")
 
-    cx, cy, cz = center_um
-    title = f"{geometry_mode} overlap @ ({cx:.0f}, {cy:.0f}, {cz:.0f}) µm"
-    if alignment_metrics is not None:
-        offset = alignment_metrics.get("center_offset_um", [0, 0, 0])
-        ncc = alignment_metrics.get("slice_ncc")
-        offset_norm = alignment_metrics.get("center_offset_norm_um")
-        parts = [title, f"Δcenter=({offset[0]:+.0f}, {offset[1]:+.0f}, {offset[2]:+.0f}) µm"]
-        if offset_norm is not None:
-            parts.append(f"|Δ|={float(offset_norm):.0f} µm")
-        if ncc is not None:
-            parts.append(f"NCC={float(ncc):.3f}")
-        title = " · ".join(parts)
-    fig.suptitle(title, fontsize=10)
     plt.tight_layout()
     plt.savefig(output_path, dpi=150)
     plt.close(fig)

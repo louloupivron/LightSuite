@@ -1,0 +1,141 @@
+SmartSPIM / ASI acquisition geometry — reference notes
+======================================================
+
+Scope: how to turn a SmartSPIM `metadata.txt` tile table plus a stitched output
+stack into a physical (micron) coordinate frame, for overview <-> high-resolution
+multiresolution registration.
+
+Part 1 of this file is the convention as reported by the acquisition/stitching
+side. Part 2 records measurements made against the Multi_RES_SCANs dataset that
+confirm (and quantify) those conventions.
+
+
+--------------------------------------------------------------------
+1. Stated acquisition / stitching conventions
+--------------------------------------------------------------------
+
+Stage X and Y
+  The X and Y columns of the tile table are the FOV *center* of each tile.
+
+Stage Z
+  The Z column alone does not give the axial extent. The Z extent must be
+  inferred from the Z column together with `NumImages` and `Z step (um)`.
+
+Tile overlap
+  Overlap between adjacent tiles is hard-coded at 10% by the acquisition
+  software. It is not read back from the stage positions.
+
+Stitching origin
+  The stitching software uses the upper-left tile's coordinates as the (0, 0)
+  origin of the stitched output space.
+
+Reproducibility between resolutions
+  There is a slight drift between acquisitions performed at different
+  resolutions even when the commanded stage position is identical. Alignment
+  between an overview scan and a high-resolution scan can therefore never be
+  expected to be exact from metadata alone; residuals on the order of a few tens
+  of microns are normal and must be absorbed by the registration step.
+
+
+--------------------------------------------------------------------
+2. Measured conventions (Multi_RES_SCANs, July 2026)
+--------------------------------------------------------------------
+
+2.1 Stage coordinate unit: 0.1 um per table unit
+------------------------------------------------
+The X/Y columns are integers in units of 0.1 um (i.e. divide by 10 to get
+microns). This is fixed by the hard-coded 10% overlap: dividing the adjacent
+tile pitch by the tile field of view must give exactly 0.90.
+
+  1.6x overview   tile 2000 x 1600 px @ 4.000 um/px = 8000 x 6400 um
+                  X pitch 72000 units -> 7200 um -> 7200/8000 = 0.9000
+                  Y pitch 57600 units -> 5760 um -> 5760/6400 = 0.9000
+
+  9x cortex       tile 2000 x 2000 px @ 0.710 um/px = 1420 x 1420 um
+                  X pitch 12780 units -> 1278 um -> 1278/1420 = 0.9000
+                  Y pitch 12780 units -> 1278 um -> 1278/1420 = 0.9000
+
+  9x cerebellum   same 9x tile size, X and Y pitch 12780 units -> 0.9000
+
+A 0.01 um/unit interpretation yields a pitch/FOV ratio of 0.09, i.e. a nonsense
+91% overlap, and places every scan ~10x too close to the stage origin.
+
+2.2 Stitched canvas size
+------------------------
+The stitched canvas matches the nominal 10%-overlap mosaic to within a handful
+of pixels (the stitcher appears to refine each seam slightly):
+
+  scan            nominal (ny, nx)      actual (ny, nx)     excess
+  1.6x overview   (4480, 3800)          (4492, 3807)        +12, +7
+  9x cortex       (3800, 7400)          (3805, 7405)         +5, +5
+  9x cerebellum   (7400, 11000)         (7405, 11012)        +5, +12
+
+So `nx = hres + round(0.9 * hres) * (ncols - 1)` is a good predictor but not
+exact. Prefer reading the true shape from the stitched stack and deriving the
+origin from the tile-table bounding box.
+
+2.3 Axis directions: no lateral flip
+------------------------------------
+Stitched image column increases with stage X, and stitched image *row increases
+with stage Y*. There is no Y flip. Equivalently the upper-left tile of the
+stitched canvas is the (min X, min Y) tile, consistent with the stated
+"upper-left tile is the (0,0) origin" convention.
+
+Physical origin of a stitched stack (corner of pixel [0,0]):
+
+  origin_x = min(stage_x) * 0.1 - (hres * um_per_pix) / 2
+  origin_y = min(stage_y) * 0.1 - (vres * um_per_pix) / 2
+  direction = identity
+
+2.4 Z: the Z column is the stack START, not the center
+------------------------------------------------------
+Plane k of the stitched stack sits at `z_um = Z + k * z_step_um`, with the Z
+column already expressed in microns (unlike X and Y).
+
+Confirmed by the per-wavelength `z / focus` calibration table at the bottom of
+`metadata.txt`, whose first entry reproduces the Z column and whose last entry
+reproduces `Z + NumImages * z_step`:
+
+  9x cortex       Z=4970, NumImages=1638, step=1.0  -> 4970 .. 6608
+                  focus table: 4969.9 .. 6605.0
+  9x single FOV   Z=4670, NumImages=2041, step=1.0  -> 4670 .. 6711
+                  focus table: 4669.9 .. 6710.3
+
+`Z_Range` in the header is the signed span and is redundant with
+`NumImages * z_step`.
+
+2.5 Accuracy of pure metadata placement
+---------------------------------------
+Each 9x stack was located inside the 1.6x overview by normalised cross-
+correlation of a mid-stack plane (9x plane downsampled to 4.0 um/px). Residual
+between the metadata-predicted position and the image-content position, using
+the conventions above:
+
+  scan            dX (um)   dY (um)   dZ (um)   NCC peak
+  9x single FOV     -49       -73        0        0.73
+  9x cortex         -43       -66      -10        0.47
+  9x cerebellum     -35       -90        0        0.72
+
+Z is correct to within one overview plane. The lateral residual is a consistent
+bias of roughly -40 um in X and -75 um in Y across all three scans, i.e. about
+10-20 overview pixels. This is the expected cross-resolution drift, possibly
+combined with the few-pixel stitcher seam refinement noted in 2.2.
+
+Practical consequence: metadata placement is good to well under one 9x tile, so
+a translation (then rigid) registration with a capture range of a couple of
+hundred microns is sufficient. No landmark picking, mosaic pitch correction, or
+manual origin offset is required.
+
+2.6 Summary of the placement recipe
+-----------------------------------
+For a stitched SmartSPIM stack with shape (nz, ny, nx):
+
+  spacing = (um_per_pix, um_per_pix, z_step_um)
+  origin  = (min(stage_x) * 0.1 - hres * um_per_pix / 2,
+             min(stage_y) * 0.1 - vres * um_per_pix / 2,
+             stage_z)
+  direction = identity
+
+The same recipe applies unchanged to the overview and to the ROI, so the two
+volumes land in a common stage frame and no overview<->ROI anchoring logic is
+needed.
