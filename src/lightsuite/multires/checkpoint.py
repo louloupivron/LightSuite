@@ -30,6 +30,8 @@ class MultiresRegOptsCheckpoint:
     landmark_session_path: str | None = None
     roi_to_overview_tform: list[list[float]] | None = None
     landmark_rms_error_um: float | None = None
+    registration_overlay_qc_path: str | None = None
+    registration_slice_ncc: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

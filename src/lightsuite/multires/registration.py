@@ -54,6 +54,8 @@ class MultiresRegistrationResult:
     fixed_voxel_gb: float
     moving_voxel_gb: float
     roi_to_overview_tform: list[list[float]] | None = None
+    registration_overlay_qc_path: Path | None = None
+    registration_slice_ncc: float | None = None
 
 
 def apply_elastix_transforms(
@@ -103,6 +105,7 @@ def register_roi_to_overview(
     registration_bin: int,
     elastix_stages: list[str],
     write_full_overview_canvas: bool = True,
+    pair_label: str | None = None,
 ) -> MultiresRegistrationResult:
     """Run itk-elastix on a prepared overview / ROI pair."""
     import itk
@@ -156,6 +159,23 @@ def register_roi_to_overview(
     sitk.WriteImage(fixed_cropped, str(cropped_overview_path), useCompression=True)
     sitk.WriteImage(result_sitk, str(registered_roi_path), useCompression=True)
 
+    registration_overlay_qc_path = output_dir / "registration_overlay_qc.png"
+    registration_slice_ncc: float | None = None
+    try:
+        from lightsuite.multires.plots import save_registration_overlay_qc_plot
+
+        registration_slice_ncc = save_registration_overlay_qc_plot(
+            overview_crop=fixed_cropped,
+            registered_roi=result_sitk,
+            output_path=registration_overlay_qc_path,
+            pair_label=pair_label,
+        )
+    except (ImportError, ValueError) as exc:
+        registration_overlay_qc_path = None
+        import warnings
+
+        warnings.warn(f"Registration overlay QC plot skipped: {exc}", stacklevel=1)
+
     registered_roi_full_overview_path: Path | None = None
     if write_full_overview_canvas:
         registered_roi_full_overview_path = (
@@ -185,6 +205,8 @@ def register_roi_to_overview(
         fixed_voxel_gb=fixed_gb,
         moving_voxel_gb=moving_gb,
         roi_to_overview_tform=roi_tform,
+        registration_overlay_qc_path=registration_overlay_qc_path,
+        registration_slice_ncc=registration_slice_ncc,
     )
 
 

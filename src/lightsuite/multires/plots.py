@@ -218,3 +218,67 @@ def save_geometry_slice_qc_plot(
     plt.tight_layout()
     plt.savefig(output_path, dpi=150)
     plt.close(fig)
+
+
+def save_registration_overlay_qc_plot(
+    *,
+    overview_crop: sitk.Image | np.ndarray,
+    registered_roi: sitk.Image | np.ndarray,
+    output_path: Path,
+    pair_label: str | None = None,
+    z_index: int | None = None,
+) -> float:
+    """Three-panel post-registration QC: overview crop, registered ROI, R/G overlay.
+
+    Returns mid-plane normalized cross-correlation (overview vs registered ROI).
+    """
+    output_path = output_path.expanduser()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    ov_arr = (
+        sitk.GetArrayFromImage(overview_crop)
+        if isinstance(overview_crop, sitk.Image)
+        else np.asarray(overview_crop, dtype=np.float32)
+    )
+    roi_arr = (
+        sitk.GetArrayFromImage(registered_roi)
+        if isinstance(registered_roi, sitk.Image)
+        else np.asarray(registered_roi, dtype=np.float32)
+    )
+    if ov_arr.shape != roi_arr.shape:
+        msg = (
+            f"Overview crop and registered ROI shapes must match for overlay QC: "
+            f"{ov_arr.shape} vs {roi_arr.shape}"
+        )
+        raise ValueError(msg)
+
+    z = int(z_index if z_index is not None else ov_arr.shape[0] // 2)
+    z = int(np.clip(z, 0, ov_arr.shape[0] - 1))
+    sl_overview = np.asarray(ov_arr[z], dtype=np.float32)
+    sl_roi = _resample_to_shape(np.asarray(roi_arr[z], dtype=np.float32), sl_overview.shape)
+
+    overview_norm = _normalize_panel(sl_overview)
+    roi_norm = _normalize_panel(sl_roi)
+    ncc = normalized_cross_correlation(overview_norm, roi_norm)
+
+    overlay = np.zeros((*overview_norm.shape, 3), dtype=np.float32)
+    overlay[:, :, 0] = overview_norm
+    overlay[:, :, 1] = roi_norm
+
+    fig, axes = plt.subplots(1, 3, figsize=(14, 5))
+    axes[0].imshow(overview_norm, cmap="gray")
+    axes[0].set_title("Overview crop")
+    axes[0].axis("off")
+    axes[1].imshow(roi_norm, cmap="gray")
+    axes[1].set_title("Registered ROI")
+    axes[1].axis("off")
+    axes[2].imshow(overlay)
+    axes[2].set_title("Overlay R=ov G=roi")
+    axes[2].axis("off")
+
+    label = pair_label or "pair"
+    fig.suptitle(f"{label} · mid Z · NCC={ncc:.3f}")
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=150)
+    plt.close(fig)
+    return ncc

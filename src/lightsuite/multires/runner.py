@@ -366,6 +366,7 @@ def run_multires_registration(cfg: MultiresPipelineConfig) -> MultiresRegOptsChe
         registration_bin=meso.registration.registration_bin,
         elastix_stages=meso.registration.elastix_stages,
         write_full_overview_canvas=meso.registration.write_full_overview_canvas,
+        pair_label=manifest.pair_label,
     )
 
     landmark_session_path = None
@@ -398,8 +399,18 @@ def run_multires_registration(cfg: MultiresPipelineConfig) -> MultiresRegOptsChe
         landmark_rms_error_um=(
             prepared.landmark_fit.rms_error_um if prepared.landmark_fit is not None else None
         ),
+        registration_overlay_qc_path=(
+            str(result.registration_overlay_qc_path)
+            if result.registration_overlay_qc_path is not None
+            else None
+        ),
+        registration_slice_ncc=result.registration_slice_ncc,
     )
     checkpoint.save(multires_checkpoint_path(cfg.sample.save_path))
+    if result.registration_overlay_qc_path is not None:
+        _status(f"Registration overlay QC: {result.registration_overlay_qc_path}")
+        if result.registration_slice_ncc is not None:
+            _status(f"Mid-plane NCC: {result.registration_slice_ncc:.3f}")
     if result.registered_roi_full_overview_path is not None:
         _status(f"Full overview canvas: {result.registered_roi_full_overview_path}")
     _status(f"Registered ROI: {result.registered_roi_path}")

@@ -93,7 +93,11 @@ class MultiresConfig(BaseModel):
             if not path.is_absolute():
                 path = self.pair_manifest.parent / path
             return path.resolve()
-        return default_landmark_session_path(save_path)
+        pair_label = getattr(manifest, "pair_label", None)
+        return default_landmark_session_path(
+            save_path,
+            pair_label=str(pair_label) if pair_label else None,
+        )
 
 
 class MultiresPipelineConfig(BaseModel):

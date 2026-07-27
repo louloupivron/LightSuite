@@ -60,5 +60,12 @@ class MultiresLandmarkSession:
         return min(n_overview, n_roi), n_overview, n_roi
 
 
-def default_landmark_session_path(save_path: Path) -> Path:
-    return save_path.expanduser() / "multires_landmarks.json"
+def default_landmark_session_path(save_path: Path, pair_label: str | None = None) -> Path:
+    """Default landmark JSON path; include pair label when available to avoid collisions."""
+    root = save_path.expanduser()
+    if pair_label:
+        from lightsuite.multires.registration import sanitize_experiment_name
+
+        slug = sanitize_experiment_name(str(pair_label))
+        return root / f"multires_landmarks_{slug}.json"
+    return root / "multires_landmarks.json"

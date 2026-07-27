@@ -22,7 +22,8 @@ multires:
 
   geometry_mode: landmarks
   landmarks:
-    session_path: null       # default: save_path/multires_landmarks.json
+    # Keep the existing single-FOV session (pre-pair-label default path).
+    session_path: /media/gbm/NVME2/ALICe-pipelines-data/Multi_RES_SCANs/registration_results/multires_landmarks.json
     fit_mode: similarity     # similarity | rigid | affine
     min_pairs: 3
 
