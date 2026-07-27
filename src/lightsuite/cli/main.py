@@ -770,6 +770,24 @@ def multires_validate_config(
     )
 
 
+@multires_app.command("match-points")
+def multires_match_points(
+    config: str = typer.Option(..., "--config", "-c", help="Multires pipeline YAML config."),
+    headless: bool = typer.Option(
+        False,
+        "--headless",
+        help="Create an empty landmark session without opening Napari (for tests).",
+    ),
+) -> None:
+    """Interactive overview / ROI landmark placement (Napari)."""
+    from lightsuite.config.loader import load_multires_config
+    from lightsuite.gui.match_points_multires import run_multires_match_points
+
+    cfg = load_multires_config(config)
+    path = run_multires_match_points(cfg, headless=headless)
+    typer.echo(f"Landmark session: {path}")
+
+
 @multires_app.command("check-geometry")
 def multires_check_geometry(
     config: str = typer.Option(..., "--config", "-c", help="Multires pipeline YAML config."),

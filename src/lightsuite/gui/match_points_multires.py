@@ -1,4 +1,4 @@
-"""Napari GUI for mesoSPIM overview / ROI landmark matching."""
+"""Napari GUI for multiresolution overview / ROI landmark matching."""
 
 from __future__ import annotations
 
@@ -11,42 +11,32 @@ from lightsuite.gui.match_points_shared import (
     PANEL_GAP_X,
     apply_layer_points,
     configure_point_text,
-    layer_xy_from_zyx,
     pair_status,
-    zyx_from_layer_xy,
 )
-from lightsuite.gui.mesospim_data import (
-    load_mesospim_match_points_data,
-    prepare_mesospim_match_points_session,
+from lightsuite.gui.multires_data import (
+    load_multires_match_points_data,
+    prepare_multires_match_points_session,
 )
-from lightsuite.mesospim.config_models import MesospimPipelineConfig
-from lightsuite.mesospim.landmark_geometry import (
-    fit_landmark_transform,
-    update_landmark_session_fit,
-)
+from lightsuite.multires.config_models import MultiresPipelineConfig
 
 console = Console()
 
-# Back-compat aliases for tests / older imports
-_apply_layer_points = apply_layer_points
-_configure_point_text = configure_point_text
-_layer_xy_from_zyx = layer_xy_from_zyx
-_pair_status = pair_status
-_zyx_from_layer_xy = zyx_from_layer_xy
-TEXT_LABEL_COLOR = "white"
-TEXT_LABEL_OFFSET = (0.0, 8.0)
+_SITK_HINT = "uv sync --extra gui --extra registration"
 
 
-def _pair_labels(n_points: int) -> list[str]:
-    from lightsuite.gui.match_points_shared import pair_labels
-
-    return pair_labels(n_points)
-
-
-def run_mesospim_match_points(cfg: MesospimPipelineConfig, *, headless: bool = False) -> Path:
+def run_multires_match_points(cfg: MultiresPipelineConfig, *, headless: bool = False) -> Path:
     """Launch Napari landmark matcher; returns saved session path."""
+    try:
+        import SimpleITK as sitk  # noqa: F401
+    except ImportError as exc:
+        msg = (
+            "SimpleITK is required for multires match-points.\n"
+            f"Install with: {_SITK_HINT}"
+        )
+        raise RuntimeError(msg) from exc
+
     if headless:
-        return prepare_mesospim_match_points_session(cfg)
+        return prepare_multires_match_points_session(cfg)
 
     try:
         import napari
@@ -55,14 +45,17 @@ def run_mesospim_match_points(cfg: MesospimPipelineConfig, *, headless: bool = F
         from napari.utils.notifications import show_info
         from qtpy.QtCore import QTimer
     except ImportError as exc:
-        msg = "Napari GUI requires: uv sync --extra gui"
+        msg = f"Napari GUI requires: {_SITK_HINT}"
         raise RuntimeError(msg) from exc
 
-    data = load_mesospim_match_points_data(cfg)
+    from lightsuite.multires.landmarks import fit_landmark_transform, update_landmark_session_fit
+    from lightsuite.multires.spec_geometry import sitk_geometry_from_spec
+
+    data = load_multires_match_points_data(cfg)
     state = {
-        "overview_z": data.overview_shape_zyx[0] // 2,
-        "roi_z": data.roi_shape_zyx[0] // 2,
-        "link_z": False,
+        "overview_z": data.initial_overview_z,
+        "roi_z": data.initial_roi_z,
+        "link_z": True if data.crop_mode else False,
         "_nav_syncing": False,
         "_view_shape": None,
         "_pending_overview_z": None,
@@ -73,11 +66,14 @@ def run_mesospim_match_points(cfg: MesospimPipelineConfig, *, headless: bool = F
     z_nav_timer.setSingleShot(True)
     z_nav_timer.setInterval(32)
 
-    viewer = napari.Viewer(title=f"LightSuite mesospim — {cfg.sample.name}")
+    mode_label = "hybrid crop" if data.crop_mode else "full volume"
+    viewer = napari.Viewer(
+        title=f"LightSuite multires — {cfg.sample.name} ({mode_label})"
+    )
     viewer.dims.ndisplay = 2
 
-    overview_layer = viewer.add_image(np.zeros((10, 10)), name="overview", colormap="gray")
-    roi_layer = viewer.add_image(np.zeros((10, 10)), name="roi", colormap="gray")
+    overview_layer = viewer.add_image(np.zeros((10, 10)), name="overview_crop", colormap="gray")
+    roi_layer = viewer.add_image(np.zeros((10, 10)), name="roi_crop", colormap="gray")
     overview_pts = viewer.add_points(
         np.zeros((0, 2)),
         name="overview_points",
@@ -92,14 +88,22 @@ def run_mesospim_match_points(cfg: MesospimPipelineConfig, *, headless: bool = F
         size=10,
         ndim=2,
     )
-    _configure_point_text(overview_pts)
-    _configure_point_text(roi_pts)
+    configure_point_text(overview_pts)
+    configure_point_text(roi_pts)
 
     points_summary = Label(
         label="Landmark pairs",
         value="Total points: 0 matched pairs (0 overview, 0 ROI)",
     )
     fit_summary = Label(label="Fit preview", value="Add landmark pairs to preview the transform.")
+    crop_summary = Label(
+        label="Display",
+        value=(
+            f"Metadata overlap crop (±{data.margin_um:.0f} µm)"
+            if data.crop_mode
+            else "Full volumes (no metadata overlap — fallback)"
+        ),
+    )
 
     def _layout_panels() -> None:
         _h, w = overview_layer.data.shape
@@ -126,18 +130,11 @@ def run_mesospim_match_points(cfg: MesospimPipelineConfig, *, headless: bool = F
             )
             return
         try:
-            import SimpleITK as sitk
-
-            from lightsuite.mesospim.prepare import apply_volume_geometry
-
-            overview_img = sitk.GetImageFromArray(
-                np.zeros(data.overview_shape_zyx, dtype=np.float32)
-            )
-            roi_img = sitk.GetImageFromArray(np.zeros(data.roi_shape_zyx, dtype=np.float32))
-            apply_volume_geometry(overview_img, roi_img, cfg.mesospim)
+            overview_geo = sitk_geometry_from_spec(data.overview_spec)
+            roi_geo = sitk_geometry_from_spec(data.roi_spec)
             fit = fit_landmark_transform(
-                overview=overview_img,
-                roi=roi_img,
+                overview=overview_geo,
+                roi=roi_geo,
                 session=data.session,
                 fit_mode=data.session.fit_mode,
                 min_pairs=data.min_pairs,
@@ -153,11 +150,17 @@ def run_mesospim_match_points(cfg: MesospimPipelineConfig, *, headless: bool = F
     def _update_status() -> None:
         matched, n_overview, n_roi = data.session.point_counts()
         _update_summaries()
+        oy0, ox0 = data.overview.xy_origin_yx
+        ry0, rx0 = data.roi.xy_origin_yx
         viewer.status = (
-            f"Overview Z={state['overview_z']}/{data.overview_shape_zyx[0] - 1} | "
-            f"ROI Z={state['roi_z']}/{data.roi_shape_zyx[0] - 1} | "
-            f"{_pair_status(n_overview, n_roi)} | "
-            f"all: {matched} pairs ({n_overview} overview / {n_roi} ROI)"
+            f"Overview Z={state['overview_z']} "
+            f"[{data.overview.z_min}–{data.overview.z_max}] "
+            f"cropYX@({oy0},{ox0}) | "
+            f"ROI Z={state['roi_z']} "
+            f"[{data.roi.z_min}–{data.roi.z_max}] "
+            f"cropYX@({ry0},{rx0}) | "
+            f"{pair_status(n_overview, n_roi)} | "
+            f"all: {matched} pairs"
         )
 
     def _refresh(*, fit_preview: bool = False) -> None:
@@ -165,13 +168,19 @@ def run_mesospim_match_points(cfg: MesospimPipelineConfig, *, headless: bool = F
         roi_layer.data = data.roi.read_display_slice(state["roi_z"])
         _layout_panels()
         with overview_pts.events.data.blocker(), roi_pts.events.data.blocker():
-            _apply_layer_points(
+            apply_layer_points(
                 overview_pts,
-                _layer_xy_from_zyx(data.session.overview_points_zyx, state["overview_z"]),
+                data.overview.display_xy_from_volume_zyx(
+                    data.session.overview_points_zyx,
+                    state["overview_z"],
+                ),
             )
-            _apply_layer_points(
+            apply_layer_points(
                 roi_pts,
-                _layer_xy_from_zyx(data.session.roi_points_zyx, state["roi_z"]),
+                data.roi.display_xy_from_volume_zyx(
+                    data.session.roi_points_zyx,
+                    state["roi_z"],
+                ),
             )
         if fit_preview:
             _try_fit_preview()
@@ -183,18 +192,18 @@ def run_mesospim_match_points(cfg: MesospimPipelineConfig, *, headless: bool = F
             state["_view_shape"] = overview_layer.data.shape
 
     def _sync_store_from_layer(panel: str) -> None:
-        layer = overview_pts if panel == "overview" else roi_pts
-        z_index = state["overview_z"] if panel == "overview" else state["roi_z"]
-        store = (
-            data.session.overview_points_zyx
-            if panel == "overview"
-            else data.session.roi_points_zyx
-        )
-        updated = _zyx_from_layer_xy(np.asarray(layer.data, dtype=float), z_index, store)
         if panel == "overview":
-            data.session.overview_points_zyx = updated
+            data.session.overview_points_zyx = data.overview.volume_zyx_from_display_xy(
+                np.asarray(overview_pts.data, dtype=float),
+                state["overview_z"],
+                data.session.overview_points_zyx,
+            )
         else:
-            data.session.roi_points_zyx = updated
+            data.session.roi_points_zyx = data.roi.volume_zyx_from_display_xy(
+                np.asarray(roi_pts.data, dtype=float),
+                state["roi_z"],
+                data.session.roi_points_zyx,
+            )
 
     def _on_panel_points_changed(panel: str) -> None:
         _sync_store_from_layer(panel)
@@ -226,15 +235,17 @@ def run_mesospim_match_points(cfg: MesospimPipelineConfig, *, headless: bool = F
         refocus_canvas: bool = False,
     ) -> None:
         if overview_z is not None:
-            state["overview_z"] = int(
-                np.clip(overview_z, 0, data.overview_shape_zyx[0] - 1)
-            )
+            state["overview_z"] = data.overview.clip_z(overview_z)
         if roi_z is not None:
-            state["roi_z"] = int(np.clip(roi_z, 0, data.roi_shape_zyx[0] - 1))
-        if state["link_z"] and overview_z is not None:
-            state["roi_z"] = state["overview_z"]
-        elif state["link_z"] and roi_z is not None:
-            state["overview_z"] = state["roi_z"]
+            state["roi_z"] = data.roi.clip_z(roi_z)
+        if state["link_z"] and overview_z is not None and roi_z is None:
+            state["roi_z"] = data.roi.z_index_from_physical_z(
+                data.overview.physical_z_um(state["overview_z"])
+            )
+        elif state["link_z"] and roi_z is not None and overview_z is None:
+            state["overview_z"] = data.overview.z_index_from_physical_z(
+                data.roi.physical_z_um(state["roi_z"])
+            )
         _refresh(fit_preview=False)
         _sync_navigation_widget()
         if refocus_canvas:
@@ -271,23 +282,31 @@ def run_mesospim_match_points(cfg: MesospimPipelineConfig, *, headless: bool = F
                 target.setFocus()
                 return
 
+    _init_oz = int(data.initial_overview_z)
+    _init_rz = int(data.initial_roi_z)
+    _init_link = bool(state["link_z"])
+
     @magicgui(
         overview_z={
-            "min": 0,
-            "max": max(data.overview_shape_zyx[0] - 1, 0),
+            "min": int(data.overview.z_min),
+            "max": int(data.overview.z_max),
             "step": 1,
             "label": "Overview Z index",
         },
         roi_z={
-            "min": 0,
-            "max": max(data.roi_shape_zyx[0] - 1, 0),
+            "min": int(data.roi.z_min),
+            "max": int(data.roi.z_max),
             "step": 1,
             "label": "ROI Z index",
         },
-        link_z={"label": "Link overview / ROI Z"},
+        link_z={"label": "Link Z (physical)"},
         call_button="Show slices",
     )
-    def navigation(overview_z: int = 0, roi_z: int = 0, link_z: bool = False) -> None:
+    def navigation(
+        overview_z: int = _init_oz,
+        roi_z: int = _init_rz,
+        link_z: bool = _init_link,
+    ) -> None:
         state["link_z"] = bool(link_z)
         _set_z(overview_z=overview_z, roi_z=roi_z)
 
@@ -316,18 +335,11 @@ def run_mesospim_match_points(cfg: MesospimPipelineConfig, *, headless: bool = F
         matched, n_overview, n_roi = data.session.point_counts()
         if matched >= data.min_pairs and n_overview == n_roi:
             try:
-                import SimpleITK as sitk
-
-                from lightsuite.mesospim.prepare import apply_volume_geometry
-
-                overview_img = sitk.GetImageFromArray(
-                    np.zeros(data.overview_shape_zyx, dtype=np.float32)
-                )
-                roi_img = sitk.GetImageFromArray(np.zeros(data.roi_shape_zyx, dtype=np.float32))
-                apply_volume_geometry(overview_img, roi_img, cfg.mesospim)
+                overview_geo = sitk_geometry_from_spec(data.overview_spec)
+                roi_geo = sitk_geometry_from_spec(data.roi_spec)
                 fit = fit_landmark_transform(
-                    overview=overview_img,
-                    roi=roi_img,
+                    overview=overview_geo,
+                    roi=roi_geo,
                     session=data.session,
                     fit_mode=data.session.fit_mode,
                     min_pairs=data.min_pairs,
@@ -389,6 +401,7 @@ def run_mesospim_match_points(cfg: MesospimPipelineConfig, *, headless: bool = F
     viewer.bind_key("PageDown", lambda _v: _roi_z_step(-1), overwrite=True)
     viewer.bind_key("Backspace", lambda _v: delete_last_point(), overwrite=True)
 
+    viewer.window.add_dock_widget(crop_summary, area="right", name="Crop mode")
     viewer.window.add_dock_widget(points_summary, area="right", name="Point counts")
     viewer.window.add_dock_widget(fit_summary, area="right", name="Fit preview")
     viewer.window.add_dock_widget(navigation, area="right", name="Navigation")
@@ -401,9 +414,12 @@ def run_mesospim_match_points(cfg: MesospimPipelineConfig, *, headless: bool = F
     _sync_navigation_widget()
 
     console.print(
-        "[bold]Napari mesoSPIM landmark GUI[/bold] — overview (left), ROI (right). "
-        "Place numbered corresponding landmarks on salient structures. "
-        "Points are stored as [Z, Y, X] voxel indices. "
+        "[bold]Napari multires landmark GUI[/bold] — "
+        f"{'metadata overlap crop' if data.crop_mode else 'full volumes'} "
+        "(overview left, ROI right). "
+        "Landmarks are stored as full-volume [Z, Y, X] indices. "
+        "After saving, set [bold]geometry_mode: landmarks[/bold] (or hybrid) then "
+        "run check-geometry / register. "
         "Shortcuts: [bold]←[/bold]/[bold]→[/bold] overview Z, "
         "[bold]PgUp[/bold]/[bold]PgDn[/bold] ROI Z, [bold]Backspace[/bold] undo last point."
     )

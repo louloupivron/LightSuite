@@ -6,7 +6,6 @@ from lightsuite.mesospim.landmark_session import (
     MesospimLandmarkSession,
     default_landmark_session_path,
 )
-from lightsuite.mesospim.runner import check_mesospim_geometry, run_mesospim_registration
 
 __all__ = [
     "MesospimGeometryMode",
@@ -18,3 +17,15 @@ __all__ = [
     "mesospim_checkpoint_path",
     "run_mesospim_registration",
 ]
+
+
+def check_mesospim_geometry(*args, **kwargs):
+    from lightsuite.mesospim.runner import check_mesospim_geometry as _impl
+
+    return _impl(*args, **kwargs)
+
+
+def run_mesospim_registration(*args, **kwargs):
+    from lightsuite.mesospim.runner import run_mesospim_registration as _impl
+
+    return _impl(*args, **kwargs)

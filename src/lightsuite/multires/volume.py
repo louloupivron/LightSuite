@@ -259,6 +259,23 @@ def load_manifest_xy_slice(
     raise FileNotFoundError(msg)
 
 
+def load_manifest_xy_plane_at_z_index(
+    spec: ManifestVolumeSpec,
+    z_index: int,
+    *,
+    manifest_dir: Path | None = None,
+) -> np.ndarray:
+    """Load one full XY plane by Z index without reading the full stack."""
+    _nz, ny, nx = (int(v) for v in spec.shape_zyx)
+    return load_manifest_xy_crop(
+        spec,
+        z_index=z_index,
+        start_xyz=[0, 0, 0],
+        crop_size_xyz=[nx, ny, 1],
+        manifest_dir=manifest_dir,
+    )
+
+
 def load_manifest_xy_crop(
     spec: ManifestVolumeSpec,
     *,

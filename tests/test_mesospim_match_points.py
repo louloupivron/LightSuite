@@ -9,10 +9,10 @@ import tifffile
 import yaml
 
 from lightsuite.config.loader import load_mesospim_config
-from lightsuite.gui.match_points_mesospim import (
-    _layer_xy_from_zyx,
-    _pair_status,
-    _zyx_from_layer_xy,
+from lightsuite.gui.match_points_shared import (
+    layer_xy_from_zyx,
+    pair_status,
+    zyx_from_layer_xy,
 )
 from lightsuite.gui.mesospim_data import MesospimSliceSource, prepare_mesospim_match_points_session
 from lightsuite.mesospim.config_models import MesospimTiffRemapConfig
@@ -21,11 +21,11 @@ from lightsuite.mesospim.landmark_session import default_landmark_session_path
 
 def test_layer_xy_roundtrip() -> None:
     points = [[2.0, 10.0, 20.0], [5.0, 30.0, 40.0]]
-    xy = _layer_xy_from_zyx(points, z_index=2)
+    xy = layer_xy_from_zyx(points, z_index=2)
     assert xy.shape == (1, 2)
     assert np.allclose(xy[0], [10.0, 20.0])
 
-    updated = _zyx_from_layer_xy(np.array([[11.0, 21.0], [31.0, 41.0]]), 2, points)
+    updated = zyx_from_layer_xy(np.array([[11.0, 21.0], [31.0, 41.0]]), 2, points)
     assert len(updated) == 3
     assert updated[0] == [5.0, 30.0, 40.0]
     assert updated[1] == [2.0, 11.0, 21.0]
@@ -33,9 +33,9 @@ def test_layer_xy_roundtrip() -> None:
 
 
 def test_pair_status_messages() -> None:
-    assert "ROI point #2" in _pair_status(2, 1)
-    assert "overview point #2" in _pair_status(1, 2)
-    assert "matched" in _pair_status(3, 3)
+    assert "ROI point #2" in pair_status(2, 1)
+    assert "overview point #2" in pair_status(1, 2)
+    assert "matched" in pair_status(3, 3)
 
 
 def test_prepare_mesospim_match_points_session_headless(tmp_path: Path) -> None:

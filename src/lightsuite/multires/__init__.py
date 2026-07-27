@@ -13,7 +13,6 @@ from lightsuite.multires.manifest import (
     load_pair_manifest,
     save_pair_manifest,
 )
-from lightsuite.multires.runner import check_multires_geometry, run_multires_registration
 
 __all__ = [
     "MANIFEST_FORMAT",
@@ -30,3 +29,15 @@ __all__ = [
     "run_multires_registration",
     "save_pair_manifest",
 ]
+
+
+def check_multires_geometry(*args, **kwargs):
+    from lightsuite.multires.runner import check_multires_geometry as _impl
+
+    return _impl(*args, **kwargs)
+
+
+def run_multires_registration(*args, **kwargs):
+    from lightsuite.multires.runner import run_multires_registration as _impl
+
+    return _impl(*args, **kwargs)
