@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import SimpleITK as sitk
 
+from lightsuite.multires.geometry import crop_index_range_from_continuous_indices
 from lightsuite.multires.volume import apply_manifest_geometry
 
 if TYPE_CHECKING:
@@ -108,12 +109,7 @@ def crop_index_range_from_physical_box(
                 corners.append((x, y, z))
 
     indices = np.array([physical_to_continuous_index_xyz(spec, point) for point in corners])
-    idx_lo = np.floor(indices.min(axis=0)).astype(int)
-    idx_hi = np.ceil(indices.max(axis=0)).astype(int)
-    idx_lo = np.clip(idx_lo, 0, size_img - 1)
-    idx_hi = np.clip(idx_hi, 0, size_img - 1)
-    start = idx_lo.tolist()
-    crop_size = (idx_hi - idx_lo + 1).tolist()
+    start, crop_size = crop_index_range_from_continuous_indices(indices, size_img)
     return start, crop_size
 
 
@@ -143,6 +139,37 @@ def overlap_box_from_landmark_specs(
         )
         raise ValueError(msg)
     return overlap_min, overlap_max
+
+
+def alignment_metrics_from_specs(
+    overview_spec: ManifestVolumeSpec,
+    roi_spec: ManifestVolumeSpec,
+    *,
+    overlap_min: np.ndarray | None = None,
+    overlap_max: np.ndarray | None = None,
+) -> dict[str, object]:
+    """Quantify manifest-only alignment between overview and ROI volumes."""
+    overview_center = physical_center_from_spec(overview_spec)
+    roi_center = physical_center_from_spec(roi_spec)
+    center_offset_um = roi_center - overview_center
+    if overlap_min is None or overlap_max is None:
+        overlap_min, overlap_max = overlap_physical_bounds_from_specs(overview_spec, roi_spec)
+    overlap_extent = np.maximum(0.0, overlap_max - overlap_min)
+    overlap_volume_um3 = float(np.prod(overlap_extent))
+    roi_extent = physical_bounds_from_spec(roi_spec)[1] - physical_bounds_from_spec(roi_spec)[0]
+    overview_extent = physical_bounds_from_spec(overview_spec)[1] - physical_bounds_from_spec(overview_spec)[0]
+    roi_volume_um3 = float(np.prod(roi_extent))
+    overview_volume_um3 = float(np.prod(overview_extent))
+    return {
+        "center_offset_um": center_offset_um.tolist(),
+        "center_offset_norm_um": float(np.linalg.norm(center_offset_um)),
+        "overlap_center_um": (0.5 * (overlap_min + overlap_max)).tolist(),
+        "overlap_extent_um": overlap_extent.tolist(),
+        "roi_overlap_fraction": overlap_volume_um3 / roi_volume_um3 if roi_volume_um3 > 0 else 0.0,
+        "overview_overlap_fraction": overlap_volume_um3 / overview_volume_um3
+        if overview_volume_um3 > 0
+        else 0.0,
+    }
 
 
 def manifest_geometry_report_from_spec(label: str, spec: ManifestVolumeSpec) -> dict[str, object]:

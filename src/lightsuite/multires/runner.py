@@ -13,11 +13,12 @@ from lightsuite.multires.config_models import (
     MultiresGeometryMode,
     MultiresPipelineConfig,
 )
-from lightsuite.multires.geometry import transformed_bounds_in_target_space
+from lightsuite.multires.geometry import physical_corners, transform_physical_points, transformed_bounds_in_target_space
 from lightsuite.multires.landmarks import fit_landmark_transform
 from lightsuite.multires.manifest import load_pair_manifest
 from lightsuite.multires.models import MultiresPairManifest, serialize_report
 from lightsuite.multires.plots import (
+    normalized_cross_correlation,
     save_fov_overlap_plot,
     save_geometry_overlap_qc_plot,
     save_geometry_slice_qc_plot,
@@ -25,14 +26,16 @@ from lightsuite.multires.plots import (
 from lightsuite.multires.prepare import load_landmark_session, prepare_multires_registration_pair
 from lightsuite.multires.registration import register_roi_to_overview, sanitize_experiment_name
 from lightsuite.multires.spec_geometry import (
+    alignment_metrics_from_specs,
     crop_index_range_from_physical_box,
     manifest_geometry_report_from_spec,
     overlap_box_from_landmark_specs,
     overlap_physical_bounds_from_specs,
+    physical_to_continuous_index_xyz,
     sitk_geometry_from_spec,
     transformed_bounds_from_spec,
 )
-from lightsuite.multires.volume import load_manifest_xy_slice, write_sitk_hyperstack_tiff
+from lightsuite.multires.volume import load_manifest_xy_crop, write_sitk_hyperstack_tiff
 
 
 def _status(message: str) -> None:
@@ -129,6 +132,12 @@ def _write_geometry_artifacts(
     manifest_path = cfg.multires.pair_manifest
 
     report_path = geometry_dir / "geometry_report.json"
+    alignment_metrics = alignment_metrics_from_specs(
+        manifest.overview,
+        manifest.roi,
+        overlap_min=overlap_min,
+        overlap_max=overlap_max,
+    )
     serializable = {
         "geometry_mode": mode.value,
         "geometry_check_level": level.value,
@@ -137,6 +146,7 @@ def _write_geometry_artifacts(
         "overview": serialize_report(rep_overview),
         "roi": serialize_report(rep_roi),
         "overlap_box_um": [overlap_min.tolist(), overlap_max.tolist()],
+        "alignment_metrics": serialize_report(alignment_metrics),
     }
     if landmark_fit is not None:
         serializable["landmark_fit"] = {
@@ -144,7 +154,6 @@ def _write_geometry_artifacts(
             "fit_stats": landmark_fit.fit_stats,
             "roi_to_overview_tform": landmark_fit.roi_to_overview_tform.tolist(),
         }
-    report_path.write_text(json.dumps(serializable, indent=2), encoding="utf-8")
 
     overview_path = Path(manifest.overview.volume_path)
     roi_path = Path(manifest.roi.volume_path)
@@ -171,32 +180,70 @@ def _write_geometry_artifacts(
     roi_tform = landmark_fit.roi_to_overview_tform if landmark_fit is not None else None
     if level == MultiresGeometryCheckLevel.SLICE_QC:
         center_um = tuple(float(v) for v in 0.5 * (overlap_min + overlap_max))
-        sl_overview = load_manifest_xy_slice(
+        overview_start, overview_size = crop_index_range_from_physical_box(
             manifest.overview,
-            physical_um=center_um,
-            manifest_dir=manifest_dir,
+            overlap_min,
+            overlap_max,
         )
         if roi_tform is None:
-            sl_roi = load_manifest_xy_slice(
+            roi_start, roi_size = crop_index_range_from_physical_box(
                 manifest.roi,
-                physical_um=center_um,
-                manifest_dir=manifest_dir,
+                overlap_min,
+                overlap_max,
             )
+            roi_physical_um = center_um
         else:
-            roi_center = (
-                np.linalg.inv(roi_tform) @ np.array([*center_um, 1.0], dtype=float)
-            )[:3]
-            sl_roi = load_manifest_xy_slice(
+            inv = np.linalg.inv(roi_tform)
+            roi_corners = transform_physical_points(physical_corners(overlap_min, overlap_max), inv)
+            roi_phys_min = roi_corners.min(axis=0)
+            roi_phys_max = roi_corners.max(axis=0)
+            roi_start, roi_size = crop_index_range_from_physical_box(
                 manifest.roi,
-                physical_um=tuple(float(v) for v in roi_center),
-                manifest_dir=manifest_dir,
+                roi_phys_min,
+                roi_phys_max,
             )
+            roi_physical_um = tuple(
+                float(v)
+                for v in (inv @ np.array([*center_um, 1.0], dtype=float))[:3]
+            )
+        overview_z = int(
+            round(physical_to_continuous_index_xyz(manifest.overview, center_um)[2])
+        )
+        roi_z = int(
+            round(physical_to_continuous_index_xyz(manifest.roi, roi_physical_um)[2])
+        )
+        sl_overview = load_manifest_xy_crop(
+            manifest.overview,
+            z_index=overview_z,
+            start_xyz=overview_start,
+            crop_size_xyz=overview_size,
+            manifest_dir=manifest_dir,
+        )
+        sl_roi = load_manifest_xy_crop(
+            manifest.roi,
+            z_index=roi_z,
+            start_xyz=roi_start,
+            crop_size_xyz=roi_size,
+            manifest_dir=manifest_dir,
+        )
+        try:
+            from lightsuite.multires.plots import _normalize_panel, _resample_to_shape
+
+            roi_panel = _resample_to_shape(_normalize_panel(sl_roi), _normalize_panel(sl_overview).shape)
+            alignment_metrics["slice_ncc"] = normalized_cross_correlation(
+                roi_panel,
+                _normalize_panel(sl_overview),
+            )
+        except ValueError:
+            alignment_metrics["slice_ncc"] = None
+        serializable["alignment_metrics"] = serialize_report(alignment_metrics)
         save_geometry_slice_qc_plot(
             sl_overview=sl_overview,
             sl_roi=sl_roi,
             center_um=center_um,
             output_path=qc_plot_path,
             geometry_mode=mode.value,
+            alignment_metrics=alignment_metrics,
         )
     elif level == MultiresGeometryCheckLevel.FULL:
         assert prepared is not None
@@ -208,9 +255,13 @@ def _write_geometry_artifacts(
             output_path=qc_plot_path,
             geometry_mode=mode.value,
             roi_to_overview=roi_tform,
+            overview_crop=prepared.fixed_cropped,
+            roi_crop=prepared.moving,
         )
         write_sitk_hyperstack_tiff(cropped_path, prepared.fixed_cropped)
         geometry_report_paths["cropped_overview_preview"] = str(cropped_path)
+
+    report_path.write_text(json.dumps(serializable, indent=2), encoding="utf-8")
 
     experiment_slug = sanitize_experiment_name(cfg.multires.registration.experiment_name)
     landmark_session_path = None

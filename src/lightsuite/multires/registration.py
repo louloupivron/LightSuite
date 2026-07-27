@@ -52,6 +52,26 @@ class MultiresRegistrationResult:
     roi_to_overview_tform: list[list[float]] | None = None
 
 
+def apply_elastix_transforms(
+    moving: sitk.Image,
+    transform_paths: list[Path],
+    *,
+    reference: sitk.Image,
+) -> sitk.Image:
+    """Apply saved elastix transform parameter files to *moving* on *reference* grid."""
+    import itk
+
+    parameter_object = itk.ParameterObject.New()
+    for path in transform_paths:
+        parameter_object.AddParameterFile(str(path))
+    result_itk = itk.transformix_filter(
+        sitk_to_itk(moving),
+        transform_parameter_object=parameter_object,
+    )
+    result_sitk = sitk.GetImageFromArray(itk.GetArrayFromImage(result_itk))
+    return resample_to_reference_grid(result_sitk, reference)
+
+
 def register_roi_to_overview(
     *,
     prepared: MultiresPreparedPair,
@@ -96,8 +116,16 @@ def register_roi_to_overview(
 
     result_sitk = sitk.GetImageFromArray(itk.GetArrayFromImage(result_itk))
     result_sitk.CopyInformation(fixed_for_elastix)
+    transform_paths = sorted(output_dir.glob("TransformParameters.*.txt"))
+    if not transform_paths:
+        msg = f"No elastix transform files written under {output_dir}"
+        raise RuntimeError(msg)
     if registration_bin > 1:
-        result_sitk = resample_to_reference_grid(result_sitk, fixed_cropped)
+        result_sitk = apply_elastix_transforms(
+            moving,
+            transform_paths,
+            reference=fixed_cropped,
+        )
 
     cropped_overview_path = output_dir / f"{experiment_slug}_{overview_stem}_cropped_overlap.tif"
     registered_roi_path = (
@@ -114,11 +142,6 @@ def register_roi_to_overview(
             / f"{experiment_slug}_{roi_stem}_registered_to_{overview_stem}_in_full_overview.tif"
         )
         sitk.WriteImage(full_canvas, str(registered_roi_full_overview_path), useCompression=True)
-
-    transform_paths = sorted(output_dir.glob("TransformParameters.*.txt"))
-    if not transform_paths:
-        msg = f"No elastix transform files written under {output_dir}"
-        raise RuntimeError(msg)
 
     overlap_min, overlap_max = overlap_box
     roi_tform = None
@@ -141,6 +164,7 @@ def register_roi_to_overview(
 
 __all__ = [
     "MultiresRegistrationResult",
+    "apply_elastix_transforms",
     "build_elastix_parameter_object",
     "register_roi_to_overview",
     "sanitize_experiment_name",

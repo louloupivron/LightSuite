@@ -17,6 +17,7 @@ from lightsuite.multires.manifest import save_pair_manifest
 from lightsuite.multires.models import MANIFEST_FORMAT, ManifestVolumeSpec, MultiresPairManifest
 from lightsuite.multires.runner import check_multires_geometry
 from lightsuite.multires.spec_geometry import (
+    alignment_metrics_from_specs,
     manifest_geometry_report_from_spec,
     overlap_physical_bounds_from_specs,
     physical_bounds_from_spec,
@@ -71,6 +72,48 @@ def test_manifest_geometry_report_uses_spec_only() -> None:
     assert report["phys_min"][0] == pytest.approx(4.0)
 
 
+def test_spec_crop_matches_sitk_crop(tmp_path: Path) -> None:
+    from lightsuite.multires.geometry import crop_to_physical_box
+    from lightsuite.multires.spec_geometry import crop_index_range_from_physical_box
+
+    overview_dir = tmp_path / "overview"
+    roi_dir = tmp_path / "roi"
+    _write_plane_stack(overview_dir, (4, 8, 8))
+    _write_plane_stack(roi_dir, (4, 4, 4))
+
+    manifest = MultiresPairManifest(
+        format=MANIFEST_FORMAT,
+        sample_name="sample",
+        pair_label="pair",
+        overview=_overview_spec(overview_dir),
+        roi=_roi_spec(roi_dir),
+    )
+    overlap_min, overlap_max = overlap_physical_bounds_from_specs(manifest.overview, manifest.roi)
+    spec_start, spec_size = crop_index_range_from_physical_box(
+        manifest.overview,
+        overlap_min,
+        overlap_max,
+    )
+
+    image = sitk.GetImageFromArray(np.zeros((4, 8, 8), dtype=np.float32))
+    image.SetSpacing((2.0, 2.0, 2.0))
+    image.SetOrigin((0.0, 0.0, 0.0))
+    _, sitk_start = crop_to_physical_box(image, overlap_min, overlap_max)
+    assert spec_start == sitk_start
+    assert spec_size == [4, 4, 4]
+
+
+def test_alignment_metrics_from_specs() -> None:
+    overview = _overview_spec(Path("overview"))
+    roi = _roi_spec(Path("roi"))
+    overlap_min, overlap_max = overlap_physical_bounds_from_specs(overview, roi)
+    metrics = alignment_metrics_from_specs(overview, roi, overlap_min=overlap_min, overlap_max=overlap_max)
+    assert metrics["center_offset_um"] == [0.0, 0.0, 0.0]
+    assert metrics["center_offset_norm_um"] == pytest.approx(0.0)
+    assert metrics["roi_overlap_fraction"] == pytest.approx(1.0)
+    assert metrics["overview_overlap_fraction"] == pytest.approx(0.1836734693877551)
+
+
 def test_check_multires_geometry_metadata_only(tmp_path: Path) -> None:
     overview_dir = tmp_path / "overview"
     roi_dir = tmp_path / "roi"
@@ -108,6 +151,29 @@ def test_check_multires_geometry_metadata_only(tmp_path: Path) -> None:
     report = json.loads((geometry_dir / "geometry_report.json").read_text(encoding="utf-8"))
     assert report["roi"]["phys_min"][0] == pytest.approx(4.0)
     assert report["roi"]["phys_center"][0] == pytest.approx(7.0)
+    assert report["alignment_metrics"]["center_offset_norm_um"] == pytest.approx(0.0)
+
+
+def test_load_manifest_xy_crop_matches_plane_per_file(tmp_path: Path) -> None:
+    folder = tmp_path / "stack"
+    _write_plane_stack(folder, (3, 5, 6))
+    spec = ManifestVolumeSpec(
+        volume_path=str(folder),
+        shape_zyx=[3, 5, 6],
+        spacing_um=[1.0, 1.0, 1.0],
+        origin_um=[0.0, 0.0, 0.0],
+    )
+    from lightsuite.multires.volume import load_manifest_xy_crop, load_manifest_xy_slice
+
+    full_plane = load_manifest_xy_slice(spec, physical_um=(1.0, 1.0, 1.0))
+    crop = load_manifest_xy_crop(
+        spec,
+        z_index=1,
+        start_xyz=[1, 1, 1],
+        crop_size_xyz=[3, 2, 1],
+    )
+    assert crop.shape == (2, 3)
+    np.testing.assert_array_equal(crop, full_plane[1:3, 1:4])
 
 
 def test_load_manifest_xy_slice_plane_per_file(tmp_path: Path) -> None:

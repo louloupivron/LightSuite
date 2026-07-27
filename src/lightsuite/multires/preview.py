@@ -9,12 +9,17 @@ from typing import Literal
 import numpy as np
 import tifffile
 
-from lightsuite.multires.config_models import MultiresPipelineConfig
+from lightsuite.multires.config_models import MultiresGeometryMode, MultiresPipelineConfig
+from lightsuite.multires.landmark_session import load_landmark_session
+from lightsuite.multires.landmarks import fit_landmark_transform
 from lightsuite.multires.manifest import load_pair_manifest
+from lightsuite.multires.geometry import physical_corners, transform_physical_points
 from lightsuite.multires.spec_geometry import (
     crop_index_range_from_physical_box,
+    overlap_box_from_landmark_specs,
     overlap_physical_bounds_from_specs,
     physical_to_continuous_index_xyz,
+    sitk_geometry_from_spec,
 )
 from lightsuite.multires.volume import _normalize_tiff_array, _resolve_volume_path, _sorted_plane_files
 
@@ -159,22 +164,54 @@ def export_alignment_preview_crops(
     manifest = load_pair_manifest(manifest_path)
     manifest_dir = manifest_path.parent
     pair_label = manifest.pair_label
+    mode = cfg.multires.geometry_mode
+    margin_um = cfg.multires.registration.overlap_margin_um
+    roi_to_overview = None
 
-    overlap_min, overlap_max = overlap_physical_bounds_from_specs(
-        manifest.overview,
-        manifest.roi,
-        margin_um=cfg.multires.registration.overlap_margin_um,
-    )
+    if mode == MultiresGeometryMode.METADATA:
+        overlap_min, overlap_max = overlap_physical_bounds_from_specs(
+            manifest.overview,
+            manifest.roi,
+            margin_um=margin_um,
+        )
+    else:
+        session_path = cfg.multires.resolved_landmark_session_path(cfg.sample.save_path, manifest)
+        session = load_landmark_session(session_path)
+        landmark_fit = fit_landmark_transform(
+            overview=sitk_geometry_from_spec(manifest.overview),
+            roi=sitk_geometry_from_spec(manifest.roi),
+            session=session,
+            fit_mode=cfg.multires.landmarks.fit_mode,
+            min_pairs=cfg.multires.landmarks.min_pairs,
+        )
+        roi_to_overview = landmark_fit.roi_to_overview_tform
+        overlap_min, overlap_max = overlap_box_from_landmark_specs(
+            manifest.overview,
+            manifest.roi,
+            roi_to_overview,
+            margin_um=margin_um,
+        )
     overview_start, overview_size = crop_index_range_from_physical_box(
         manifest.overview,
         overlap_min,
         overlap_max,
     )
-    roi_start, roi_size = crop_index_range_from_physical_box(
-        manifest.roi,
-        overlap_min,
-        overlap_max,
-    )
+    if roi_to_overview is None:
+        roi_start, roi_size = crop_index_range_from_physical_box(
+            manifest.roi,
+            overlap_min,
+            overlap_max,
+        )
+    else:
+        inv = np.linalg.inv(roi_to_overview)
+        roi_corners = transform_physical_points(physical_corners(overlap_min, overlap_max), inv)
+        roi_phys_min = roi_corners.min(axis=0)
+        roi_phys_max = roi_corners.max(axis=0)
+        roi_start, roi_size = crop_index_range_from_physical_box(
+            manifest.roi,
+            roi_phys_min,
+            roi_phys_max,
+        )
 
     margin_xy_vox_overview = int(round(margin_um / manifest.overview.spacing_um[0]))
     margin_xy_vox_roi = int(round(margin_um / manifest.roi.spacing_um[0]))
@@ -211,7 +248,16 @@ def export_alignment_preview_crops(
         )
     )
     roi_center_z = int(
-        round(physical_to_continuous_index_xyz(manifest.roi, center_um)[2])
+        round(
+            physical_to_continuous_index_xyz(
+                manifest.roi,
+                (
+                    np.linalg.inv(roi_to_overview) @ np.array([*center_um, 1.0], dtype=float)
+                )[:3]
+                if roi_to_overview is not None
+                else center_um,
+            )[2]
+        )
     )
     overview_path = _resolve_volume_path(manifest.overview, manifest_dir)
     roi_path = _resolve_volume_path(manifest.roi, manifest_dir)
@@ -304,7 +350,7 @@ def export_alignment_preview_crops(
         sl_roi=roi_image if projection == "max" else roi_stack[len(roi_stack) // 2],
         center_um=tuple(float(v) for v in center_um),
         output_path=qc_plot_path,
-        geometry_mode=f"metadata ({projection})",
+        geometry_mode=f"{mode.value} ({projection})",
     )
 
     report = {

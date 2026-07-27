@@ -87,6 +87,20 @@ def overlap_physical_bounds(
     return overlap_min, overlap_max
 
 
+def crop_index_range_from_continuous_indices(
+    indices: np.ndarray,
+    size_img: np.ndarray,
+) -> tuple[list[int], list[int]]:
+    """Return XYZ start index and crop size covering continuous index corners."""
+    idx_lo = np.floor(indices.min(axis=0)).astype(int)
+    idx_hi = np.ceil(indices.max(axis=0)).astype(int)
+    idx_lo = np.clip(idx_lo, 0, size_img - 1)
+    idx_hi = np.clip(idx_hi, 0, size_img - 1)
+    start = idx_lo.tolist()
+    crop_size = (idx_hi - idx_lo + 1).tolist()
+    return start, crop_size
+
+
 def crop_to_physical_box(
     image: sitk.Image,
     phys_min: np.ndarray,
@@ -100,14 +114,8 @@ def crop_to_physical_box(
                 corners.append((float(x), float(y), float(z)))
 
     indices = np.array([image.TransformPhysicalPointToContinuousIndex(p) for p in corners])
-    idx_lo = np.floor(indices.min(axis=0)).astype(int)
-    idx_hi = np.ceil(indices.max(axis=0)).astype(int)
-
     size_img = np.array(image.GetSize(), dtype=int)
-    idx_lo = np.clip(idx_lo, 0, size_img - 1)
-    idx_hi = np.clip(idx_hi, 0, size_img - 1)
-    start = idx_lo.tolist()
-    crop_size = (idx_hi - idx_lo + 1).tolist()
+    start, crop_size = crop_index_range_from_continuous_indices(indices, size_img)
     cropped = sitk.RegionOfInterest(image, crop_size, start)
     return cropped, start
 

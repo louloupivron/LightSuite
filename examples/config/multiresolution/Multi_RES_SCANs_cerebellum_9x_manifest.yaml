@@ -14,11 +14,11 @@
 #       overview_path=root/'1_6X/All_Channels',
 #       roi_path=root/'9X/20260710_10_04_38_9X_cerebellum/All_Channels',
 #       overview_meta_path=root/'1_6X/metadata.txt',
-#       roi_meta_path=roi_meta,
+#       roi_meta_path=root/'9X/20260710_10_04_38_9X_cerebellum/metadata.txt',
 #       overview_tile_centers_stage=overview_tiles,
 #       roi_tile_centers_stage=tiles,
-#       overview_geometry=SmartspimGeometryConfig(lateral_flip=(1, -1)),
-#       roi_geometry=SmartspimGeometryConfig(anchor_roi_y_to_overview_stage=True),
+#       overview_geometry=SmartspimGeometryConfig(lateral_flip=(1, -1), stage_z_is_center=True),
+#       roi_geometry=SmartspimGeometryConfig(lateral_flip=(1, -1), stage_z_is_center=True),
 #       output_manifest_path=out/'cerebellum_9x_561_pair.json',
 #   )"
 #

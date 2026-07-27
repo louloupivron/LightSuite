@@ -257,3 +257,50 @@ def load_manifest_xy_slice(
 
     msg = f"Volume path not found: {volume_path}"
     raise FileNotFoundError(msg)
+
+
+def load_manifest_xy_crop(
+    spec: ManifestVolumeSpec,
+    *,
+    z_index: int,
+    start_xyz: list[int],
+    crop_size_xyz: list[int],
+    manifest_dir: Path | None = None,
+) -> np.ndarray:
+    """Load an XY crop from one Z plane without reading the full stack."""
+    volume_path = _resolve_volume_path(spec, manifest_dir)
+    ix0, iy0, _iz0 = start_xyz
+    sx, sy, _sz = crop_size_xyz
+    ix1 = ix0 + sx
+    iy1 = iy0 + sy
+    nz, ny, nx = (int(v) for v in spec.shape_zyx)
+    iz = int(np.clip(z_index, 0, nz - 1))
+    ix0 = int(np.clip(ix0, 0, nx - 1))
+    iy0 = int(np.clip(iy0, 0, ny - 1))
+    ix1 = int(np.clip(ix1, 0, nx))
+    iy1 = int(np.clip(iy1, 0, ny))
+
+    if volume_path.is_file():
+        with tifffile.TiffFile(volume_path) as tf:
+            series = tf.series[0]
+            if series.shape[0] == nz:
+                plane = series.asarray(key=iz)
+            else:
+                plane = tf.pages[iz].asarray()
+        plane = _normalize_tiff_array(np.asarray(plane), volume_path)
+        if plane.ndim == 3:
+            plane = plane[0]
+        return np.asarray(plane[iy0:iy1, ix0:ix1], dtype=np.float32)
+
+    if volume_path.is_dir():
+        planes = _sorted_plane_files(volume_path)
+        if iz >= len(planes):
+            msg = f"Z index {iz} out of range for {len(planes)} planes in {volume_path}"
+            raise IndexError(msg)
+        plane = _normalize_tiff_array(np.asarray(tifffile.imread(str(planes[iz]))), planes[iz])
+        if plane.ndim == 3:
+            plane = plane[0]
+        return np.asarray(plane[iy0:iy1, ix0:ix1], dtype=np.float32)
+
+    msg = f"Volume path not found: {volume_path}"
+    raise FileNotFoundError(msg)

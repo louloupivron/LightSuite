@@ -39,6 +39,43 @@ def _normalize_panel(image: np.ndarray) -> np.ndarray:
     return np.clip(data / max(hi, 1e-6), 0, 1)
 
 
+def _resample_to_shape(image: np.ndarray, target_shape: tuple[int, int]) -> np.ndarray:
+    """Resize a 2D panel to ``target_shape`` (rows, cols) for overlay comparison."""
+    if image.shape == target_shape:
+        return image.astype(np.float32, copy=False)
+    from scipy.ndimage import zoom
+
+    zoom_y = target_shape[0] / image.shape[0]
+    zoom_x = target_shape[1] / image.shape[1]
+    return np.asarray(zoom(image.astype(np.float32), (zoom_y, zoom_x), order=1), dtype=np.float32)
+
+
+def normalized_cross_correlation(image_a: np.ndarray, image_b: np.ndarray) -> float:
+    """Pearson correlation between two equally sized 2D panels."""
+    if image_a.shape != image_b.shape:
+        msg = f"NCC requires matching shapes, got {image_a.shape} and {image_b.shape}"
+        raise ValueError(msg)
+    a = image_a.astype(np.float64, copy=False).ravel()
+    b = image_b.astype(np.float64, copy=False).ravel()
+    a = a - a.mean()
+    b = b - b.mean()
+    denom = float(np.sqrt((a * a).sum() * (b * b).sum()))
+    if denom < 1e-12:
+        return 0.0
+    return float((a * b).sum() / denom)
+
+
+def _checkerboard_overlay(image_a: np.ndarray, image_b: np.ndarray, *, tile: int = 32) -> np.ndarray:
+    """Alternate tiles from two normalized panels."""
+    rows, cols = image_a.shape
+    yy, xx = np.mgrid[0:rows, 0:cols]
+    mask = ((yy // tile) + (xx // tile)) % 2 == 0
+    overlay = np.empty_like(image_a, dtype=np.float32)
+    overlay[mask] = image_a[mask]
+    overlay[~mask] = image_b[~mask]
+    return overlay
+
+
 def _overlap_center_from_sitk(
     overview: sitk.Image,
     roi: sitk.Image,
@@ -136,19 +173,28 @@ def save_geometry_overlap_qc_plot(
     output_path: Path,
     geometry_mode: str,
     roi_to_overview: np.ndarray | None = None,
+    overview_crop: sitk.Image | None = None,
+    roi_crop: sitk.Image | None = None,
 ) -> None:
-    """Side-by-side XY slices at overlap center."""
-    sl_overview, sl_roi, center = _overlap_center_from_sitk(
-        overview,
-        roi,
-        overlap_min,
-        overlap_max,
-        roi_to_overview=roi_to_overview,
-    )
+    """Side-by-side overlap crops at the shared overlap center."""
+    center_um = tuple(float(v) for v in 0.5 * (overlap_min + overlap_max))
+    if overview_crop is not None and roi_crop is not None:
+        overview_arr = sitk.GetArrayViewFromImage(overview_crop)
+        roi_arr = sitk.GetArrayViewFromImage(roi_crop)
+        sl_overview = np.asarray(overview_arr[overview_arr.shape[0] // 2], dtype=np.float32)
+        sl_roi = np.asarray(roi_arr[roi_arr.shape[0] // 2], dtype=np.float32)
+    else:
+        sl_overview, sl_roi, center_um = _overlap_center_from_sitk(
+            overview,
+            roi,
+            overlap_min,
+            overlap_max,
+            roi_to_overview=roi_to_overview,
+        )
     save_geometry_slice_qc_plot(
         sl_overview=sl_overview,
         sl_roi=sl_roi,
-        center_um=center,
+        center_um=center_um,
         output_path=output_path,
         geometry_mode=geometry_mode,
     )
@@ -161,20 +207,42 @@ def save_geometry_slice_qc_plot(
     center_um: tuple[float, float, float],
     output_path: Path,
     geometry_mode: str,
+    alignment_metrics: dict[str, object] | None = None,
 ) -> None:
-    """Side-by-side XY slices from pre-loaded 2D panels."""
+    """ROI / overview overlap crops with a resampled checkerboard overlay."""
     output_path = output_path.expanduser()
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    fig, axes = plt.subplots(1, 2, figsize=(10, 5))
-    axes[0].imshow(_normalize_panel(sl_overview), cmap="gray")
-    axes[0].set_title("Overview")
+    roi_norm = _normalize_panel(sl_roi)
+    overview_norm = _normalize_panel(sl_overview)
+    target_shape = overview_norm.shape
+    roi_resampled = _resample_to_shape(roi_norm, target_shape)
+    overlay = _checkerboard_overlay(roi_resampled, overview_norm)
+
+    fig, axes = plt.subplots(1, 3, figsize=(14, 5))
+    axes[0].imshow(roi_norm, cmap="gray")
+    axes[0].set_title("ROI (overlap crop)")
     axes[0].axis("off")
-    axes[1].imshow(_normalize_panel(sl_roi), cmap="gray")
-    axes[1].set_title("ROI")
+    axes[1].imshow(overview_norm, cmap="gray")
+    axes[1].set_title("Overview (overlap crop)")
     axes[1].axis("off")
+    axes[2].imshow(overlay, cmap="gray")
+    axes[2].set_title("Checkerboard overlay")
+    axes[2].axis("off")
+
     cx, cy, cz = center_um
-    fig.suptitle(f"{geometry_mode} overlap @ ({cx:.0f}, {cy:.0f}, {cz:.0f}) µm")
+    title = f"{geometry_mode} overlap @ ({cx:.0f}, {cy:.0f}, {cz:.0f}) µm"
+    if alignment_metrics is not None:
+        offset = alignment_metrics.get("center_offset_um", [0, 0, 0])
+        ncc = alignment_metrics.get("slice_ncc")
+        offset_norm = alignment_metrics.get("center_offset_norm_um")
+        parts = [title, f"Δcenter=({offset[0]:+.0f}, {offset[1]:+.0f}, {offset[2]:+.0f}) µm"]
+        if offset_norm is not None:
+            parts.append(f"|Δ|={float(offset_norm):.0f} µm")
+        if ncc is not None:
+            parts.append(f"NCC={float(ncc):.3f}")
+        title = " · ".join(parts)
+    fig.suptitle(title, fontsize=10)
     plt.tight_layout()
     plt.savefig(output_path, dpi=150)
     plt.close(fig)
