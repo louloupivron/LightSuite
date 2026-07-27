@@ -2,7 +2,7 @@
 
 Expected ROI positions are the image-content positions measured by normalised
 cross-correlation of a mid-stack 9× plane against the 1.6× overview (see
-``context.txt``). Metadata placement is expected to reproduce them to within the
+``examples/config/smartspim/context.txt``). Metadata placement is expected to reproduce them to within the
 cross-resolution stage drift, which is under ~100 µm on this dataset.
 """
 

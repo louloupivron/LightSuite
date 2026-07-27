@@ -1,6 +1,7 @@
 """Build multiresolution pair manifests from SmartSPIM / ASI exports.
 
-Stage-table conventions (see ``context.txt`` for the supporting measurements):
+Stage-table conventions (see ``examples/config/smartspim/context.txt`` for the
+supporting measurements):
 
 * ``X`` and ``Y`` are tile FOV centers in units of 0.1 µm.
 * ``Z`` is the *first* plane of the stack, already in µm; the stack spans

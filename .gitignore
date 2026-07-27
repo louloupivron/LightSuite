@@ -2,6 +2,7 @@ scripts/lsfm_atlas_inspect/.venv/
 scripts/lsfm_atlas_inspect/lsfm_atlas_inspect_out/
 
 .venv/
+.cursor_tmp_panels/
 __pycache__/
 .pytest_cache/
 *.egg-info/
