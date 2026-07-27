@@ -9,6 +9,7 @@ This documentation covers the **Python pipeline** on branch `feature/python-migr
 | Workflow | Status |
 |----------|--------|
 | **Brain lightsheet** (3D whole-brain volumes) | Preprocess → check orientation → init registration → match points → register → export |
+| **Multiresolution** (overview ↔ ROI) | Manifest → match points (optional) → check geometry → register ([usage guide](usage_multiresolution.md)) |
 | **Spinal cord lightsheet** | Python MVP: preprocess → straighten → init registration → match points → register → export ([usage guide](usage_spinal_cord.md)) |
 | **Widefield coronal slices** | MATLAB only ([usage guide](usage_slice.md)) |
 
@@ -76,8 +77,9 @@ Copy [`examples/brain_lightsheet.yaml`](../examples/brain_lightsheet.yaml), edit
 
 1. **[Installation](installation.md)** — Python, `uv`, Elastix, atlas files
 2. **[Brain lightsheet usage](usage_lightsheet_brain.md)** — YAML config, CLI stages, outputs, GUI
-3. **[Spinal cord](usage_spinal_cord.md)** — MATLAB workflow (not yet in Python)
-4. **[Slice module](usage_slice.md)** — MATLAB workflow (not yet in Python)
+3. **[Multiresolution registration](usage_multiresolution.md)** — overview ↔ ROI alignment (mesoSPIM, SmartSPIM)
+4. **[Spinal cord](usage_spinal_cord.md)** — MATLAB workflow (not yet in Python)
+5. **[Slice module](usage_slice.md)** — MATLAB workflow (not yet in Python)
 
 ## Getting help
 
