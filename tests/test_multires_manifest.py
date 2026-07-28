@@ -234,3 +234,47 @@ def test_build_mesospim_multichannel_manifest(tmp_path: Path) -> None:
     assert manifest.non_reference_channels(reference_channel="488") == ["561"]
     loaded = load_pair_manifest(manifest_path)
     assert loaded.overview.volume_path.endswith("overview_a.tif")
+
+
+def test_load_multires_config_from_channel_paths(tmp_path: Path) -> None:
+    overview_a = tmp_path / "overview_a.tif"
+    overview_b = tmp_path / "overview_b.tif"
+    roi_a = tmp_path / "roi_a.tif"
+    roi_b = tmp_path / "roi_b.tif"
+    for path in (overview_a, overview_b, roi_a, roi_b):
+        _write_stack(path, (5, 16, 16))
+        _write_meta(meta_path_for_tiff(path))
+
+    config_path = tmp_path / "multires.yaml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "sample": {"name": "sample_a", "save_path": str(tmp_path / "out")},
+                "multires": {
+                    "pair_label": "dual_from_config",
+                    "channels": {
+                        "488": {"overview": str(overview_a), "roi": str(roi_a)},
+                        "561": {"overview": str(overview_b), "roi": str(roi_b)},
+                    },
+                    "registration": {
+                        "reference_channel": "488",
+                        "apply_transform_to": ["561"],
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    cfg = load_multires_config(config_path)
+    assert cfg.multires.channels is not None
+    assert set(cfg.multires.channels) == {"488", "561"}
+
+    from lightsuite.multires.resolve import resolve_pair_manifest
+
+    manifest, manifest_path = resolve_pair_manifest(cfg)
+    assert manifest_path.is_file()
+    assert manifest.reference_channel == "488"
+    assert set(manifest.channel_names()) == {"488", "561"}
+    assert manifest.overview.volume_path.endswith("overview_a.tif")
+    assert manifest.channels["561"].roi.volume_path.endswith("roi_b.tif")

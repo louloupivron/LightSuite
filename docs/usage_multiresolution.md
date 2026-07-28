@@ -95,7 +95,32 @@ manifest = build_mesospim_pair_manifest(
 )
 ```
 
-Multichannel manifest (shared geometry; one Elastix run on the reference laser):
+Multichannel paths in the YAML config (recommended for OP39M2-style data):
+
+```yaml
+multires:
+  pair_label: spinal_cord_488_561
+  pair_manifest: /data/OP39M2/multiresolution_results/converted/OP39M2_spinal_cord_pair.json
+  overview_meta_path: /data/OP39M2/2.5X/..._Tile0.tiff_meta.txt
+  channels:
+    "488":
+      overview: /data/OP39M2/2.5X/output/channel_488/RES(...)
+      roi: /data/OP39M2/1.25X/..._Ch488_....tiff
+    "561":
+      overview: /data/OP39M2/2.5X/output/channel_561/RES(...)
+      roi: /data/OP39M2/1.25X/..._Ch561_....tiff
+  registration:
+    reference_channel: "488"
+    apply_transform_to: ["561"]
+```
+
+`validate-config` / `check-geometry` / `register` rebuild the pair manifest from `multires.channels` automatically. The standalone builder remains available:
+
+```bash
+uv run python scripts/build_op39m2_multires_manifest.py
+```
+
+Or call the helper directly:
 
 ```python
 from lightsuite.multires.vendor.mesospim import build_mesospim_multichannel_pair_manifest
@@ -191,6 +216,10 @@ multires:
 
 | Key | Default | Description |
 |-----|---------|-------------|
+| `multires.pair_manifest` | auto under `save_path/converted/` | Pair JSON path. Required unless `multires.channels` is set; when channels are set, the JSON is rebuilt from those paths |
+| `multires.channels` | — | Optional map of channel → `{overview, roi}` paths (mesoSPIM). Preferred way to declare multichannel inputs in YAML |
+| `multires.overview_meta_path` | — | Anchor tile `*_meta.txt` for stitched overview folders |
+| `multires.pair_label` | from experiment/sample | Short identifier used in output folders and default landmark filenames |
 | `multires.geometry_mode` | `metadata` | `metadata` — overlap from stage geometry only; `hybrid` — metadata crop + landmark fit |
 | `multires.landmarks.session_path` | auto | Path to landmark JSON; when `null`, uses `multires_landmarks_<pair_label>.json` under `save_path` |
 | `multires.landmarks.fit_mode` | `similarity` | Transform fitted from landmark pairs: `similarity`, `rigid`, or `affine` |

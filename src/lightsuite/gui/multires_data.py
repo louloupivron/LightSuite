@@ -9,7 +9,6 @@ import numpy as np
 
 from lightsuite.multires.config_models import MultiresGeometryMode, MultiresPipelineConfig
 from lightsuite.multires.landmark_session import MultiresLandmarkSession
-from lightsuite.multires.manifest import load_pair_manifest
 from lightsuite.multires.models import ManifestVolumeSpec, MultiresPairManifest
 from lightsuite.multires.spec_geometry import (
     crop_index_range_from_physical_box,
@@ -322,8 +321,15 @@ def load_multires_match_points_data(
     overview mosaic.
     """
     if manifest is None:
-        manifest = load_pair_manifest(cfg.multires.pair_manifest)
-    manifest_dir = cfg.multires.pair_manifest.parent
+        from lightsuite.multires.resolve import resolve_pair_manifest
+
+        manifest, manifest_path = resolve_pair_manifest(cfg)
+    else:
+        manifest_path = cfg.multires.resolved_pair_manifest_path(
+            cfg.sample.save_path,
+            cfg.sample.name,
+        )
+    manifest_dir = manifest_path.parent
 
     session_path = cfg.multires.resolved_landmark_session_path(cfg.sample.save_path, manifest)
     if session_path.is_file():

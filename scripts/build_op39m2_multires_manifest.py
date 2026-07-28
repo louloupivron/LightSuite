@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Publish the OP39M2 mesoSPIM multichannel multires pair manifest."""
+"""Optional helper: publish the OP39M2 mesoSPIM multichannel pair manifest.
+
+Preferred workflow is to declare channel paths in
+``examples/config/multiresolution/OP39M2_multires_manifest.yaml`` and let
+``lightsuite multires validate-config`` rebuild the pair JSON automatically.
+This script remains for one-off conversion without a full pipeline config.
+"""
 
 from __future__ import annotations
 

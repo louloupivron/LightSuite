@@ -760,10 +760,10 @@ def multires_validate_config(
 ) -> None:
     """Load and validate a manifest-driven multiresolution YAML config."""
     from lightsuite.config.loader import load_multires_config
-    from lightsuite.multires.manifest import load_pair_manifest
+    from lightsuite.multires.resolve import resolve_pair_manifest
 
     cfg = load_multires_config(config)
-    manifest = load_pair_manifest(cfg.multires.pair_manifest)
+    manifest, manifest_path = resolve_pair_manifest(cfg)
     channel_note = ""
     if manifest.channels:
         ref = cfg.multires.registration.reference_channel or manifest.resolved_reference_channel()
@@ -779,6 +779,8 @@ def multires_validate_config(
         f"({Path(manifest.overview.volume_path).name} → {Path(manifest.roi.volume_path).name})"
         f"{channel_note}"
     )
+    if cfg.multires.channels:
+        typer.echo(f"Pair manifest: {manifest_path}")
 
 
 @multires_app.command("match-points")

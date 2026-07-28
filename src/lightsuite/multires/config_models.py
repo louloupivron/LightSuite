@@ -6,7 +6,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Annotated
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from lightsuite.multires.landmark_session import LandmarkFitMode, default_landmark_session_path
 
@@ -50,6 +50,30 @@ class MultiresLandmarkConfig(BaseModel):
         return value.expanduser()
 
 
+class MultiresChannelPathConfig(BaseModel):
+    """Overview / ROI volume paths for one imaging channel."""
+
+    overview: Path
+    roi: Path
+    overview_meta_path: Path | None = None
+    roi_meta_path: Path | None = None
+
+    @field_validator("overview", "roi", "overview_meta_path", "roi_meta_path")
+    @classmethod
+    def expand_paths(cls, value: Path | None) -> Path | None:
+        if value is None:
+            return None
+        return value.expanduser().resolve()
+
+    @field_validator("overview", "roi")
+    @classmethod
+    def path_must_exist(cls, value: Path) -> Path:
+        if not value.exists():
+            msg = f"Channel volume path does not exist: {value}"
+            raise ValueError(msg)
+        return value
+
+
 class MultiresRegistrationSettings(BaseModel):
     overlap_margin_um: float = 0.0
     registration_bin: int = Field(default=1, ge=1)
@@ -62,23 +86,20 @@ class MultiresRegistrationSettings(BaseModel):
 
 
 class MultiresConfig(BaseModel):
-    pair_manifest: Path
+    pair_manifest: Path | None = None
+    pair_label: str | None = None
+    overview_meta_path: Path | None = None
+    channels: dict[str, MultiresChannelPathConfig] | None = None
     geometry_mode: MultiresGeometryMode = MultiresGeometryMode.METADATA
     landmarks: MultiresLandmarkConfig = Field(default_factory=MultiresLandmarkConfig)
     registration: MultiresRegistrationSettings = Field(default_factory=MultiresRegistrationSettings)
 
-    @field_validator("pair_manifest")
+    @field_validator("pair_manifest", "overview_meta_path")
     @classmethod
-    def expand_manifest_path(cls, value: Path) -> Path:
+    def expand_optional_paths(cls, value: Path | None) -> Path | None:
+        if value is None:
+            return None
         return value.expanduser().resolve()
-
-    @field_validator("pair_manifest")
-    @classmethod
-    def manifest_must_exist(cls, value: Path) -> Path:
-        if not value.is_file():
-            msg = f"Pair manifest does not exist: {value}"
-            raise ValueError(msg)
-        return value
 
     @field_validator("geometry_mode", mode="before")
     @classmethod
@@ -87,6 +108,56 @@ class MultiresConfig(BaseModel):
             return MultiresGeometryMode.HYBRID
         return value
 
+    @model_validator(mode="after")
+    def validate_manifest_or_channels(self) -> MultiresConfig:
+        has_channels = bool(self.channels)
+        has_manifest = self.pair_manifest is not None
+        if not has_channels and not has_manifest:
+            msg = "Provide multires.pair_manifest and/or multires.channels"
+            raise ValueError(msg)
+        if has_manifest and self.pair_manifest is not None and not has_channels:
+            if not self.pair_manifest.is_file():
+                msg = f"Pair manifest does not exist: {self.pair_manifest}"
+                raise ValueError(msg)
+        if has_channels:
+            if self.registration.reference_channel is None:
+                # Default to first declared channel when building from config paths.
+                self.registration.reference_channel = next(iter(self.channels))
+            ref = self.registration.reference_channel
+            if ref not in self.channels:
+                msg = (
+                    f"registration.reference_channel {ref!r} missing from multires.channels "
+                    f"(available: {sorted(self.channels)})"
+                )
+                raise ValueError(msg)
+            if self.apply_targets_missing():
+                missing = [
+                    name
+                    for name in (self.registration.apply_transform_to or [])
+                    if name not in self.channels
+                ]
+                msg = f"registration.apply_transform_to channels missing from multires.channels: {missing}"
+                raise ValueError(msg)
+        return self
+
+    def apply_targets_missing(self) -> bool:
+        if not self.channels or not self.registration.apply_transform_to:
+            return False
+        return any(name not in self.channels for name in self.registration.apply_transform_to)
+
+    def resolved_pair_label(self, sample_name: str) -> str:
+        if self.pair_label:
+            return self.pair_label
+        if self.registration.experiment_name and self.registration.experiment_name != "default":
+            return self.registration.experiment_name
+        return f"{sample_name}_pair"
+
+    def resolved_pair_manifest_path(self, save_path: Path, sample_name: str) -> Path:
+        if self.pair_manifest is not None:
+            return self.pair_manifest.expanduser().resolve()
+        label = self.resolved_pair_label(sample_name)
+        return (save_path.expanduser() / "converted" / f"{label}_pair.json").resolve()
+
     def resolved_landmark_session_path(self, save_path: Path, manifest: object) -> Path:
         if self.landmarks.session_path is not None:
             return self.landmarks.session_path.expanduser().resolve()
@@ -94,7 +165,11 @@ class MultiresConfig(BaseModel):
         if landmarks_path:
             path = Path(str(landmarks_path)).expanduser()
             if not path.is_absolute():
-                path = self.pair_manifest.parent / path
+                manifest_path = self.resolved_pair_manifest_path(
+                    save_path,
+                    getattr(manifest, "sample_name", "sample"),
+                )
+                path = manifest_path.parent / path
             return path.resolve()
         pair_label = getattr(manifest, "pair_label", None)
         return default_landmark_session_path(

@@ -15,9 +15,9 @@ from lightsuite.multires.landmarks import (
     fit_landmark_transform,
     update_landmark_session_fit,
 )
-from lightsuite.multires.manifest import load_pair_manifest
 from lightsuite.multires.memory import warn_if_overlap_memory_exceeds_system
 from lightsuite.multires.models import ManifestVolumeSpec, MultiresPairManifest
+from lightsuite.multires.resolve import resolve_pair_manifest
 from lightsuite.multires.spec_geometry import (
     crop_index_range_from_physical_box,
     overlap_box_from_landmark_specs,
@@ -64,9 +64,13 @@ def prepare_multires_registration_pair(
     shared physical overlap (plus a small Z chunk of the ROI at a time while
     resampling) is held in RAM.
     """
-    manifest_path = cfg.multires.pair_manifest
     if manifest is None:
-        manifest = load_pair_manifest(manifest_path)
+        manifest, manifest_path = resolve_pair_manifest(cfg)
+    else:
+        manifest_path = cfg.multires.resolved_pair_manifest_path(
+            cfg.sample.save_path,
+            cfg.sample.name,
+        )
     manifest_dir = manifest_path.parent
     margin_um = cfg.multires.registration.overlap_margin_um
     mode = cfg.multires.geometry_mode

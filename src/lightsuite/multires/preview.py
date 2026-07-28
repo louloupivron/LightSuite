@@ -12,7 +12,6 @@ import tifffile
 from lightsuite.multires.config_models import MultiresGeometryMode, MultiresPipelineConfig
 from lightsuite.multires.landmark_session import load_landmark_session
 from lightsuite.multires.landmarks import fit_landmark_transform
-from lightsuite.multires.manifest import load_pair_manifest
 from lightsuite.multires.geometry import physical_corners, transform_physical_points
 from lightsuite.multires.spec_geometry import (
     crop_index_range_from_physical_box,
@@ -160,8 +159,9 @@ def export_alignment_preview_crops(
     With ``projection="max"``, writes a single XY max-intensity projection over the full
     overlap Z extent instead of subvolumes.
     """
-    manifest_path = cfg.multires.pair_manifest
-    manifest = load_pair_manifest(manifest_path)
+    from lightsuite.multires.resolve import resolve_pair_manifest
+
+    manifest, manifest_path = resolve_pair_manifest(cfg)
     manifest_dir = manifest_path.parent
     pair_label = manifest.pair_label
     mode = cfg.multires.geometry_mode

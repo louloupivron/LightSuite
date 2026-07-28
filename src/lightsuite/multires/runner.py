@@ -18,7 +18,6 @@ from lightsuite.multires.geometry import (
     transform_physical_points,
 )
 from lightsuite.multires.landmarks import fit_landmark_transform
-from lightsuite.multires.manifest import load_pair_manifest
 from lightsuite.multires.memory import warn_if_overlap_memory_exceeds_system
 from lightsuite.multires.models import MultiresPairManifest, serialize_report
 from lightsuite.multires.plots import (
@@ -33,6 +32,7 @@ from lightsuite.multires.registration import (
     register_roi_to_overview,
     sanitize_experiment_name,
 )
+from lightsuite.multires.resolve import resolve_pair_manifest
 from lightsuite.multires.spec_geometry import (
     alignment_metrics_from_specs,
     crop_index_range_from_physical_box,
@@ -141,7 +141,10 @@ def _write_geometry_artifacts(
 
     geometry_dir = cfg.sample.save_path / "geometry" / manifest.pair_label
     geometry_dir.mkdir(parents=True, exist_ok=True)
-    manifest_path = cfg.multires.pair_manifest
+    manifest_path = cfg.multires.resolved_pair_manifest_path(
+        cfg.sample.save_path,
+        cfg.sample.name,
+    )
 
     report_path = geometry_dir / "geometry_report.json"
     alignment_metrics = alignment_metrics_from_specs(
@@ -318,8 +321,7 @@ def check_multires_geometry(
     level: MultiresGeometryCheckLevel = MultiresGeometryCheckLevel.FULL,
 ) -> MultiresRegOptsCheckpoint:
     """Validate FOV overlap and write geometry QA artifacts."""
-    manifest_path = cfg.multires.pair_manifest
-    manifest = load_pair_manifest(manifest_path)
+    manifest, manifest_path = resolve_pair_manifest(cfg)
     manifest_dir = manifest_path.parent
 
     if level in (MultiresGeometryCheckLevel.METADATA_ONLY, MultiresGeometryCheckLevel.SLICE_QC):
@@ -355,8 +357,7 @@ def check_multires_geometry(
 
 def run_multires_registration(cfg: MultiresPipelineConfig) -> MultiresRegOptsCheckpoint:
     """Register ROI stack to overview using a pair manifest and elastix."""
-    manifest_path = cfg.multires.pair_manifest
-    manifest = load_pair_manifest(manifest_path)
+    manifest, manifest_path = resolve_pair_manifest(cfg)
     meso = cfg.multires
 
     experiment_slug = sanitize_experiment_name(meso.registration.experiment_name)

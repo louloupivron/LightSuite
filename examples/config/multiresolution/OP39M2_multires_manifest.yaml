@@ -1,12 +1,11 @@
 # Multiresolution registration — OP39M2 mesoSPIM spinal cord (488 + 561)
 #
-# Build the pair manifest first:
-#   uv run python scripts/build_op39m2_multires_manifest.py
+# Channel overview/ROI paths are declared here. validate-config / check-geometry /
+# register rebuild the pair manifest automatically from these paths.
 #
-# Then:
 #   uv sync --extra registration
 #   uv run lightsuite multires validate-config -c examples/config/multiresolution/OP39M2_multires_manifest.yaml
-#   uv run lightsuite multires check-geometry      -c examples/config/multiresolution/OP39M2_multires_manifest.yaml
+#   uv run lightsuite multires check-geometry      -c examples/config/multiresolution/OP39M2_multires_manifest.yaml --level metadata-only
 #   uv run lightsuite multires register            -c examples/config/multiresolution/OP39M2_multires_manifest.yaml
 #
 # Overview: 2.5X TeraStitcher mosaic (stitched plane-per-file folder)
@@ -19,7 +18,20 @@ sample:
   scratch: /media/gbm/NVME2/lightsuite_scratch
 
 multires:
+  pair_label: spinal_cord_488_561
+  # Optional explicit output path for the generated pair JSON:
   pair_manifest: /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP39M2/multiresolution_results/converted/OP39M2_spinal_cord_pair.json
+
+  # Anchor tile meta for the stitched 2.5X overview mosaic (required for folders).
+  overview_meta_path: /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP39M2/2.5X/20250331_MES_OP39-M2_Mag2.5x_ch488_Tile0.tiff_meta.txt
+
+  channels:
+    "488":
+      overview: /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP39M2/2.5X/output/channel_488/RES(12486x2162x1163)
+      roi: /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP39M2/1.25X/20250331_MES_OP39-M2_Mag1.25x_Tile0_Ch488_Sh0_Rot0.tiff
+    "561":
+      overview: /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP39M2/2.5X/output/channel_561/RES(12486x2162x1163)
+      roi: /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP39M2/1.25X/20250331_MES_OP39-M2_Mag1.25x_Tile0_Ch561_Sh0_Rot0.tiff
 
   geometry_mode: metadata
 
