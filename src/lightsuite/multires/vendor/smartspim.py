@@ -9,13 +9,18 @@ supporting measurements):
 * Adjacent tiles overlap by a hard-coded 10%, and the stitcher anchors the
   mosaic on the upper-left tile, so the stitched pixel ``[0, 0]`` sits at that
   tile's leading corner.
+
+Metadata may be either legacy tab-separated ``metadata.txt`` or JSON
+``metadata.json`` (``sample_metadata`` + ``tiles``).
 """
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from lightsuite.multires.manifest import save_pair_manifest
 from lightsuite.multires.models import MANIFEST_FORMAT, ManifestVolumeSpec, MultiresPairManifest
@@ -40,7 +45,7 @@ class SmartspimGeometryConfig:
 
 @dataclass(frozen=True)
 class SmartspimScanMeta:
-    """Parsed fields from a SmartSPIM ``metadata.txt`` export."""
+    """Parsed fields from a SmartSPIM ``metadata.txt`` / ``metadata.json`` export."""
 
     objective: str
     hres: int
@@ -59,9 +64,36 @@ class SmartspimScanMeta:
         return float(self.vres) * self.um_per_pix
 
 
-def parse_smartspim_metadata(path: Path) -> SmartspimScanMeta:
+def _finalize_scan_meta(
+    *,
+    path: Path,
+    objective: str,
+    hres: int,
+    vres: int,
+    um_per_pix: float,
+    z_step_um: float,
+    tile_centers_stage: list[tuple[float, float, float]],
+    tile_num_images: list[int],
+) -> SmartspimScanMeta:
+    if not tile_centers_stage:
+        msg = f"No tile stage positions found in {path}"
+        raise ValueError(msg)
+    if not tile_num_images:
+        msg = f"No NumImages values found in tile table: {path}"
+        raise ValueError(msg)
+    return SmartspimScanMeta(
+        objective=objective,
+        hres=hres,
+        vres=vres,
+        um_per_pix=um_per_pix,
+        z_step_um=z_step_um,
+        tile_centers_stage=tile_centers_stage,
+        tile_num_images=tile_num_images,
+    )
+
+
+def _parse_smartspim_metadata_txt(path: Path) -> SmartspimScanMeta:
     """Parse ASI SmartSPIM ``metadata.txt`` (tab-separated export)."""
-    path = path.expanduser().resolve()
     lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
     if len(lines) < 2:
         msg = f"SmartSPIM metadata too short: {path}"
@@ -106,14 +138,8 @@ def parse_smartspim_metadata(path: Path) -> SmartspimScanMeta:
             except ValueError:
                 continue
 
-    if not tile_centers_stage:
-        msg = f"No tile stage positions found in {path}"
-        raise ValueError(msg)
-    if not tile_num_images:
-        msg = f"No NumImages values found in tile table: {path}"
-        raise ValueError(msg)
-
-    return SmartspimScanMeta(
+    return _finalize_scan_meta(
+        path=path,
         objective=objective,
         hres=hres,
         vres=vres,
@@ -122,6 +148,79 @@ def parse_smartspim_metadata(path: Path) -> SmartspimScanMeta:
         tile_centers_stage=tile_centers_stage,
         tile_num_images=tile_num_images,
     )
+
+
+def _parse_smartspim_metadata_json(path: Path) -> SmartspimScanMeta:
+    """Parse ASI SmartSPIM ``metadata.json`` (``sample_metadata`` + ``tiles``)."""
+    try:
+        payload: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        msg = f"Invalid SmartSPIM metadata JSON: {path}"
+        raise ValueError(msg) from exc
+
+    sample = payload.get("sample_metadata")
+    tiles = payload.get("tiles")
+    if not isinstance(sample, dict):
+        msg = f"Missing sample_metadata object in {path}"
+        raise ValueError(msg)
+    if not isinstance(tiles, list) or not tiles:
+        msg = f"Missing tiles array in {path}"
+        raise ValueError(msg)
+
+    try:
+        objective = str(sample["objective"])
+        hres = int(float(sample["horizontal_resolution"]))
+        vres = int(float(sample["vertical_resolution"]))
+        um_per_pix = float(sample["um_per_pix"])
+        z_step_um = float(sample["z_step_um"])
+    except KeyError as exc:
+        msg = f"Missing SmartSPIM sample_metadata field {exc!s} in {path}"
+        raise ValueError(msg) from exc
+    except (TypeError, ValueError) as exc:
+        msg = f"Invalid SmartSPIM sample_metadata numeric field in {path}"
+        raise ValueError(msg) from exc
+
+    tile_centers_stage: list[tuple[float, float, float]] = []
+    tile_num_images: list[int] = []
+    for index, tile in enumerate(tiles):
+        if not isinstance(tile, dict):
+            msg = f"Tile {index} is not an object in {path}"
+            raise ValueError(msg)
+        try:
+            tile_centers_stage.append((float(tile["X"]), float(tile["Y"]), float(tile["Z"])))
+            tile_num_images.append(int(float(tile["NumImages"])))
+        except KeyError as exc:
+            msg = f"Missing tile field {exc!s} at index {index} in {path}"
+            raise ValueError(msg) from exc
+        except (TypeError, ValueError) as exc:
+            msg = f"Invalid tile numeric field at index {index} in {path}"
+            raise ValueError(msg) from exc
+
+    return _finalize_scan_meta(
+        path=path,
+        objective=objective,
+        hres=hres,
+        vres=vres,
+        um_per_pix=um_per_pix,
+        z_step_um=z_step_um,
+        tile_centers_stage=tile_centers_stage,
+        tile_num_images=tile_num_images,
+    )
+
+
+def parse_smartspim_metadata(path: Path) -> SmartspimScanMeta:
+    """Parse ASI SmartSPIM ``metadata.txt`` or ``metadata.json``."""
+    path = path.expanduser().resolve()
+    suffix = path.suffix.lower()
+    if suffix == ".json":
+        return _parse_smartspim_metadata_json(path)
+    if suffix in {".txt", ".tsv", ""}:
+        return _parse_smartspim_metadata_txt(path)
+    # Fall back by content for oddly named exports.
+    head = path.read_text(encoding="utf-8", errors="replace").lstrip()[:1]
+    if head == "{":
+        return _parse_smartspim_metadata_json(path)
+    return _parse_smartspim_metadata_txt(path)
 
 
 def stage_pitch_overlap_fractions(

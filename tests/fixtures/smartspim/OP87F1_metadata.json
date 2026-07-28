@@ -1,0 +1,97 @@
+{
+  "sample_metadata": {
+    "acquisition_ID": "20260420_10_59_12_20260420_SMART_OP87F1_A_3_6x",
+    "objective": "LCT 3.6x",
+    "immersion": "1.52+",
+    "horizontal_resolution": 2000,
+    "vertical_resolution": 1600,
+    "um_per_pix": 1.8,
+    "z_step_um": 1.8,
+    "z_range": -3859.9,
+    "scanning": "FAST",
+    "sampling": "1/1",
+    "destripe": "256/0",
+    "destripe_status": "done",
+    "laser power": [
+      {"wavelength": 488, "left (%)": 60, "right (%)": 60},
+      {"wavelength": 561, "left (%)": 60, "right (%)": 60},
+      {"wavelength": 640, "left (%)": 60, "right (%)": 60}
+    ]
+  },
+  "tiles": [
+    {
+      "X": "503010",
+      "Y": "592920",
+      "Z": "4832",
+      "Laser": "640",
+      "Side": "0",
+      "Exposure": "2",
+      "Acquire": "1",
+      "Filter": "640F",
+      "FilterChannel": "3",
+      "NumImages": "2145"
+    },
+    {
+      "X": "503010",
+      "Y": "592920",
+      "Z": "4832",
+      "Laser": "561",
+      "Side": "0",
+      "Exposure": "2",
+      "Acquire": "1",
+      "Filter": "561F",
+      "FilterChannel": "2",
+      "NumImages": "2145"
+    },
+    {
+      "X": "503010",
+      "Y": "592920",
+      "Z": "4832",
+      "Laser": "488",
+      "Side": "0",
+      "Exposure": "2",
+      "Acquire": "1",
+      "Filter": "488F",
+      "FilterChannel": "1",
+      "NumImages": "2145"
+    },
+    {
+      "X": "503010",
+      "Y": "618840",
+      "Z": "4832",
+      "Laser": "640",
+      "Side": "0",
+      "Exposure": "2",
+      "Acquire": "1",
+      "Filter": "640F",
+      "FilterChannel": "3",
+      "NumImages": "2145"
+    },
+    {
+      "X": "503010",
+      "Y": "618840",
+      "Z": "4832",
+      "Laser": "561",
+      "Side": "0",
+      "Exposure": "2",
+      "Acquire": "1",
+      "Filter": "561F",
+      "FilterChannel": "2",
+      "NumImages": "2145"
+    },
+    {
+      "X": "503010",
+      "Y": "618840",
+      "Z": "4832",
+      "Laser": "488",
+      "Side": "0",
+      "Exposure": "2",
+      "Acquire": "1",
+      "Filter": "488F",
+      "FilterChannel": "1",
+      "NumImages": "2145"
+    }
+  ],
+  "application_version": "6.0.0.91",
+  "camera_model": "C14440-20UP"
+}

@@ -183,3 +183,28 @@ def test_geometry_config_defaults_document_the_measured_convention() -> None:
     assert geometry.stage_z_is_center is False
     assert geometry.lateral_flip == (1, 1)
     assert replace(geometry, lateral_flip=(1, -1)).lateral_flip == (1, -1)
+
+
+def test_parse_smartspim_metadata_json_export() -> None:
+    """ASI JSON exports (sample_metadata + tiles) map to the same scan meta model."""
+    meta_path = Path(__file__).resolve().parent / "fixtures/smartspim/OP87F1_metadata.json"
+    meta = parse_smartspim_metadata(meta_path)
+
+    assert meta.objective == "LCT 3.6x"
+    assert meta.hres == 2000
+    assert meta.vres == 1600
+    assert meta.um_per_pix == pytest.approx(1.8)
+    assert meta.z_step_um == pytest.approx(1.8)
+    assert meta.tile_width_um == pytest.approx(3600.0)
+    assert meta.tile_height_um == pytest.approx(2880.0)
+    assert len(meta.tile_centers_stage) == 6
+    assert meta.tile_centers_stage[0] == pytest.approx((503010.0, 592920.0, 4832.0))
+    assert set(meta.tile_num_images) == {2145}
+
+    fractions = stage_pitch_overlap_fractions(
+        meta.tile_centers_stage,
+        meta=meta,
+        geometry=SmartspimGeometryConfig(),
+    )
+    assert fractions == {"y": pytest.approx(NOMINAL_TILE_OVERLAP, abs=1e-4)}
+    check_stage_scale(meta.tile_centers_stage, meta=meta, geometry=SmartspimGeometryConfig())

@@ -144,7 +144,7 @@ manifest = build_mesospim_multichannel_pair_manifest(
 )
 ```
 
-### SmartSPIM / ASI (plane-per-file + `metadata.txt`)
+### SmartSPIM / ASI (plane-per-file + `metadata.txt` / `metadata.json`)
 
 For the bundled **Multi_RES_SCANs** example dataset, rebuild all three pair manifests with:
 
@@ -154,7 +154,7 @@ uv run python scripts/rebuild_multi_res_manifests.py
 
 This writes manifests such as `cortex_9x_561_pair.json`, `cerebellum_9x_561_pair.json`, and `single_fov_561_pair.json` under `registration_results/converted/`.
 
-For new SmartSPIM acquisitions, adapt `scripts/rebuild_multi_res_manifests.py` or use `lightsuite.multires.vendor.smartspim.build_smartspim_pair_manifest` with your overview/ROI paths and `metadata.txt` files.
+For new SmartSPIM acquisitions, adapt `scripts/rebuild_multi_res_manifests.py` or use `lightsuite.multires.vendor.smartspim.build_smartspim_pair_manifest` with your overview/ROI paths and stage metadata. Both legacy tab-separated `metadata.txt` and JSON `metadata.json` (`sample_metadata` + `tiles`) are accepted.
 
 ---
 
@@ -405,7 +405,7 @@ Install registration extras: `uv sync --extra registration`.
 ### Poor overlap / high landmark RMS
 
 - Verify the correct overview and ROI acquisitions are paired in the manifest.
-- For SmartSPIM mosaics, confirm tile origins in `metadata.txt` match the stitched stack.
+- For SmartSPIM mosaics, confirm tile origins in `metadata.txt` / `metadata.json` match the stitched stack.
 - Add more landmark pairs and try `fit_mode: affine` if similarity is too rigid.
 - Use `export-preview` or `check-geometry --level slice-qc` to inspect alignment before registering.
 
