@@ -1,6 +1,6 @@
 # Spinal cord lightsheet analysis
 
-The **Python spinal cord pipeline** covers preprocess, straightening, registration, export, intensity parcellation, and point-based region stats. Cohort rollups, NNMF normalization, and MATLAB-style structure/division plots remain in `example_analysis_spinal_cord.m`.
+The **Python spinal cord pipeline** covers preprocess, straightening, registration, export, intensity parcellation, hierarchy rollups, and point-based region stats. Cohort NNMF normalization and MATLAB-style structure/division plots remain in `example_analysis_spinal_cord.m`.
 
 For the brain pipeline, see [Brain lightsheet analysis](usage_lightsheet_brain.md).
 
@@ -92,6 +92,7 @@ analysis:
   parcellate_intensities: true
   intensity_channels: [1, 2]   # omit to use all exported channels
   relative_intensity_to: none  # or background (per-segment id 0 reference)
+  rollups: [division, structure]  # optional GM/WM and lamina/funiculus rollups
   count_points: true
   point_labels:
     - imaris_TAyellow
@@ -105,6 +106,18 @@ Outputs under `volume_registered/`:
 
 Intensity metrics: `median_intensity`, `std`, `volume_mm3`, and optionally
 `relative_median_intensity` when `relative_intensity_to: background`.
+
+Optional hierarchy rollups aggregate finest-region stats to **division** (GM/WM)
+or **structure** (combined laminas and funiculi) with volume-weighted means:
+
+```yaml
+analysis:
+  rollups: [division, structure]
+```
+
+Rolled rows are appended to `region_stats.csv` with `rollup_level` =
+`region`, `division`, or `structure`. Per-level sidecars:
+`region_stats_division.csv`, `region_stats_structure.csv`.
 
 Each row includes `segment` (e.g. `C5`, `L3`), `parcellation_index`, region name/acronym,
 and `hemisphere` = `whole` (cord has no left/right split).
@@ -179,6 +192,8 @@ Under `<sample.save_path>/`:
 | `sample_reference.json` | preprocess |
 | `{label}_atlas_coords.npz` | import-annotations |
 | `region_stats.csv` | region-stats |
+| `region_stats_division.csv` | region-stats (rollup) |
+| `region_stats_structure.csv` | region-stats (rollup) |
 | `chan{NN}_region_stats.csv` | region-stats (intensity) |
 | `{label}_region_counts.csv` | region-stats |
 | `cache/` | preprocess + init-registration intermediates (registration-grid TIFFs, straightened volume, resampled atlas) |

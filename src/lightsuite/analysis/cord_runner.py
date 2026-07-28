@@ -17,6 +17,7 @@ from lightsuite.analysis.cord_counts import (
     write_cord_region_stats_csv,
 )
 from lightsuite.analysis.cord_parcellation import parcellate_cord_intensities
+from lightsuite.analysis.cord_rollup import apply_cord_rollups
 from lightsuite.analysis.counts import SAMPLE_POINTS_KEY
 from lightsuite.analysis.cord_ontology import load_cord_region_table
 from lightsuite.atlas.fiederling import resolve_fiederling_paths
@@ -41,6 +42,7 @@ console = Console()
 @dataclass
 class CordRegionStatsRunResult:
     combined_path: Path | None = None
+    rollup_paths: dict[str, Path] = field(default_factory=dict)
     intensity_channels: list[int] = field(default_factory=list)
     count_labels: list[str] = field(default_factory=list)
     n_rows: int = 0
@@ -107,6 +109,7 @@ def run_cord_region_stats(
     sample_frames: list[pd.DataFrame] = []
     count_labels: list[str] = []
     intensity_channels: list[int] = []
+    rollup_paths: dict[str, Path] = {}
 
     if "atlas" in spaces_set:
         annotation: np.ndarray | None = None
@@ -206,8 +209,19 @@ def run_cord_region_stats(
     combined_path: Path | None = None
     if atlas_frames:
         combined = pd.concat(atlas_frames, ignore_index=True).reindex(columns=CORD_TIDY_COLUMNS)
+        regions_df = pd.read_csv(atlas_paths.regions_csv)
+        combined = apply_cord_rollups(combined, regions_df, config.analysis.rollups)
         combined_path = register_path / "region_stats.csv"
         write_cord_region_stats_csv(combined_path, combined)
+        for level in config.analysis.rollups:
+            normalized = str(level).strip().lower()
+            if normalized not in ("division", "structure"):
+                continue
+            subset = combined[combined["rollup_level"] == normalized]
+            if len(subset):
+                rollup_path = register_path / f"region_stats_{normalized}.csv"
+                write_cord_region_stats_csv(rollup_path, subset)
+                rollup_paths[normalized] = rollup_path
     else:
         combined = pd.DataFrame(columns=CORD_TIDY_COLUMNS)
 
@@ -220,10 +234,12 @@ def run_cord_region_stats(
 
     console.print(
         f"[green]Cord region stats:[/green] {len(combined)} atlas rows "
-        f"({len(intensity_channels)} intensity channel(s), {len(count_labels)} point source(s))"
+        f"({len(intensity_channels)} intensity channel(s), {len(count_labels)} point source(s)"
+        f"{f', rollups: {sorted(rollup_paths)}' if rollup_paths else ''})"
     )
     return CordRegionStatsRunResult(
         combined_path=combined_path,
+        rollup_paths=rollup_paths,
         intensity_channels=intensity_channels,
         count_labels=count_labels,
         n_rows=int(len(combined)),

@@ -331,6 +331,10 @@ class AnalysisConfig(BaseModel):
         default_factory=lambda: ["atlas"],
         description="Coordinate spaces for region_stats tables: atlas and/or sample.",
     )
+    rollups: list[str] = Field(
+        default_factory=list,
+        description='Spinal cord rollups to append: "division" (GM/WM) and/or "structure" (laminas/funiculi).',
+    )
 
 
 class AnnotationFormat(str, Enum):

@@ -151,6 +151,7 @@ def parcellate_cord_intensities(
     df["sample"] = sample
     df["channel"] = channel
     df["atlas"] = atlas_id
+    df["rollup_level"] = "region"
     df = _attach_cord_region_metadata(df, region_table)
     return df.reindex(columns=CORD_TIDY_COLUMNS)
 

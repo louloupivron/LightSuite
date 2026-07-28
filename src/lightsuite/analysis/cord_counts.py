@@ -24,6 +24,7 @@ CORD_TIDY_COLUMNS = [
     "structure",
     "division",
     "segment",
+    "rollup_level",
     "hemisphere",
     "metric",
     "value",
@@ -200,6 +201,7 @@ def count_points_in_cord_regions(
     df["sample"] = sample
     df["channel"] = channel
     df["atlas"] = atlas_id
+    df["rollup_level"] = "region"
 
     meta_table = region_table
     df = _attach_cord_region_metadata(df, meta_table)
