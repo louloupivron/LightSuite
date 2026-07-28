@@ -1,6 +1,6 @@
 # Spinal cord lightsheet analysis
 
-The **Python spinal cord pipeline** (MVP) covers preprocess, straightening, init registration, match-points, register, and export. Post-registration cohort analysis remains MATLAB-only (`example_analysis_spinal_cord.m`).
+The **Python spinal cord pipeline** covers preprocess, straightening, registration, export, intensity parcellation, and point-based region stats. Cohort rollups, NNMF normalization, and MATLAB-style structure/division plots remain in `example_analysis_spinal_cord.m`.
 
 For the brain pipeline, see [Brain lightsheet analysis](usage_lightsheet_brain.md).
 
@@ -67,20 +67,44 @@ rostrocaudal segments (`Segments.csv`):
 uv run lightsuite spinal region-stats -c my_spinal.yaml
 ```
 
-Configure which import labels to count (optional):
+### Intensity parcellation (registered channels)
+
+After `export`, compute **median intensity**, **std**, and **volume_mm3** per
+Fiederling region × segment from the exported `chan*_channel*.tiff` volumes
+(same grid as `annotation_registered.tiff`):
+
+```bash
+uv run lightsuite spinal region-stats -c my_spinal.yaml
+```
+
+`region-stats` combines intensity parcellation and imported point counts into
+one `region_stats.csv`. Disable either step:
+
+```bash
+uv run lightsuite spinal region-stats -c my_spinal.yaml --no-count-points
+uv run lightsuite spinal region-stats -c my_spinal.yaml --no-parcellate-intensities
+```
+
+Configure in YAML:
 
 ```yaml
 analysis:
+  parcellate_intensities: true
+  intensity_channels: [1, 2]   # omit to use all exported channels
+  relative_intensity_to: none  # or background (per-segment id 0 reference)
   count_points: true
   point_labels:
     - imaris_TAyellow
-    - imaris_MG_cyan
 ```
 
 Outputs under `volume_registered/`:
 
-- `region_stats.csv` — combined long-form table (`cell_count`, `cell_density` per region × segment)
-- `{label}_region_counts.csv` — per-import-label table
+- `region_stats.csv` — combined long-form table (intensities + cell counts)
+- `chan{NN}_region_stats.csv` — per-channel intensity table
+- `{label}_region_counts.csv` — per-import-label cell count table
+
+Intensity metrics: `median_intensity`, `std`, `volume_mm3`, and optionally
+`relative_median_intensity` when `relative_intensity_to: background`.
 
 Each row includes `segment` (e.g. `C5`, `L3`), `parcellation_index`, region name/acronym,
 and `hemisphere` = `whole` (cord has no left/right split).
@@ -155,6 +179,7 @@ Under `<sample.save_path>/`:
 | `sample_reference.json` | preprocess |
 | `{label}_atlas_coords.npz` | import-annotations |
 | `region_stats.csv` | region-stats |
+| `chan{NN}_region_stats.csv` | region-stats (intensity) |
 | `{label}_region_counts.csv` | region-stats |
 | `cache/` | preprocess + init-registration intermediates (registration-grid TIFFs, straightened volume, resampled atlas) |
 | `transforms/` | elastix affine + inverted B-spline parameter files |

@@ -1137,13 +1137,18 @@ def spinal_region_stats(
         "--count-points/--no-count-points",
         help="Bin imported atlas-space points into cell counts (default: analysis.count_points).",
     ),
+    parcellate_intensities: bool = typer.Option(
+        None,
+        "--parcellate-intensities/--no-parcellate-intensities",
+        help="Median intensity per region × segment from exported channels (default: analysis.parcellate_intensities).",
+    ),
     space: str | None = typer.Option(
         None,
         "--space",
         help="Stats space: atlas, sample, or both (default: analysis.stats_spaces).",
     ),
 ) -> None:
-    """Assemble region_stats.csv with per-region, per-segment cell counts."""
+    """Assemble region_stats.csv with per-region, per-segment intensities and cell counts."""
     from lightsuite.analysis.cord_runner import run_cord_region_stats
     from lightsuite.cli.spaces import parse_spaces_option
     from lightsuite.config.loader import load_spinal_config
@@ -1152,12 +1157,20 @@ def spinal_region_stats(
     result = run_cord_region_stats(
         cfg,
         count_points=count_points,
+        parcellate_intensities=parcellate_intensities,
         stats_spaces=parse_spaces_option(space),
     )
     if result.combined_path is not None:
-        typer.echo(f"Region stats: {result.combined_path} ({result.n_rows} rows)")
+        typer.echo(
+            f"Region stats: {result.combined_path} ({result.n_rows} rows, "
+            f"{len(result.intensity_channels)} intensity channel(s), "
+            f"{len(result.count_labels)} point source(s))"
+        )
     else:
-        typer.echo("No region stats produced (run import-annotations first).")
+        typer.echo(
+            "No region stats produced. Run 'lightsuite spinal export' for intensities "
+            "and/or 'lightsuite spinal import-annotations' for point counts."
+        )
 
 
 @spinal_app.command("inspect-imports")

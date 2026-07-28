@@ -311,6 +311,18 @@ class AnalysisConfig(BaseModel):
         default=True,
         description="Bin imported atlas-space point clouds into per-region cell counts/densities.",
     )
+    parcellate_intensities: bool = Field(
+        default=True,
+        description="Compute per-region median intensity from registered channel volumes (spinal cord).",
+    )
+    intensity_channels: list[int] | None = Field(
+        default=None,
+        description="Registered channel indices to parcellate; None = all exported channels.",
+    )
+    relative_intensity_to: str = Field(
+        default="none",
+        description='Intensity normalization: "none" or "background" (relative to annotation id 0 per segment).',
+    )
     point_labels: list[str] | None = Field(
         default=None,
         description="Import labels to count (matches *_atlas_coords.npz stems); None = all found.",
