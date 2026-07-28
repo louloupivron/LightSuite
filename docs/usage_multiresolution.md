@@ -25,8 +25,8 @@ Supported input layouts today:
 
 | Layout | Example |
 |--------|---------|
-| Single multi-page TIFF | mesoSPIM `1-561-1x.tif` |
-| Plane-per-file folder | SmartSPIM `All_Channels/` |
+| Single multi-page TIFF | mesoSPIM `1-561-1x.tif` or 1.25X ROI tile |
+| Plane-per-file folder | SmartSPIM `All_Channels/` or mesoSPIM TeraStitcher `RES(...)` mosaic |
 
 ---
 
@@ -57,11 +57,15 @@ Each manifest describes:
 
 ### mesoSPIM (TIFF + `*_meta.txt`)
 
-Use the conversion notebook or call the vendor helper directly:
+Use the conversion notebook, the vendor helper, or the sample build script:
 
 ```bash
 # Notebook: examples/notebooks/convert_mesospim_to_multires.ipynb
+# OP39M2 spinal cord (stitched 2.5X overview + 1.25X ROI, 488 + 561):
+uv run python scripts/build_op39m2_multires_manifest.py
 ```
+
+Single-channel hyperstack pair:
 
 ```python
 from pathlib import Path
@@ -73,6 +77,45 @@ manifest = build_mesospim_pair_manifest(
     overview_path=Path("/data/JulieBuron/1X/1-561-1x.tif"),
     roi_path=Path("/data/JulieBuron/3.2X/1-561-3.2x_TC.tif"),
     output_manifest_path=Path("/data/JulieBuron/multiresolution_results/converted/baseline_561_TC_pair.json"),
+)
+```
+
+Stitched mesoSPIM overview (TeraStitcher `RES(...)` folder) plus ROI tile:
+
+```python
+from lightsuite.multires.vendor.mesospim import build_mesospim_pair_manifest
+
+manifest = build_mesospim_pair_manifest(
+    sample_name="OP39M2",
+    pair_label="spinal_cord_488",
+    overview_path=Path("/data/OP39M2/2.5X/output/channel_488/RES(12486x2162x1163)"),
+    roi_path=Path("/data/OP39M2/1.25X/..._Ch488_....tiff"),
+    overview_meta_path=Path("/data/OP39M2/2.5X/..._Mag2.5x_ch488_Tile0.tiff_meta.txt"),
+    output_manifest_path=Path("/data/OP39M2/multiresolution_results/converted/op39m2_488_pair.json"),
+)
+```
+
+Multichannel manifest (shared geometry; one Elastix run on the reference laser):
+
+```python
+from lightsuite.multires.vendor.mesospim import build_mesospim_multichannel_pair_manifest
+
+manifest = build_mesospim_multichannel_pair_manifest(
+    sample_name="OP39M2",
+    pair_label="spinal_cord_488_561",
+    reference_channel="488",
+    channels={
+        "488": {
+            "overview": Path("/data/OP39M2/2.5X/output/channel_488/RES(...)"),
+            "roi": Path("/data/OP39M2/1.25X/..._Ch488_....tiff"),
+        },
+        "561": {
+            "overview": Path("/data/OP39M2/2.5X/output/channel_561/RES(...)"),
+            "roi": Path("/data/OP39M2/1.25X/..._Ch561_....tiff"),
+        },
+    },
+    overview_meta_path=Path("/data/OP39M2/2.5X/..._Tile0.tiff_meta.txt"),
+    output_manifest_path=Path("/data/OP39M2/multiresolution_results/converted/op39m2_pair.json"),
 )
 ```
 
@@ -157,12 +200,16 @@ multires:
 | `multires.registration.experiment_name` | `default` | Slug for output subfolder and filenames |
 | `multires.registration.elastix_stages` | `[translation, rigid]` | Elastix parameter maps to chain |
 | `multires.registration.write_full_overview_canvas` | `true` | Write ROI embedded in full overview grid |
+| `multires.registration.max_slab_bytes` | `500000000` | Soft cap for streaming ROI slabs during resample (~500 MB) |
+| `multires.registration.reference_channel` | manifest default | Laser/channel slug used for Elastix (multichannel manifests) |
+| `multires.registration.apply_transform_to` | all non-reference channels | Additional channels that receive the saved transform without re-running Elastix |
 
 Example configs in the repository:
 
 | Config | Microscope | Geometry mode |
 |--------|------------|---------------|
 | [`JulieBuron_multires_manifest.yaml`](../examples/config/multiresolution/JulieBuron_multires_manifest.yaml) | mesoSPIM | `metadata` |
+| [`OP39M2_multires_manifest.yaml`](../examples/config/multiresolution/OP39M2_multires_manifest.yaml) | mesoSPIM (stitched + dual channel) | `metadata` |
 | [`Multi_RES_SCANs_cortex_9x_manifest.yaml`](../examples/config/multiresolution/Multi_RES_SCANs_cortex_9x_manifest.yaml) | SmartSPIM | `hybrid` |
 | [`Multi_RES_SCANs_single_fov_manifest.yaml`](../examples/config/multiresolution/Multi_RES_SCANs_single_fov_manifest.yaml) | SmartSPIM | `hybrid` |
 | [`Multi_RES_SCANs_cerebellum_9x_manifest.yaml`](../examples/config/multiresolution/Multi_RES_SCANs_cerebellum_9x_manifest.yaml) | SmartSPIM | `metadata` (geometry QC example) |
@@ -335,7 +382,10 @@ Install registration extras: `uv sync --extra registration`.
 
 ### Registration is slow or runs out of memory
 
+- `check-geometry` and `register` warn when the estimated overlap-crop peak RAM exceeds available machine memory.
 - Increase `registration_bin` (e.g. `2`) for faster, lower-resolution Elastix.
+- Use a negative `overlap_margin_um` to shrink the registration crop when the full overlap is too large.
+- Lower `max_slab_bytes` to reduce streaming slab size during ROI resampling.
 - Set `write_full_overview_canvas: false` when you only need the overlap-registered ROI.
 - Ensure `sample.scratch` points to fast local SSD space.
 

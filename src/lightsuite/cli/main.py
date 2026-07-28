@@ -764,9 +764,20 @@ def multires_validate_config(
 
     cfg = load_multires_config(config)
     manifest = load_pair_manifest(cfg.multires.pair_manifest)
+    channel_note = ""
+    if manifest.channels:
+        ref = cfg.multires.registration.reference_channel or manifest.resolved_reference_channel()
+        extra = manifest.non_reference_channels(
+            reference_channel=ref,
+            apply_transform_to=cfg.multires.registration.apply_transform_to,
+        )
+        channel_note = f" channels={','.join(manifest.channel_names())} ref={ref}"
+        if extra:
+            channel_note += f" apply_to={','.join(extra)}"
     typer.echo(
         f"Config valid: {cfg.sample.name} / {manifest.pair_label} "
         f"({Path(manifest.overview.volume_path).name} → {Path(manifest.roi.volume_path).name})"
+        f"{channel_note}"
     )
 
 

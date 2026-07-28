@@ -16,6 +16,7 @@ from lightsuite.multires.landmarks import (
     update_landmark_session_fit,
 )
 from lightsuite.multires.manifest import load_pair_manifest
+from lightsuite.multires.memory import warn_if_overlap_memory_exceeds_system
 from lightsuite.multires.models import ManifestVolumeSpec, MultiresPairManifest
 from lightsuite.multires.spec_geometry import (
     crop_index_range_from_physical_box,
@@ -54,6 +55,8 @@ def prepare_multires_registration_pair(
     *,
     manifest: MultiresPairManifest | None = None,
     landmark_session: MultiresLandmarkSession | None = None,
+    overview_spec: ManifestVolumeSpec | None = None,
+    roi_spec: ManifestVolumeSpec | None = None,
 ) -> MultiresPreparedPair:
     """Build fixed/moving overlap crops by streaming planes from disk.
 
@@ -67,8 +70,8 @@ def prepare_multires_registration_pair(
     manifest_dir = manifest_path.parent
     margin_um = cfg.multires.registration.overlap_margin_um
     mode = cfg.multires.geometry_mode
-    overview_spec = manifest.overview
-    roi_spec = manifest.roi
+    overview_spec = overview_spec or manifest.overview
+    roi_spec = roi_spec or manifest.roi
 
     landmark_fit: LandmarkFitResult | None = None
     session: MultiresLandmarkSession | None = None
@@ -108,6 +111,10 @@ def prepare_multires_registration_pair(
         overlap_min,
         overlap_max,
     )
+    warn_if_overlap_memory_exceeds_system(
+        crop_size,
+        max_slab_bytes=cfg.multires.registration.max_slab_bytes,
+    )
     fixed_cropped = load_manifest_xyz_crop(
         overview_spec,
         start_xyz=crop_start_index,
@@ -119,6 +126,7 @@ def prepare_multires_registration_pair(
         fixed_cropped,
         manifest_dir=manifest_dir,
         reference_to_moving=reference_to_moving,
+        max_slab_bytes=cfg.multires.registration.max_slab_bytes,
     )
 
     return MultiresPreparedPair(

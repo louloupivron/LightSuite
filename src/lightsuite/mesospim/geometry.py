@@ -27,12 +27,14 @@ __all__ = [
     "crop_to_physical_box",
     "embed_crop_in_full_overview",
     "geometry_report",
+    "mesospim_geometry_fields",
     "overlap_physical_bounds",
     "physical_bounds",
     "physical_center",
     "physical_corners",
     "prepare_registration_pair",
     "resample_to_reference_grid",
+    "stitched_mosaic_geometry_fields",
     "transform_physical_points",
     "transformed_bounds_in_target_space",
     "voxel_count_gb",
@@ -75,6 +77,63 @@ def apply_image_geometry(
         ox, oy = m0, m1
     image.SetOrigin((ox, oy, z_start))
     return image
+
+
+def mesospim_geometry_fields(
+    shape_zyx: tuple[int, int, int],
+    meta: dict[str, float | int | str],
+    geometry: MesospimGeometryConfig,
+) -> tuple[tuple[float, float, float], tuple[float, float, float], list[float]]:
+    """Return spacing, origin, and direction for a ZYX shape without allocating voxels."""
+    _z, y_size, x_size = shape_zyx
+    px = float(meta["Pixelsize in um"])
+    z_start = float(meta["z_start"])
+    z_end = float(meta["z_end"])
+    z_step = float(meta["z_stepsize"])
+    sx = float(meta["x_pos"])
+    sy = float(meta["y_pos"])
+
+    if geometry.itk_lateral_dim0_motor == "x":
+        m0, m1 = sx, sy
+    else:
+        m0, m1 = sy, sx
+
+    f0, f1 = geometry.lateral_flip
+    fz = -1 if z_end < z_start else 1
+    direction = np.diag([float(f0), float(f1), float(fz)]).ravel().tolist()
+    spacing = (px, px, abs(z_step))
+
+    if geometry.stage_xy_is_center:
+        ox = m0 - f0 * px * (x_size - 1) / 2.0
+        oy = m1 - f1 * px * (y_size - 1) / 2.0
+    else:
+        ox, oy = m0, m1
+    origin = (ox, oy, z_start)
+    return spacing, origin, direction
+
+
+def stitched_mosaic_geometry_fields(
+    stitched_shape_zyx: tuple[int, int, int],
+    anchor_meta: dict[str, float | int | str],
+    geometry: MesospimGeometryConfig,
+) -> tuple[tuple[float, float, float], tuple[float, float, float], list[float]]:
+    """Geometry for a Y-stitched mesoSPIM mosaic using the northern anchor tile meta."""
+    tile_shape = (
+        int(anchor_meta["z_planes"]),
+        int(anchor_meta["y_pixels"]),
+        int(anchor_meta["x_pixels"]),
+    )
+    spacing, tile_origin, direction = mesospim_geometry_fields(tile_shape, anchor_meta, geometry)
+
+    _nz, _ny, nx = stitched_shape_zyx
+    px = spacing[0]
+    f0 = direction[0]
+    sx = float(anchor_meta["x_pos"])
+    sy = float(anchor_meta["y_pos"])
+    m0 = sx if geometry.itk_lateral_dim0_motor == "x" else sy
+    ox = m0 - f0 * px * (nx - 1) / 2.0
+    origin = (ox, float(tile_origin[1]), float(tile_origin[2]))
+    return spacing, origin, direction
 
 
 def apply_voxel_geometry(

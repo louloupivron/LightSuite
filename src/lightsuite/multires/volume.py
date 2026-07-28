@@ -89,6 +89,56 @@ def _load_tiff_hyperstack(path: Path) -> np.ndarray:
         return np.asarray(tifffile.imread(str(path)))
 
 
+_HYPERSTACK_MEMMAP: dict[str, np.ndarray] = {}
+
+
+def _single_page_hyperstack_volume(volume_path: Path, shape_zyx: tuple[int, int, int]) -> np.ndarray:
+    """Return a ZYX view for a one-page ImageJ hyperstack TIFF (mesoSPIM-style)."""
+    key = str(volume_path.expanduser().resolve())
+    cached = _HYPERSTACK_MEMMAP.get(key)
+    if cached is not None:
+        return cached
+    try:
+        vol = tifffile.memmap(key)
+    except ValueError:
+        vol = _load_tiff_hyperstack(volume_path)
+    vol = _normalize_tiff_array(np.asarray(vol), volume_path)
+    if tuple(vol.shape) != tuple(shape_zyx):
+        msg = (
+            f"Hyperstack shape ZYX {vol.shape} != manifest shape_zyx {shape_zyx} "
+            f"for {volume_path}"
+        )
+        raise ValueError(msg)
+    _HYPERSTACK_MEMMAP[key] = vol
+    return vol
+
+
+def _read_tiff_xy_plane(
+    volume_path: Path,
+    *,
+    z_index: int,
+    shape_zyx: tuple[int, int, int],
+) -> np.ndarray:
+    """Read one native Z plane from a hyperstack TIFF or page-per-slice stack."""
+    nz, _ny, _nx = shape_zyx
+    iz = int(np.clip(int(z_index), 0, nz - 1))
+    with tifffile.TiffFile(volume_path) as tf:
+        series = tf.series[0]
+        if len(tf.pages) == 1 and series.ndim == 3 and int(series.shape[0]) == nz:
+            return np.asarray(_single_page_hyperstack_volume(volume_path, shape_zyx)[iz])
+        if series.ndim == 3 and int(series.shape[0]) == nz and len(tf.pages) > 1:
+            plane = series.asarray(key=iz)
+        else:
+            if iz >= len(tf.pages):
+                msg = f"Z index {iz} out of range for {len(tf.pages)} pages in {volume_path}"
+                raise IndexError(msg)
+            plane = tf.pages[iz].asarray()
+    plane = _normalize_tiff_array(np.asarray(plane), volume_path)
+    if plane.ndim == 3:
+        return np.asarray(plane[0], dtype=np.float32)
+    return np.asarray(plane, dtype=np.float32)
+
+
 def _load_plane_per_file_stack(folder: Path) -> np.ndarray:
     planes = _sorted_plane_files(folder)
     if not planes:
@@ -196,6 +246,23 @@ def volume_spec_from_image(label: str, volume_path: Path, image: sitk.Image) -> 
     )
 
 
+def volume_spec_from_geometry(
+    volume_path: Path,
+    shape_zyx: tuple[int, int, int],
+    spacing_um: tuple[float, float, float],
+    origin_um: tuple[float, float, float],
+    direction: list[float] | tuple[float, ...],
+) -> ManifestVolumeSpec:
+    """Build a manifest volume spec without allocating voxel data."""
+    return ManifestVolumeSpec(
+        volume_path=str(volume_path),
+        shape_zyx=[int(v) for v in shape_zyx],
+        spacing_um=[float(v) for v in spacing_um],
+        origin_um=[float(v) for v in origin_um],
+        direction=[float(v) for v in direction],
+    )
+
+
 def manifest_geometry_report(
     label: str,
     spec: ManifestVolumeSpec,
@@ -234,16 +301,7 @@ def load_manifest_xy_slice(
     iz = int(np.clip(iz, 0, nz - 1))
 
     if volume_path.is_file():
-        with tifffile.TiffFile(volume_path) as tf:
-            series = tf.series[0]
-            if series.shape[0] == nz:
-                plane = series.asarray(key=iz)
-            else:
-                plane = tf.pages[iz].asarray()
-        plane = _normalize_tiff_array(np.asarray(plane), volume_path)
-        if plane.ndim == 3:
-            return np.asarray(plane[0], dtype=np.float32)
-        return np.asarray(plane, dtype=np.float32)
+        return _read_tiff_xy_plane(volume_path, z_index=iz, shape_zyx=(nz, ny, nx))
 
     if volume_path.is_dir():
         planes = _sorted_plane_files(volume_path)
@@ -298,15 +356,7 @@ def load_manifest_xy_crop(
     iy1 = int(np.clip(iy1, 0, ny))
 
     if volume_path.is_file():
-        with tifffile.TiffFile(volume_path) as tf:
-            series = tf.series[0]
-            if series.shape[0] == nz:
-                plane = series.asarray(key=iz)
-            else:
-                plane = tf.pages[iz].asarray()
-        plane = _normalize_tiff_array(np.asarray(plane), volume_path)
-        if plane.ndim == 3:
-            plane = plane[0]
+        plane = _read_tiff_xy_plane(volume_path, z_index=iz, shape_zyx=(nz, ny, nx))
         return np.asarray(plane[iy0:iy1, ix0:ix1], dtype=np.float32)
 
     if volume_path.is_dir():

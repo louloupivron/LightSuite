@@ -37,7 +37,15 @@ def save_pair_manifest(manifest: MultiresPairManifest, path: str | Path) -> Path
 
 def _validate_manifest_paths(manifest: MultiresPairManifest, *, manifest_path: Path) -> None:
     base = manifest_path.parent
-    for label, spec in (("overview", manifest.overview), ("roi", manifest.roi)):
+    specs_to_check: list[tuple[str, object]] = [
+        ("overview", manifest.overview),
+        ("roi", manifest.roi),
+    ]
+    if manifest.channels:
+        for channel, channel_specs in manifest.channels.items():
+            specs_to_check.append((f"channels.{channel}.overview", channel_specs.overview))
+            specs_to_check.append((f"channels.{channel}.roi", channel_specs.roi))
+    for label, spec in specs_to_check:
         volume_path = Path(spec.volume_path).expanduser()
         if not volume_path.is_absolute():
             volume_path = (base / volume_path).resolve()

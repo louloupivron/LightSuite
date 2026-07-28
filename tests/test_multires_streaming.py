@@ -16,6 +16,7 @@ from lightsuite.multires.models import MANIFEST_FORMAT, ManifestVolumeSpec, Mult
 from lightsuite.multires.prepare import prepare_multires_registration_pair
 from lightsuite.multires.volume import (
     load_manifest_volume,
+    load_manifest_xy_plane_at_z_index,
     load_manifest_xyz_crop,
     stream_resample_to_reference,
     write_embedded_crop_canvas,
@@ -42,6 +43,20 @@ def _spec(
         spacing_um=list(spacing),
         origin_um=list(origin),
     )
+
+
+def test_load_manifest_single_page_hyperstack(tmp_path: Path) -> None:
+    arr = np.arange(4 * 6 * 8, dtype=np.uint16).reshape(4, 6, 8)
+    path = tmp_path / "stack.tif"
+    tifffile.imwrite(path, arr, imagej=True)
+
+    spec = _spec(path, arr)
+    for iz in (0, 2, 3):
+        plane = load_manifest_xy_plane_at_z_index(spec, iz)
+        np.testing.assert_array_equal(plane, arr[iz].astype(np.float32))
+
+    crop = load_manifest_xyz_crop(spec, start_xyz=[1, 1, 1], crop_size_xyz=[3, 2, 2])
+    np.testing.assert_array_equal(sitk.GetArrayFromImage(crop), arr[1:3, 1:3, 1:4])
 
 
 def test_load_manifest_xyz_crop_matches_full_load(tmp_path: Path) -> None:

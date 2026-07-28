@@ -32,6 +32,8 @@ class MultiresRegOptsCheckpoint:
     landmark_rms_error_um: float | None = None
     registration_overlay_qc_path: str | None = None
     registration_slice_ncc: float | None = None
+    reference_channel: str | None = None
+    additional_channel_paths: dict[str, str] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

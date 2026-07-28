@@ -1,0 +1,34 @@
+# Multiresolution registration — OP39M2 mesoSPIM spinal cord (488 + 561)
+#
+# Build the pair manifest first:
+#   uv run python scripts/build_op39m2_multires_manifest.py
+#
+# Then:
+#   uv sync --extra registration
+#   uv run lightsuite multires validate-config -c examples/config/multiresolution/OP39M2_multires_manifest.yaml
+#   uv run lightsuite multires check-geometry      -c examples/config/multiresolution/OP39M2_multires_manifest.yaml
+#   uv run lightsuite multires register            -c examples/config/multiresolution/OP39M2_multires_manifest.yaml
+#
+# Overview: 2.5X TeraStitcher mosaic (stitched plane-per-file folder)
+# ROI:      1.25X single-tile hyperstack (smaller FOV, coarser voxels)
+# Registration runs on Ch488; the same elastix transform is applied to Ch561.
+
+sample:
+  name: OP39M2
+  save_path: /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP39M2/multiresolution_results
+  scratch: /media/gbm/NVME2/lightsuite_scratch
+
+multires:
+  pair_manifest: /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP39M2/multiresolution_results/converted/OP39M2_spinal_cord_pair.json
+
+  geometry_mode: metadata
+
+  registration:
+    overlap_margin_um: 0.0
+    registration_bin: 4
+    max_slab_bytes: 100000000
+    experiment_name: OP39M2_spinal_cord
+    elastix_stages: [translation, rigid]
+    write_full_overview_canvas: false
+    reference_channel: "488"
+    apply_transform_to: ["561"]

@@ -19,6 +19,7 @@ from lightsuite.multires.geometry import (
 )
 from lightsuite.multires.landmarks import fit_landmark_transform
 from lightsuite.multires.manifest import load_pair_manifest
+from lightsuite.multires.memory import warn_if_overlap_memory_exceeds_system
 from lightsuite.multires.models import MultiresPairManifest, serialize_report
 from lightsuite.multires.plots import (
     normalized_cross_correlation,
@@ -27,7 +28,11 @@ from lightsuite.multires.plots import (
     save_geometry_slice_qc_plot,
 )
 from lightsuite.multires.prepare import load_landmark_session, prepare_multires_registration_pair
-from lightsuite.multires.registration import register_roi_to_overview, sanitize_experiment_name
+from lightsuite.multires.registration import (
+    apply_registration_to_channel,
+    register_roi_to_overview,
+    sanitize_experiment_name,
+)
 from lightsuite.multires.spec_geometry import (
     alignment_metrics_from_specs,
     crop_index_range_from_physical_box,
@@ -103,10 +108,14 @@ def _lightweight_geometry_context(
             margin_um=margin_um,
         )
 
-    crop_start_index, _crop_size = crop_index_range_from_physical_box(
+    crop_start_index, crop_size = crop_index_range_from_physical_box(
         overview_spec,
         overlap_min,
         overlap_max,
+    )
+    warn_if_overlap_memory_exceeds_system(
+        crop_size,
+        max_slab_bytes=cfg.multires.registration.max_slab_bytes,
     )
     return overlap_min, overlap_max, crop_start_index, landmark_fit
 
@@ -353,9 +362,26 @@ def run_multires_registration(cfg: MultiresPipelineConfig) -> MultiresRegOptsChe
     experiment_slug = sanitize_experiment_name(meso.registration.experiment_name)
     output_dir = cfg.sample.save_path / "elastix_roi_to_overview" / experiment_slug
 
-    prepared = prepare_multires_registration_pair(cfg, manifest=manifest)
-    overview_stem = _volume_stem(Path(manifest.overview.volume_path))
-    roi_stem = _volume_stem(Path(manifest.roi.volume_path))
+    reference_channel = (
+        meso.registration.reference_channel
+        or manifest.resolved_reference_channel()
+    )
+    if manifest.channels and reference_channel:
+        ref_specs = manifest.channel_specs(reference_channel)
+        overview_spec = ref_specs.overview
+        roi_spec = ref_specs.roi
+    else:
+        overview_spec = manifest.overview
+        roi_spec = manifest.roi
+
+    prepared = prepare_multires_registration_pair(
+        cfg,
+        manifest=manifest,
+        overview_spec=overview_spec,
+        roi_spec=roi_spec,
+    )
+    overview_stem = _volume_stem(Path(overview_spec.volume_path))
+    roi_stem = _volume_stem(Path(roi_spec.volume_path))
 
     result = register_roi_to_overview(
         prepared=prepared,
@@ -367,7 +393,34 @@ def run_multires_registration(cfg: MultiresPipelineConfig) -> MultiresRegOptsChe
         elastix_stages=meso.registration.elastix_stages,
         write_full_overview_canvas=meso.registration.write_full_overview_canvas,
         pair_label=manifest.pair_label,
+        channel=reference_channel,
     )
+
+    additional_channels = manifest.non_reference_channels(
+        reference_channel=reference_channel,
+        apply_transform_to=meso.registration.apply_transform_to,
+    )
+    for channel_name in additional_channels:
+        channel_specs = manifest.channel_specs(channel_name)
+        channel_prepared = prepare_multires_registration_pair(
+            cfg,
+            manifest=manifest,
+            overview_spec=channel_specs.overview,
+            roi_spec=channel_specs.roi,
+        )
+        channel_result = apply_registration_to_channel(
+            prepared=channel_prepared,
+            transform_paths=result.transform_paths,
+            output_dir=output_dir,
+            experiment_slug=experiment_slug,
+            channel=channel_name,
+            overview_stem=_volume_stem(Path(channel_specs.overview.volume_path)),
+            roi_stem=_volume_stem(Path(channel_specs.roi.volume_path)),
+            write_full_overview_canvas=meso.registration.write_full_overview_canvas,
+            pair_label=manifest.pair_label,
+        )
+        result.additional_channels.append(channel_result)
+        _status(f"Applied transform to channel {channel_name}: {channel_result.registered_roi_path}")
 
     landmark_session_path = None
     if meso.geometry_mode != MultiresGeometryMode.METADATA:
@@ -380,8 +433,8 @@ def run_multires_registration(cfg: MultiresPipelineConfig) -> MultiresRegOptsChe
         pair_label=manifest.pair_label,
         pair_manifest_path=str(manifest_path),
         experiment_slug=experiment_slug,
-        overview_volume_path=manifest.overview.volume_path,
-        roi_volume_path=manifest.roi.volume_path,
+        overview_volume_path=overview_spec.volume_path,
+        roi_volume_path=roi_spec.volume_path,
         geometry_mode=meso.geometry_mode.value,
         landmark_session_path=landmark_session_path,
         overlap_box_um=list(result.overlap_box_um),
@@ -405,6 +458,13 @@ def run_multires_registration(cfg: MultiresPipelineConfig) -> MultiresRegOptsChe
             else None
         ),
         registration_slice_ncc=result.registration_slice_ncc,
+        reference_channel=reference_channel,
+        additional_channel_paths={
+            channel_result.channel: str(channel_result.registered_roi_path)
+            for channel_result in result.additional_channels
+        }
+        if result.additional_channels
+        else None,
     )
     checkpoint.save(multires_checkpoint_path(cfg.sample.save_path))
     if result.registration_overlay_qc_path is not None:
