@@ -1,6 +1,6 @@
 # Spinal cord lightsheet analysis
 
-The **Python spinal cord pipeline** covers preprocess, straightening, registration, export, intensity parcellation, hierarchy rollups, and point-based region stats. Cohort NNMF normalization and MATLAB-style structure/division plots remain in `example_analysis_spinal_cord.m`.
+The **Python spinal cord pipeline** covers preprocess, straightening, registration, export, intensity parcellation, hierarchy rollups, point-based region stats, and cord-specific plots. Cohort NNMF normalization remains in `example_analysis_spinal_cord.m`.
 
 For the brain pipeline, see [Brain lightsheet analysis](usage_lightsheet_brain.md).
 
@@ -121,6 +121,36 @@ Rolled rows are appended to `region_stats.csv` with `rollup_level` =
 
 Each row includes `segment` (e.g. `C5`, `L3`), `parcellation_index`, region name/acronym,
 and `hemisphere` = `whole` (cord has no left/right split).
+
+### Cord plots
+
+After `region-stats`, generate matplotlib figures (requires the `gui` extra / matplotlib):
+
+```bash
+uv run lightsuite analysis plot-cord-structure \
+  -c examples/config/spinal_cord/OP87F4.yaml \
+  -o plots/op87_structure.png \
+  --channel 1 --metric median_intensity
+
+uv run lightsuite analysis plot-cord-division-profile \
+  -c examples/config/spinal_cord/OP87F4.yaml \
+  -o plots/op87_division_profile.png \
+  --channel 1 --metric median_intensity
+
+uv run lightsuite analysis plot-cord-segment-bars \
+  -c examples/config/spinal_cord/OP87F4.yaml \
+  -o plots/op87_segment_counts.png \
+  --channel imaris_Coloc_pink_yellow --metric cell_count
+```
+
+| Command | Uses `rollup_level` | MATLAB equivalent |
+|---------|---------------------|-------------------|
+| `plot-cord-structure` | `structure` | Top-row `imagesc` heatmap |
+| `plot-cord-division-profile` | `division` | Bottom-row GM/WM line plot |
+| `plot-cord-segment-bars` | `region` (summed per segment) | — |
+
+Use `--input region_stats.csv` instead of `--config` when plotting from a copied CSV.
+Each command also writes a sidecar `.csv` next to the PNG.
 
 ### Inspect imports (Napari QC)
 

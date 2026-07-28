@@ -588,6 +588,147 @@ def analysis_plot_group_division(
     typer.echo(f"Saved: {out.resolve()}")
 
 
+def _resolve_cord_plot_context(
+    *,
+    input_path: str | None,
+    spinal_config: str | None,
+) -> tuple["Path", Path | None, list[str]]:
+    from pathlib import Path
+
+    from lightsuite.analysis.viz.cord_io import load_segment_order, resolve_cord_region_stats_from_config
+    from lightsuite.atlas.fiederling import resolve_fiederling_paths
+
+    if input_path and spinal_config:
+        raise typer.BadParameter("Use only one of --input or --config.")
+    if spinal_config:
+        from lightsuite.config.loader import load_spinal_config
+
+        cfg = load_spinal_config(spinal_config)
+        stats_path = resolve_cord_region_stats_from_config(spinal_config)
+        segments_csv = resolve_fiederling_paths(cfg.atlas.atlas_dir).segments_csv
+        return stats_path, segments_csv, load_segment_order(segments_csv)
+    if input_path:
+        return Path(input_path).expanduser().resolve(), None, []
+    raise typer.BadParameter("Provide --input or --config (spinal cord YAML).")
+
+
+@analysis_app.command("plot-cord-structure")
+def analysis_plot_cord_structure(
+    output: str = typer.Option(..., "--output", "-o", help="Output PNG path."),
+    input_path: str | None = typer.Option(None, "--input", "-i", help="Cord region_stats.csv."),
+    spinal_config: str | None = typer.Option(
+        None, "--config", "-c", help="Spinal YAML; uses volume_registered/region_stats.csv."
+    ),
+    channel: str = typer.Option("1", "--channel", help="Imaging channel or import label."),
+    metric: str = typer.Option("median_intensity", "--metric", help="Metric to plot."),
+    title: str | None = typer.Option(None, "--title", help="Figure title."),
+    dpi: int = typer.Option(200, "--dpi", help="Figure DPI."),
+) -> None:
+    """Heatmap: structure (rows) × rostrocaudal segment (columns)."""
+    from lightsuite.analysis.viz.cord_io import filter_cord_stats, load_cord_stats_csv, parse_plot_channel
+    from lightsuite.analysis.viz.cord_plots import plot_cord_structure_heatmap
+
+    stats_path, _segments_csv, segment_order = _resolve_cord_plot_context(
+        input_path=input_path, spinal_config=spinal_config
+    )
+    table = filter_cord_stats(
+        load_cord_stats_csv(stats_path),
+        channel=parse_plot_channel(channel),
+        metric=metric,
+        rollup_level="structure",
+    )
+    out = Path(output).expanduser()
+    plot_cord_structure_heatmap(
+        table,
+        segment_order=segment_order or None,
+        title=title,
+        metric=metric,
+        output_path=out,
+        dpi=dpi,
+    )
+    typer.echo(f"Saved: {out.resolve()}")
+
+
+@analysis_app.command("plot-cord-division-profile")
+def analysis_plot_cord_division_profile(
+    output: str = typer.Option(..., "--output", "-o", help="Output PNG path."),
+    input_path: str | None = typer.Option(None, "--input", "-i", help="Cord region_stats.csv."),
+    spinal_config: str | None = typer.Option(
+        None, "--config", "-c", help="Spinal YAML; uses volume_registered/region_stats.csv."
+    ),
+    channel: str = typer.Option("1", "--channel", help="Imaging channel or import label."),
+    metric: str = typer.Option("median_intensity", "--metric", help="Metric to plot."),
+    title: str | None = typer.Option(None, "--title", help="Figure title."),
+    z_voxel_um: float = typer.Option(20.0, "--z-voxel-um", help="Atlas Z voxel size in µm for mm axis."),
+    dpi: int = typer.Option(200, "--dpi", help="Figure DPI."),
+) -> None:
+    """Line plot: GM/WM signal vs rostrocaudal position."""
+    import pandas as pd
+
+    from lightsuite.analysis.viz.cord_io import filter_cord_stats, load_cord_stats_csv, parse_plot_channel
+    from lightsuite.analysis.viz.cord_plots import plot_cord_division_profile
+
+    stats_path, segments_csv, _segment_order = _resolve_cord_plot_context(
+        input_path=input_path, spinal_config=spinal_config
+    )
+    if segments_csv is None or not segments_csv.is_file():
+        raise typer.BadParameter("Provide --config (spinal YAML) so Segments.csv can be resolved.")
+    table = filter_cord_stats(
+        load_cord_stats_csv(stats_path),
+        channel=parse_plot_channel(channel),
+        metric=metric,
+        rollup_level="division",
+    )
+    out = Path(output).expanduser()
+    plot_cord_division_profile(
+        table,
+        pd.read_csv(segments_csv),
+        title=title,
+        metric=metric,
+        z_voxel_um=z_voxel_um,
+        output_path=out,
+        dpi=dpi,
+    )
+    typer.echo(f"Saved: {out.resolve()}")
+
+
+@analysis_app.command("plot-cord-segment-bars")
+def analysis_plot_cord_segment_bars(
+    output: str = typer.Option(..., "--output", "-o", help="Output PNG path."),
+    input_path: str | None = typer.Option(None, "--input", "-i", help="Cord region_stats.csv."),
+    spinal_config: str | None = typer.Option(
+        None, "--config", "-c", help="Spinal YAML; uses volume_registered/region_stats.csv."
+    ),
+    channel: str = typer.Option("1", "--channel", help="Imaging channel or import label."),
+    metric: str = typer.Option("cell_count", "--metric", help="Metric to plot."),
+    title: str | None = typer.Option(None, "--title", help="Figure title."),
+    dpi: int = typer.Option(200, "--dpi", help="Figure DPI."),
+) -> None:
+    """Bar chart: total metric per segment (summed over finest regions)."""
+    from lightsuite.analysis.viz.cord_io import filter_cord_stats, load_cord_stats_csv, parse_plot_channel
+    from lightsuite.analysis.viz.cord_plots import plot_cord_segment_bars
+
+    stats_path, _segments_csv, segment_order = _resolve_cord_plot_context(
+        input_path=input_path, spinal_config=spinal_config
+    )
+    table = filter_cord_stats(
+        load_cord_stats_csv(stats_path),
+        channel=parse_plot_channel(channel),
+        metric=metric,
+        rollup_level="region",
+    )
+    out = Path(output).expanduser()
+    plot_cord_segment_bars(
+        table,
+        segment_order=segment_order or None,
+        title=title,
+        metric=metric,
+        output_path=out,
+        dpi=dpi,
+    )
+    typer.echo(f"Saved: {out.resolve()}")
+
+
 @analysis_app.command("build-division-map")
 def analysis_build_division_map(
     config: str = typer.Option(..., "--config", "-c", help="Brain pipeline YAML config."),
