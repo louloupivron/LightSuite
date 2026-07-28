@@ -89,8 +89,9 @@ def warn_if_positions_look_like_voxel_indices(
             return (
                 f"Imaris Position maxima {vmax.round(1).tolist()} fit voxel indices on "
                 f"grid {(ny, nx, nz)} better than µm at voxel_um={list(voxel_um)}. "
-                "Re-run with --voxel-um 1,1,1 if the .ims was saved at 1 µm/voxel "
-                "(or if Position values are indices)."
+                "Re-run with --voxel-um matching Imaris Image Properties "
+                "(often 1,1,1 when the .ims is 1 µm/voxel, or hybrid 1,1,<sample_z_um> "
+                "when Imaris Z plane count differs from LightSuite nz)."
             )
     return None
 

@@ -146,7 +146,7 @@ Each site maintains a small converter script. Common translations:
 | **0-based indices** | Add 1 to each coordinate |
 | **`[z, y, x]` order** | Reorder to `[x, y, z]` |
 | **Arivis Blob Finder CSV** | Use COM columns as `x,y,z`; add 1 if 0-based |
-| **Imaris Spot_OnePageMultiComponent_Detailed.csv** | Filter by `Component Name`; use `lightsuite spinal convert-imaris-spots`. Set `--voxel-um` to match Position units (microscope µm, or `1,1,1` if the `.ims` is 1 µm/voxel / index-valued) |
+| **Imaris Spot_OnePageMultiComponent_Detailed.csv** | Filter by `Component Name`; use `lightsuite spinal convert-imaris-spots`. Set `--voxel-um` from **Imaris** Image Properties voxel size (not blindly from `sample.voxel_um`). Use `1,1,1` when the `.ims` is 1 µm isotropic on the same grid; use hybrid values (e.g. `1,1,1.8`) when XY matches LightSuite indices but Z plane counts differ — see [Spinal cord usage](usage_spinal_cord.md) |
 | **Imaris mask TIFF series** | One label slice per Z (`*_Z####.tif`, 0-based in filename); binarize `(plane > 0)` and stack to multi-page TIFF |
 | **LCT JSON** `[[z,y,x],…]` | Reorder to `x,y,z`; add 1 |
 | **Downsampled segmentation** | Resample mask/coordinates to native `shape_yxz` before import |
@@ -165,6 +165,7 @@ Validate against `sample_reference.json` before import:
 | Missing `sample_reference.json` | Run `preprocess` |
 | Mask shape mismatch | Resample mask to native `(Y, X, Z)` |
 | All points out of bounds | Check axis order and index base (+1 for 0-based tools) |
+| Most points outside cord / background after import | Re-check Imaris voxel calibration vs `--voxel-um` (1 µm `.ims` often needs `1,1,1` or hybrid `1,1,1.8`, not microscope `1.8,1.8,1.8`) |
 | Missing `transform_params.json` | Run `register` before import |
 
 ---

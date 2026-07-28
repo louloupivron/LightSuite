@@ -40,14 +40,23 @@ Convert Imaris spot exports before import:
 uv run lightsuite spinal convert-imaris-spots \
   -s /path/to/Spot_OnePageMultiComponent_Detailed.csv \
   -o /path/to/converted \
-  --voxel-um 1.8,1.8,1.8 \
-  --shape-yxz 8793,2004,1931
+  --voxel-um 1,1,1.8 \
+  --shape-yxz 10234,2006,837
 ```
 
 `--voxel-um` is the size of one LightSuite native voxel **in the same units as the
-Imaris Position columns**. If the `.ims` was calibrated at 1 µm/voxel (or Position
-values are already voxel indices despite a `[µm]` header), use `--voxel-um 1,1,1`.
-Pass `--shape-yxz` from `sample_reference.json` to get a warning when the units look wrong.
+Imaris Position columns** (Image Properties → Geometry → Voxel Size), **not**
+necessarily `sample.voxel_um` from the YAML.
+
+Check the `.ims` calibration before converting:
+
+| Imaris voxel size | LightSuite `sample_reference.json` | Typical `--voxel-um` |
+|-------------------|------------------------------------|----------------------|
+| Same as microscope (e.g. 1.8³ µm) | Same grid and voxel size | `1.8,1.8,1.8` |
+| 1.00³ µm (Position ≈ voxel indices) | Same XYZ shape as Imaris | `1,1,1` |
+| 1.00³ µm, but **Z plane count differs** from LightSuite (common: Imaris keeps full acquisition Z, LightSuite has fewer planes at true 1.8 µm) | XY shape matches; `nz_imaris / nz_lightsuite ≈ sample.voxel_um[2]` | **`1,1,1.8`** (XY as Imaris indices, Z scaled to the LightSuite grid) |
+
+Using the microscope voxel size (`1.8,1.8,1.8`) when the `.ims` is calibrated at 1 µm shrinks coordinates toward the origin and places most spots **outside the cord** after import. Pass `--shape-yxz` from `sample_reference.json` to get a warning when the units look wrong; confirm placement with `inspect-imports`.
 
 ### Cell counts from imported spots
 

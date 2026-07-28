@@ -1036,9 +1036,12 @@ def spinal_convert_imaris_spots(
         ...,
         "--voxel-um",
         help=(
-            "Size of one LightSuite native voxel in the same units as Imaris Position columns, "
-            "as comma-separated x,y,z. Use the microscope voxel size when Position is true µm; "
-            "use 1,1,1 when the .ims was calibrated at 1 µm/voxel or Position values are indices."
+            "Size of one LightSuite native voxel in the same units as Imaris Position columns "
+            "(Image Properties → Voxel Size), as comma-separated x,y,z. "
+            "Use 1,1,1 when the .ims is 1 µm isotropic on the same grid; "
+            "use hybrid values such as 1,1,1.8 when XY matches LightSuite indices but Z "
+            "plane counts differ; use the microscope size (e.g. 1.8,1.8,1.8) only when "
+            "Imaris is calibrated to that size."
         ),
     ),
     label_prefix: str = typer.Option("imaris", help="Filename prefix for converted CSVs."),
