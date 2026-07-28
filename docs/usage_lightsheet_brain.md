@@ -363,22 +363,26 @@ uv run lightsuite brain register -c my_mouse.yaml --single-step
 
 ### 8. Export
 
-Warps all channels to atlas space and optionally writes parcellation statistics.
+Warps channels to atlas space (default) and optionally exports atlas labels warped onto the **registration grid** (sample space). See [Registration spaces](registration_spaces.md).
 
 ```bash
 uv run lightsuite brain export -c my_mouse.yaml --save-volume --write-csv
+uv run lightsuite brain export -c my_mouse.yaml --space both --save-volume --write-csv
 ```
 
 Flags override YAML defaults:
 
 - `--save-volume` / `--no-save-volume`
 - `--write-csv` / `--no-write-csv`
+- `--space atlas|sample|both` — output coordinate space(s)
 
 **Outputs** in `volume_registered/`:
 
-- `chan_{NN}_registered_atlas.tif` — if `--save-volume`
+- `chan_{NN}_registered_atlas.tif` — if `--save-volume` (atlas space)
+- `sample_space/` — warped annotation, template, division labels on registration grid
 - `chan{NN}_intensities.csv` — regional median intensity, std, volume per hemisphere
 - `chan{NN}_intensities.json` — same statistics in JSON form
+- `chan{NN}_region_stats_sample.csv` / `region_stats_sample.csv` — sample-space stats when enabled
 
 Allen parcellation CSV export requires `parcellation_to_parcellation_term_membership.csv` (see [Installation](installation.md)).
 

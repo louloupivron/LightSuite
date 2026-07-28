@@ -77,6 +77,22 @@ def permute_brain_volume(volume: np.ndarray, permvec: list[int]) -> np.ndarray:
     return np.ascontiguousarray(out)
 
 
+def unpermute_brain_volume(volume: np.ndarray, permvec: list[int]) -> np.ndarray:
+    """Inverse of :func:`permute_brain_volume`."""
+    if len(permvec) != 3:
+        msg = f"permvec must have length 3, got {permvec}"
+        raise ValueError(msg)
+    out = np.asarray(volume)
+    for dim, val in enumerate(permvec):
+        if val < 0:
+            out = np.flip(out, axis=dim)
+    perm_order = [abs(v) - 1 for v in permvec]
+    inverse_order = [0, 0, 0]
+    for new_axis, old_axis in enumerate(perm_order):
+        inverse_order[old_axis] = new_axis
+    return np.ascontiguousarray(np.transpose(out, inverse_order))
+
+
 def normalize_registration_volume(volume: np.ndarray) -> np.ndarray:
     """Scale sample volume to ~[0, 1] using central ROI (initializeRegistration.m)."""
     cent = np.array(volume.shape) // 2

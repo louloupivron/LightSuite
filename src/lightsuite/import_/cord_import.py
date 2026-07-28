@@ -18,7 +18,12 @@ from lightsuite.config.models import (
     SpinalCordPipelineConfig,
 )
 from lightsuite.import_.adapters import load_annotation, prepare_points_for_sample
-from lightsuite.import_.cord_transform import filter_points_for_cord_registration, transform_points_to_cord_atlas
+from lightsuite.import_.cord_transform import (
+    filter_points_for_cord_registration,
+    sample_points_to_straightened_grid,
+    transform_points_to_cord_atlas,
+)
+from lightsuite.registration.points import volume_indices_to_cloud_xyz
 from lightsuite.import_.models import AnnotationImportResult, ImportedPoints
 from lightsuite.import_.sample_reference import load_sample_reference
 from lightsuite.preprocess.cord_checkpoint import CordRegOptsCheckpoint, CordTransformParamsCheckpoint
@@ -97,11 +102,24 @@ def _import_points(
         temp_dir=temp_dir / _slug(prepared.label),
     )
 
+    straight_yxz = sample_points_to_straightened_grid(
+        reg_coords,
+        transform_params=transform_params,
+        tforms=tforms,
+    )
+    sample_reg_coords = volume_indices_to_cloud_xyz(straight_yxz)
+
     slug = _slug(prepared.label)
     npz_path = output_dir / f"{slug}_atlas_coords.npz"
+    sample_npz_path = output_dir / f"{slug}_sample_coords.npz"
     np.savez_compressed(
         npz_path,
         atlasptcoords=atlas_coords.astype(np.float32),
+        sampleptcoords=reg_coords.astype(np.float32),
+    )
+    np.savez_compressed(
+        sample_npz_path,
+        regptcoords=sample_reg_coords.astype(np.float32),
         sampleptcoords=reg_coords.astype(np.float32),
     )
 
@@ -126,8 +144,10 @@ def _import_points(
         kind="points",
         atlas_points_path=npz_path,
         atlas_csv_path=csv_path,
+        sample_points_path=sample_npz_path,
         n_input=int(loaded.coordinates.shape[0]),
         n_atlas=int(atlas_coords.shape[0]),
+        n_sample=int(sample_reg_coords.shape[0]),
     )
 
 

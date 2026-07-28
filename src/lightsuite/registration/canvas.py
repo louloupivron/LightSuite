@@ -238,3 +238,39 @@ def apply_canvas_sample_crop(volume: np.ndarray, canvas: RegistrationCanvas) -> 
         volume = crop_volume_yxz(volume, box)
     padding = WarpCanvasPadding(canvas.pad_before, canvas.pad_after)
     return pad_volume_for_warp_canvas(volume, padding)
+
+
+def undo_canvas_sample_crop(
+    volume: np.ndarray,
+    canvas: RegistrationCanvas,
+    full_shape: tuple[int, int, int],
+) -> np.ndarray:
+    """Inverse of :func:`apply_canvas_sample_crop` for the unpadded working region."""
+    if canvas.is_identity and volume.shape == full_shape:
+        return volume
+
+    inner_shape = tuple(
+        canvas.working_shape[i] - canvas.pad_before[i] - canvas.pad_after[i]
+        for i in range(3)
+    )
+    unpadded = volume
+    padding = WarpCanvasPadding(canvas.pad_before, canvas.pad_after)
+    if not padding.is_zero:
+        unpadded = crop_from_warp_canvas(volume, padding, inner_shape)
+
+    if canvas.sample_crop_start == (0, 0, 0):
+        if unpadded.shape == full_shape:
+            return unpadded
+        msg = (
+            f"Cannot embed unpadded volume shape {unpadded.shape} "
+            f"into full_shape {full_shape} without crop offset"
+        )
+        raise ValueError(msg)
+
+    out = np.zeros(full_shape, dtype=volume.dtype)
+    sy, sx, sz = canvas.sample_crop_start
+    ey = sy + unpadded.shape[0]
+    ex = sx + unpadded.shape[1]
+    ez = sz + unpadded.shape[2]
+    out[sy:ey, sx:ex, sz:ez] = unpadded
+    return out

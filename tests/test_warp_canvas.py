@@ -5,12 +5,16 @@ from __future__ import annotations
 import numpy as np
 
 from lightsuite.registration.canvas import (
+    RegistrationCanvas,
     WarpCanvasPadding,
+    apply_canvas_sample_crop,
     compute_vd_warp_canvas_padding,
     crop_from_warp_canvas,
     offset_volume_indices,
     pad_volume_for_warp_canvas,
+    undo_canvas_sample_crop,
 )
+from lightsuite.registration.volume import permute_brain_volume, unpermute_brain_volume
 from lightsuite.registration.warp import warp_volume_affine
 
 
@@ -84,3 +88,25 @@ def test_imwarp_output_origin_embeds_original_grid() -> None:
     z0 = padding.pad_before[2]
     assert float(warped[5, 5, z0 + 5]) == 1.0
     assert float(warped[5, 5, 5]) == 0.0
+
+
+def test_undo_canvas_sample_crop_inverts_pad() -> None:
+    volume = np.arange(24, dtype=np.float32).reshape(2, 3, 4)
+    canvas = RegistrationCanvas(
+        mode="pad",
+        pad_before=(1, 0, 2),
+        pad_after=(0, 1, 1),
+        sample_crop_start=(0, 0, 0),
+        working_shape=(3, 4, 7),
+    )
+    cropped = apply_canvas_sample_crop(volume, canvas)
+    restored = undo_canvas_sample_crop(cropped, canvas, volume.shape)
+    np.testing.assert_array_equal(restored, volume)
+
+
+def test_unpermute_brain_volume_inverts_permute() -> None:
+    volume = np.arange(24, dtype=np.int32).reshape(2, 3, 4)
+    permvec = [-2, 3, -1]
+    permuted = permute_brain_volume(volume, permvec)
+    restored = unpermute_brain_volume(permuted, permvec)
+    np.testing.assert_array_equal(restored, volume)

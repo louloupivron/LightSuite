@@ -25,9 +25,13 @@ from lightsuite.import_.sample_reference import (
     load_sample_reference,
     validate_mask_against_reference,
 )
-from lightsuite.import_.transform import transform_points_to_atlas
+from lightsuite.import_.transform import (
+    sample_points_to_registration_voxels,
+    transform_points_to_atlas,
+)
 from lightsuite.preprocess.checkpoint import RegOptsCheckpoint
 from lightsuite.preprocess.slice_ops import output_xy_shape, output_z_count
+from lightsuite.registration.points import volume_indices_to_cloud_xyz
 
 console = Console()
 
@@ -114,11 +118,25 @@ def _import_points(
         temp_dir=temp_dir / _slug(prepared.label),
     )
 
+    reg_yxz = sample_points_to_registration_voxels(
+        prepared.coordinates,
+        transform_params,
+        registres_um=checkpoint.registres_um,
+        content_crop_start=checkpoint.content_crop_start,
+    )
+    reg_coords = volume_indices_to_cloud_xyz(reg_yxz)
+
     slug = _slug(prepared.label)
     npz_path = output_dir / f"{slug}_atlas_coords.npz"
+    sample_npz_path = output_dir / f"{slug}_sample_coords.npz"
     np.savez_compressed(
         npz_path,
         atlasptcoords=atlas_coords.astype(np.float32),
+        sampleptcoords=prepared.coordinates.astype(np.float32),
+    )
+    np.savez_compressed(
+        sample_npz_path,
+        regptcoords=reg_coords.astype(np.float32),
         sampleptcoords=prepared.coordinates.astype(np.float32),
     )
 
@@ -143,8 +161,10 @@ def _import_points(
         kind="points",
         atlas_points_path=npz_path,
         atlas_csv_path=csv_path,
+        sample_points_path=sample_npz_path,
         n_input=int(loaded.coordinates.shape[0]),
         n_atlas=int(atlas_coords.shape[0]),
+        n_sample=int(reg_coords.shape[0]),
     )
 
 
@@ -183,6 +203,18 @@ def _import_mask(
         native_voxel_um=voxel_um,
         registres_um=checkpoint.registres_um,
     )
+    permuted_shape = tuple(int(v) for v in transform_params.regvolsize)
+    from lightsuite.registration.volume import permute_brain_volume
+
+    mask_sample = permute_brain_volume(mask_reg, transform_params.permute_sample_to_atlas)
+    if mask_sample.shape != permuted_shape:
+        mask_sample = _resample_mask_native_to_registration(
+            mask_sample,
+            target_shape_yxz=permuted_shape,
+            native_voxel_um=[checkpoint.registres_um, checkpoint.registres_um, checkpoint.registres_um],
+            registres_um=checkpoint.registres_um,
+        )
+
     atlas_mask = transform_mask_to_atlas(
         mask_reg,
         transform_params,
@@ -196,17 +228,22 @@ def _import_mask(
     from lightsuite.io.tiff_write import save_registration_volume
 
     save_registration_volume(atlas_mask, out_path)
+    sample_mask_path = output_dir / f"{slug}_in_sample_20um.tif"
+    save_registration_volume(mask_sample.astype(np.uint16), sample_mask_path)
 
     console.print(
         f"[green]{loaded.label}[/green]: mask warped to atlas "
-        f"({int(np.count_nonzero(atlas_mask))} foreground voxels)"
+        f"({int(np.count_nonzero(atlas_mask))} foreground voxels) "
+        f"and sample grid ({int(np.count_nonzero(mask_sample))} voxels)"
     )
     return AnnotationImportResult(
         label=loaded.label,
         kind="mask",
         atlas_mask_path=out_path,
+        sample_mask_path=sample_mask_path,
         n_input=int(np.count_nonzero(loaded.volume)),
         n_atlas=int(np.count_nonzero(atlas_mask)),
+        n_sample=int(np.count_nonzero(mask_sample)),
     )
 
 
@@ -291,6 +328,9 @@ def run_brain_import_annotations(
                     "atlas_points_path": str(r.atlas_points_path) if r.atlas_points_path else None,
                     "atlas_mask_path": str(r.atlas_mask_path) if r.atlas_mask_path else None,
                     "atlas_csv_path": str(r.atlas_csv_path) if r.atlas_csv_path else None,
+                    "sample_points_path": str(r.sample_points_path) if r.sample_points_path else None,
+                    "sample_mask_path": str(r.sample_mask_path) if r.sample_mask_path else None,
+                    "n_sample": r.n_sample,
                 }
                 for r in results
             ],

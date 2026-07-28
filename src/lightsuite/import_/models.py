@@ -39,5 +39,8 @@ class AnnotationImportResult:
     atlas_points_path: Path | None = None
     atlas_mask_path: Path | None = None
     atlas_csv_path: Path | None = None
+    sample_points_path: Path | None = None
+    sample_mask_path: Path | None = None
     n_input: int = 0
     n_atlas: int = 0
+    n_sample: int = 0

@@ -93,6 +93,39 @@ def _region_segment_voxel_counts(
     return Counter(pairs)
 
 
+def _segment_names_from_volume_indices(
+    seg_indices: np.ndarray,
+    segments_df: pd.DataFrame,
+) -> np.ndarray:
+    """Map segment row indices (1-based) from a label volume to segment names."""
+    names = np.array(segments_df["Segment"].astype(str).tolist())
+    out = np.full(seg_indices.shape, "", dtype=object)
+    valid = seg_indices > 0
+    if np.any(valid):
+        idx = seg_indices[valid].astype(np.int64) - 1
+        in_bounds = (idx >= 0) & (idx < len(names))
+        out[valid] = names[np.clip(idx, 0, len(names) - 1)]
+        out[valid & ~in_bounds] = ""
+    return out
+
+
+def _region_segment_voxel_counts_from_volume(
+    annotation: np.ndarray,
+    segments_volume: np.ndarray,
+    segments_df: pd.DataFrame,
+) -> Counter[tuple[int, str]]:
+    av = np.asarray(annotation)
+    seg_vol = np.asarray(segments_volume)
+    valid = (av > 0) & (seg_vol > 0)
+    if not np.any(valid):
+        return Counter()
+    seg_names = _segment_names_from_volume_indices(seg_vol[valid].astype(np.int64), segments_df)
+    labels = av[valid].astype(np.int64)
+    good = seg_names != ""
+    pairs = zip(labels[good].tolist(), seg_names[good].tolist(), strict=True)
+    return Counter(pairs)
+
+
 def count_points_in_cord_regions(
     atlas_points_xyz: np.ndarray,
     annotation: np.ndarray,
@@ -103,13 +136,18 @@ def count_points_in_cord_regions(
     region_table: CordRegionTable | None = None,
     voxel_um_yxz: tuple[float, float, float] = CORD_NATIVE_VOXEL_UM_YXZ,
     atlas_id: str = CORD_ATLAS_ID,
+    segments_volume: np.ndarray | None = None,
 ) -> pd.DataFrame:
-    """Bin atlas-space points into Fiederling regions and rostrocaudal segments."""
+    """Bin atlas-space or sample-space points into Fiederling regions and segments."""
     idx = atlas_points_to_voxel_indices(atlas_points_xyz, annotation.shape)
     if idx.size:
         labels = annotation[idx[:, 0], idx[:, 1], idx[:, 2]].astype(np.int64)
-        z_1based = idx[:, 2] + 1
-        seg_names = assign_segment_names(z_1based, segments)
+        if segments_volume is not None:
+            seg_idx = segments_volume[idx[:, 0], idx[:, 1], idx[:, 2]].astype(np.int64)
+            seg_names = _segment_names_from_volume_indices(seg_idx, segments)
+        else:
+            z_1based = idx[:, 2] + 1
+            seg_names = assign_segment_names(z_1based, segments)
         valid = (labels > 0) & (seg_names != "")
         labels = labels[valid]
         seg_names = seg_names[valid]
@@ -121,7 +159,10 @@ def count_points_in_cord_regions(
     for rid, seg in zip(labels.tolist(), seg_names.tolist(), strict=True):
         point_counts[(int(rid), str(seg))] += 1
 
-    voxel_counts = _region_segment_voxel_counts(annotation, segments)
+    if segments_volume is not None:
+        voxel_counts = _region_segment_voxel_counts_from_volume(annotation, segments_volume, segments)
+    else:
+        voxel_counts = _region_segment_voxel_counts(annotation, segments)
     voxel_mm3 = _voxel_mm3_yxz(voxel_um_yxz)
 
     records: list[dict] = []

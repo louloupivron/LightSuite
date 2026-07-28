@@ -25,6 +25,7 @@ from lightsuite.registration.cord_longitudinal import (
 )
 from lightsuite.registration.cord_paths import (
     cord_affine_transform_path,
+    cord_bspline_forward_transform_write_path,
     cord_bspline_transform_write_path,
     cord_qc_dir,
     cord_save_path,
@@ -179,6 +180,8 @@ def run_spinal_registration(config: SpinalCordPipelineConfig) -> Path:
     )
     bspline_out = cord_bspline_transform_write_path(config)
     bspline_out.write_text(inv_path.read_text(encoding="utf-8"), encoding="utf-8")
+    bspline_fwd_out = cord_bspline_forward_transform_write_path(config)
+    bspline_fwd_out.write_text(transforms[0].read_text(encoding="utf-8"), encoding="utf-8")
 
     transaff_inv = np.linalg.inv(transaff)
     params = CordTransformParamsCheckpoint(
@@ -194,6 +197,8 @@ def run_spinal_registration(config: SpinalCordPipelineConfig) -> Path:
         registrationres_um=checkpoint.registrationres_um,
         tofliprc=checkpoint.tofliprc,
         atlassize=list(tv.shape),
+        tform_bspline_atlas20um_to_samp_20um_px=str(bspline_fwd_out),
+        straightvol_shape=list(straightvol.shape),
     )
     out = save_path / "transform_params.json"
     params.save(out)

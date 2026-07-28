@@ -18,8 +18,14 @@ from lightsuite.analysis.region_stats import (
     parcellation_result_to_tidy,
     write_region_stats_csv,
 )
-from lightsuite.atlas.registry import resolve_brain_atlas_from_config, uses_ccf_id_parcellation
+from lightsuite.atlas.io import load_atlas_volume
+from lightsuite.atlas.registry import (
+    atlas_display_provider_from_config,
+    resolve_brain_atlas_from_config,
+    uses_ccf_id_parcellation,
+)
 from lightsuite.config.models import BrainPipelineConfig
+from lightsuite.export.brain_sample_space import export_brain_sample_space
 from lightsuite.export.atlas_space import transform_volume_to_atlas
 from lightsuite.export.parcellation import (
     compute_allen_parcellation,
@@ -29,9 +35,28 @@ from lightsuite.export.parcellation import (
 from lightsuite.io.tiff_write import save_registration_volume
 from lightsuite.preprocess.checkpoint import RegOptsCheckpoint
 from lightsuite.registration.brain_register import TransformParamsCheckpoint
+from lightsuite.registration.plots import (
+    boundary_volume_from_annotation,
+    save_registration_stage_previews,
+)
 from lightsuite.registration.volume import load_registration_volume
 
 console = Console()
+
+_EXPORT_SPACES = frozenset({"atlas", "sample"})
+
+
+def _normalize_spaces(spaces: list[str] | None, config: BrainPipelineConfig) -> set[str]:
+    raw = spaces if spaces is not None else config.export.spaces
+    normalized = {str(s).strip().lower() for s in raw}
+    unknown = normalized - _EXPORT_SPACES
+    if unknown:
+        msg = f"Invalid export spaces {unknown}; allowed: atlas, sample"
+        raise ValueError(msg)
+    if not normalized:
+        msg = "At least one export space must be selected."
+        raise ValueError(msg)
+    return normalized
 
 
 @dataclass
@@ -59,6 +84,7 @@ def export_registered_brain_volumes(
     *,
     write_csv: bool | None = None,
     save_registered_volume: bool | None = None,
+    spaces: list[str] | None = None,
 ) -> BrainExportResult:
     """Apply transforms and optionally write registered volumes and parcellation CSVs."""
     if shutil.which("transformix") is None:
@@ -78,9 +104,11 @@ def export_registered_brain_volumes(
 
     write_csv = config.export.write_cells_csv if write_csv is None else write_csv
     save_vol = config.export.save_registered_volume if save_registered_volume is None else save_registered_volume
+    export_spaces = _normalize_spaces(spaces, config)
+    save_sample_vol = config.export.save_sample_space_volume
 
     register_path = save_path / "volume_registered"
-    if save_vol:
+    if save_vol and "atlas" in export_spaces:
         register_path.mkdir(parents=True, exist_ok=True)
 
     channel_paths = {
@@ -95,28 +123,50 @@ def export_registered_brain_volumes(
     atlas_shape = tuple(int(v) for v in transform_params.atlassize)
     straightvol = np.zeros((*atlas_shape, n_chans), dtype=np.uint16)
 
-    console.print("Applying transforms to registration volumes...")
-    t0 = time.perf_counter()
-    transformix_root = save_path / "transformix_export_temp"
-    transformix_root.mkdir(parents=True, exist_ok=True)
-
     registered_paths: dict[int, Path] = {}
-    for ichan, volpath in sorted(channel_paths.items()):
-        console.print(f"Registering channel {ichan}: {volpath.name}")
-        volume = load_registration_volume(volpath)
-        registered = transform_volume_to_atlas(
-            volume,
-            transform_params,
-            permute=permute,
-            spacing_mm=spacing_mm,
-            temp_dir=transformix_root / f"chan_{ichan:02d}",
-        )
-        straightvol[:, :, :, ichan - 1] = registered
-        if save_vol:
-            out_path = register_path / f"chan_{ichan:02d}_registered_atlas.tif"
-            save_registration_volume(registered, out_path)
-            registered_paths[ichan] = out_path
-        console.print(f"Channel {ichan}/{n_chans} done in {time.perf_counter() - t0:.1f}s.")
+    if "atlas" in export_spaces:
+        console.print("Applying transforms to registration volumes (atlas space)...")
+        t0 = time.perf_counter()
+        transformix_root = save_path / "transformix_export_temp"
+        transformix_root.mkdir(parents=True, exist_ok=True)
+
+        for ichan, volpath in sorted(channel_paths.items()):
+            console.print(f"Registering channel {ichan}: {volpath.name}")
+            volume = load_registration_volume(volpath)
+            registered = transform_volume_to_atlas(
+                volume,
+                transform_params,
+                permute=permute,
+                spacing_mm=spacing_mm,
+                temp_dir=transformix_root / f"chan_{ichan:02d}",
+            )
+            straightvol[:, :, :, ichan - 1] = registered
+            if save_vol:
+                out_path = register_path / f"chan_{ichan:02d}_registered_atlas.tif"
+                save_registration_volume(registered, out_path)
+                registered_paths[ichan] = out_path
+            console.print(f"Channel {ichan}/{n_chans} done in {time.perf_counter() - t0:.1f}s.")
+
+        if save_vol and registered_paths:
+            primary = min(registered_paths)
+            reg_vol = straightvol[:, :, :, primary - 1]
+            av = load_atlas_volume(atlas.annotation_path)
+            if atlas.boundary_path is not None and atlas.boundary_path.is_file():
+                boundary = load_atlas_volume(atlas.boundary_path)
+            else:
+                boundary = boundary_volume_from_annotation(av)
+            hi = float(np.quantile(reg_vol, 0.999))
+            vol_u8 = np.clip(reg_vol / max(hi, 1e-6) * 255.0, 0, 255).astype(np.uint8)
+            save_registration_stage_previews(
+                register_path,
+                config.sample.name,
+                vol_u8,
+                boundary.astype(np.float32),
+                "export_atlas",
+                atlas_provider=atlas_display_provider_from_config(config.atlas),
+            )
+    else:
+        console.print("[dim]Skipping atlas-space volume warp (export.spaces).[/dim]")
 
     parcellation_paths: dict[int, Path] = {}
     region_stats_paths: dict[int, Path] = {}
@@ -125,14 +175,20 @@ def export_registered_brain_volumes(
     all_medians: np.ndarray | None = None
 
     emit_tidy = write_csv and atlas.supports_parcellation and config.analysis.write_tidy_csv
+    need_region_table = emit_tidy or (
+        "sample" in export_spaces
+        and write_csv
+        and "sample" in config.analysis.stats_spaces
+        and atlas.supports_parcellation
+    )
     region_table: RegionTable | None = None
-    if emit_tidy:
+    if need_region_table:
         try:
             region_table = load_region_table(atlas)
         except FileNotFoundError as exc:
             console.print(f"[yellow]Region names unavailable:[/yellow] {exc}")
 
-    if write_csv and atlas.supports_parcellation:
+    if write_csv and atlas.supports_parcellation and "atlas" in export_spaces:
         console.print("Calculating parcellation intensities...")
         for ichan in sorted(channel_paths):
             vol = straightvol[:, :, :, ichan - 1]
@@ -192,9 +248,21 @@ def export_registered_brain_volumes(
         if tidy_frames:
             region_stats_combined_path = register_path / "region_stats.csv"
             write_region_stats_csv(region_stats_combined_path, concat_tidy(tidy_frames))
+    elif write_csv and "atlas" not in export_spaces:
+        console.print("[dim]Skipping atlas-space parcellation CSV (export.spaces).[/dim]")
     elif write_csv:
         console.print(
             "[yellow]Parcellation CSV skipped:[/yellow] atlas does not expose structure metadata."
+        )
+
+    if "sample" in export_spaces:
+        export_brain_sample_space(
+            config,
+            transform_params=transform_params,
+            checkpoint=checkpoint,
+            write_csv=write_csv and "sample" in config.analysis.stats_spaces,
+            save_volume=save_sample_vol,
+            region_table=region_table,
         )
 
     console.print(f"[green]Export complete.[/green] Output under {save_path}")

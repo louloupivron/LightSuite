@@ -8,6 +8,7 @@ from lightsuite.config.models import SpinalCordPipelineConfig
 
 AFFINE_ATLAS_TO_SAMP_FILENAME = "affine_atlas_to_samp_20um.txt"
 BSPLINE_SAMP_TO_ATLAS_FILENAME = "bspline_samp_to_atlas_20um.txt"
+BSPLINE_ATLAS_TO_SAMP_FILENAME = "bspline_atlas_to_samp_20um.txt"
 
 
 def cord_save_path(config: SpinalCordPipelineConfig) -> Path:
@@ -80,3 +81,15 @@ def cord_affine_transform_write_path(config: SpinalCordPipelineConfig) -> Path:
 
 def cord_bspline_transform_write_path(config: SpinalCordPipelineConfig) -> Path:
     return cord_transforms_dir(config) / BSPLINE_SAMP_TO_ATLAS_FILENAME
+
+
+def cord_bspline_forward_transform_path(config: SpinalCordPipelineConfig) -> Path:
+    return resolve_cord_artifact(
+        cord_save_path(config),
+        "transforms",
+        BSPLINE_ATLAS_TO_SAMP_FILENAME,
+    )
+
+
+def cord_bspline_forward_transform_write_path(config: SpinalCordPipelineConfig) -> Path:
+    return cord_transforms_dir(config) / BSPLINE_ATLAS_TO_SAMP_FILENAME

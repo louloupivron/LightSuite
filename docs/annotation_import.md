@@ -123,8 +123,8 @@ Written to `<save_path>/volume_registered/`:
 
 | Kind | Files |
 |------|-------|
-| Points | `{label}_atlas_coords.npz`, optional `{label}_atlas_coords.csv` |
-| Mask | `{label}_registered_atlas.tif` |
+| Points | `{label}_atlas_coords.npz`, `{label}_sample_coords.npz`, optional `{label}_atlas_coords.csv` |
+| Mask | `{label}_registered_atlas.tif`, `{label}_in_sample_20um.tif` |
 | Summary | `import_annotations_summary.json` |
 
 For spinal cord samples, run `lightsuite spinal region-stats` to bin imported points
@@ -133,6 +133,7 @@ into Fiederling regions and rostrocaudal segments (`region_stats.csv`).
 NPZ arrays:
 
 - `atlasptcoords` — atlas-space coordinates
+- `regptcoords` — registration-grid coordinates (in `{label}_sample_coords.npz`)
 - `sampleptcoords` — native sample-space coordinates (input)
 
 ---

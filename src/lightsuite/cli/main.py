@@ -203,8 +203,14 @@ def brain_export(
         "--save-volume/--no-save-volume",
         help="Save registered atlas-space volumes (default: export.save_registered_volume).",
     ),
+    space: str | None = typer.Option(
+        None,
+        "--space",
+        help="Output space: atlas, sample, or both (default: export.spaces in YAML).",
+    ),
 ) -> None:
     """Apply transforms and export registered volumes (generateRegisteredBrainVolumes.m)."""
+    from lightsuite.cli.spaces import parse_spaces_option
     from lightsuite.config.loader import load_config
     from lightsuite.export.brain_export import export_registered_brain_volumes
 
@@ -213,6 +219,7 @@ def brain_export(
         cfg,
         write_csv=write_csv,
         save_registered_volume=save_volume,
+        spaces=parse_spaces_option(space),
     )
     if result.registered_volumes:
         typer.echo(f"Registered volumes: {len(result.registered_volumes)} channel(s)")
@@ -344,13 +351,23 @@ def analysis_region_stats(
         "--count-points/--no-count-points",
         help="Bin imported atlas-space points into cell counts (default: analysis.count_points).",
     ),
+    space: str | None = typer.Option(
+        None,
+        "--space",
+        help="Stats space: atlas, sample, or both (default: analysis.stats_spaces).",
+    ),
 ) -> None:
     """Assemble a tidy region_stats.csv (intensity + cell counts) with region names."""
     from lightsuite.analysis.runner import run_region_stats
+    from lightsuite.cli.spaces import parse_spaces_option
     from lightsuite.config.loader import load_config
 
     cfg = load_config(config)
-    result = run_region_stats(cfg, count_points=count_points)
+    result = run_region_stats(
+        cfg,
+        count_points=count_points,
+        stats_spaces=parse_spaces_option(space),
+    )
     if result.combined_path is not None:
         typer.echo(f"Region stats: {result.combined_path} ({result.n_rows} rows)")
     else:
@@ -656,6 +673,11 @@ def analysis_registration_qc(
         "--force",
         help="Rebuild cached atlas division labels before scoring.",
     ),
+    space: str = typer.Option(
+        "atlas",
+        "--space",
+        help="QC space: atlas (registered_atlas.tif) or sample (registration grid).",
+    ),
 ) -> None:
     """Naive registration QC: fraction of signal voxels in unassigned divisions."""
     from lightsuite.analysis.registration_qc_runner import run_registration_qc
@@ -671,6 +693,7 @@ def analysis_registration_qc(
         sweep_points=sweep_points,
         headless=headless,
         force_division_rebuild=force,
+        space=space,
     )
     if result.score_csv is not None:
         typer.echo(
@@ -999,13 +1022,19 @@ def spinal_register(
 @spinal_app.command("export")
 def spinal_export(
     config: str = typer.Option(..., "--config", "-c", help="Spinal cord pipeline YAML config."),
+    space: str | None = typer.Option(
+        None,
+        "--space",
+        help="Output space: atlas, sample, or both (default: export.spaces in YAML).",
+    ),
 ) -> None:
     """Export registered cord volumes (generateRegisteredCordVolume.m)."""
+    from lightsuite.cli.spaces import parse_spaces_option
     from lightsuite.config.loader import load_spinal_config
     from lightsuite.export.cord_export import export_registered_cord_volumes
 
     cfg = load_spinal_config(config)
-    result = export_registered_cord_volumes(cfg)
+    result = export_registered_cord_volumes(cfg, spaces=parse_spaces_option(space))
     typer.echo(f"Registered volumes in {result.output_dir} ({len(result.channel_paths)} channels)")
 
 
@@ -1108,13 +1137,23 @@ def spinal_region_stats(
         "--count-points/--no-count-points",
         help="Bin imported atlas-space points into cell counts (default: analysis.count_points).",
     ),
+    space: str | None = typer.Option(
+        None,
+        "--space",
+        help="Stats space: atlas, sample, or both (default: analysis.stats_spaces).",
+    ),
 ) -> None:
     """Assemble region_stats.csv with per-region, per-segment cell counts."""
     from lightsuite.analysis.cord_runner import run_cord_region_stats
+    from lightsuite.cli.spaces import parse_spaces_option
     from lightsuite.config.loader import load_spinal_config
 
     cfg = load_spinal_config(config)
-    result = run_cord_region_stats(cfg, count_points=count_points)
+    result = run_cord_region_stats(
+        cfg,
+        count_points=count_points,
+        stats_spaces=parse_spaces_option(space),
+    )
     if result.combined_path is not None:
         typer.echo(f"Region stats: {result.combined_path} ({result.n_rows} rows)")
     else:

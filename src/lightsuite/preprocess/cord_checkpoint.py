@@ -100,6 +100,8 @@ class CordTransformParamsCheckpoint:
     registrationres_um: list[float]
     tofliprc: bool
     atlassize: list[int]
+    tform_bspline_atlas20um_to_samp_20um_px: str | None = None
+    straightvol_shape: list[int] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

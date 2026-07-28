@@ -134,7 +134,7 @@ All channel folders must share the same `(ny, nx, nz)` and matching slice orderi
 
 **Important:** `sample.voxel_um` is the **native microscope voxel size**, not the registration grid. Registration always uses `registration.resolution_um` (default 20 µm). For Terastitcher exports (~1.8×1.8×4 µm), set e.g. `voxel_um: [1.8, 1.8, 4]` so plane-per-file stacks are downsampled while loading instead of loaded at full resolution.
 
-During **preprocess**, all channels are cached as `cache/chan_N_sample_register_20um.tif` (paths recorded in `regopts.json` → `regvolpaths`). **Export** loads these cached volumes, upsamples registered output to the native Fiederling template grid (10×10×20 µm), and writes `annotation_registered.tiff` and `template_registered.tiff` alongside the channel TIFFs under `volume_registered/`. **View** opens Napari with the template, all exported channels, and warped annotation labels in a shared axis layout — do not manually load the raw atlas `Template.tif` or pre-registration cached TIFFs into the same viewer (different grid and orientation).
+During **preprocess**, all channels are cached as `cache/chan_N_sample_register_20um.tif` (paths recorded in `regopts.json` → `regvolpaths`). **Export** (atlas space, default) upsamples registered output to the native Fiederling template grid (10×10×20 µm) under `volume_registered/`. **Sample-space export** (`export.spaces: [sample]` or `--space both`) writes warped labels and straightened channels under `volume_registered/sample_space/` — see [Registration spaces](registration_spaces.md).
 
 Optional `sample.source.skip_corrupt_slices: true` drops unreadable plane TIFFs instead of failing (use only when a few slices are damaged).
 

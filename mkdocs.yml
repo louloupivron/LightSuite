@@ -24,5 +24,6 @@ nav:
       - Brain lightsheet (Python): usage_lightsheet_brain.md
       - Multiresolution registration: usage_multiresolution.md
       - Annotation import: annotation_import.md
-      - Spinal cord (MATLAB): usage_spinal_cord.md
+      - Registration spaces: registration_spaces.md
+      - Spinal cord: usage_spinal_cord.md
       - Slices (MATLAB): usage_slice.md

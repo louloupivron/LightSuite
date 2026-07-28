@@ -79,6 +79,8 @@ def compute_allen_parcellation(
     atlas_resolution_um: float,
     *,
     parcellation_csv: Path | None = None,
+    annotation: np.ndarray | None = None,
+    voxel_um: float | None = None,
 ) -> ParcellationResult:
     csv_path = parcellation_csv or _resolve_allen_parcellation_csv()
     if csv_path is None or not csv_path.is_file():
@@ -92,8 +94,9 @@ def compute_allen_parcellation(
     substr = parcelinfo["parcellation_term_set_name"] == "substructure"
     area_ids = parcelinfo.loc[substr, "parcellation_index"].drop_duplicates().to_numpy(dtype=np.int64)
 
-    av = load_atlas_volume(atlas.annotation_path)
-    voxel_mm3 = (atlas_resolution_um * 1e-3) ** 3
+    av = np.asarray(annotation if annotation is not None else load_atlas_volume(atlas.annotation_path))
+    res_um = float(voxel_um if voxel_um is not None else atlas_resolution_um)
+    voxel_mm3 = (res_um * 1e-3) ** 3
 
     median_over = np.full((len(area_ids), 2), np.nan, dtype=np.float32)
     std_over = np.full((len(area_ids), 2), np.nan, dtype=np.float32)
@@ -121,6 +124,8 @@ def compute_perens_parcellation(
     atlas_resolution_um: float,
     *,
     ml_axis: int = 2,
+    annotation: np.ndarray | None = None,
+    voxel_um: float | None = None,
 ) -> ParcellationResult:
     if atlas.structures_csv_path is None:
         msg = "Perens structures CSV not found beside atlas NIfTIs."
@@ -128,12 +133,13 @@ def compute_perens_parcellation(
 
     st_tab = pd.read_csv(atlas.structures_csv_path)
     area_ids = st_tab["id"].to_numpy(dtype=np.int64)
-    av = load_atlas_volume(atlas.annotation_path)
+    av = np.asarray(annotation if annotation is not None else load_atlas_volume(atlas.annotation_path))
     if tuple(av.shape) != tuple(registered_volume.shape):
         msg = f"Annotation shape {av.shape} != registered volume {registered_volume.shape}"
         raise ValueError(msg)
 
-    voxel_mm3 = (atlas_resolution_um * 1e-3) ** 3
+    res_um = float(voxel_um if voxel_um is not None else atlas_resolution_um)
+    voxel_mm3 = (res_um * 1e-3) ** 3
     median_over = np.full((len(area_ids), 2), np.nan, dtype=np.float32)
     std_over = np.full((len(area_ids), 2), np.nan, dtype=np.float32)
     volume_over = np.full((len(area_ids), 2), np.nan, dtype=np.float32)

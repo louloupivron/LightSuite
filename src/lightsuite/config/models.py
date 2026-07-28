@@ -290,6 +290,14 @@ class ExportConfig(BaseModel):
     write_pyramid: bool = True
     write_cells_csv: bool = True
     save_registered_volume: bool = False
+    spaces: list[str] = Field(
+        default_factory=lambda: ["atlas"],
+        description="Output coordinate spaces: atlas (sample→atlas) and/or sample (atlas→sample).",
+    )
+    save_sample_space_volume: bool = Field(
+        default=True,
+        description="Write warped atlas labels/template under volume_registered/sample_space/.",
+    )
 
 
 class AnalysisConfig(BaseModel):
@@ -306,6 +314,10 @@ class AnalysisConfig(BaseModel):
     point_labels: list[str] | None = Field(
         default=None,
         description="Import labels to count (matches *_atlas_coords.npz stems); None = all found.",
+    )
+    stats_spaces: list[str] = Field(
+        default_factory=lambda: ["atlas"],
+        description="Coordinate spaces for region_stats tables: atlas and/or sample.",
     )
 
 
@@ -464,6 +476,7 @@ class SpinalCordPipelineConfig(BaseModel):
     atlas: CordAtlasConfig
     registration: CordRegistrationConfig = Field(default_factory=CordRegistrationConfig)
     compute: ComputeConfig = Field(default_factory=ComputeConfig)
+    export: ExportConfig = Field(default_factory=ExportConfig)
     analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
     import_config: ImportConfig | None = Field(default=None, alias="import")
 

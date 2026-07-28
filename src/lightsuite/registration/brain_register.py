@@ -140,6 +140,8 @@ class TransformParamsCheckpoint:
     warp_canvas_pad_before: list[int] | None = None
     atlas_crop_start_native: list[int] | None = None
     registration_canvas: dict | None = None
+    tform_bspline_atlas_20um_to_samp20um_px: str | None = None
+    tform_affine_atlas_to_samp20um_px: list[list[float]] | None = None
 
     def save(self, path: Path) -> None:
         path = path.expanduser()
@@ -577,6 +579,10 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
     samp_to_atlas_path = save_path / "bspline_samp_to_atlas_20um.txt"
     write_inverted_transform_copy(inverted, samp_to_atlas_path)
 
+    atlas_to_samp_path = save_path / "bspline_atlas_to_samp_20um.txt"
+    if bspline_result.copied_transform_path is not None:
+        atlas_to_samp_path = bspline_result.copied_transform_path
+
     affine_inv = np.linalg.inv(tform_aff)
     reg = config.registration
     use_dual = volume_secondary is not None
@@ -648,6 +654,8 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
         warp_canvas_pad_before=list(warp_pad.pad_before) if not warp_pad.is_zero else None,
         atlas_crop_start_native=list(atlas_crop_start) if any(atlas_crop_start) else None,
         registration_canvas=reg_canvas.to_checkpoint_dict() if not reg_canvas.is_identity else None,
+        tform_bspline_atlas_20um_to_samp20um_px=str(atlas_to_samp_path),
+        tform_affine_atlas_to_samp20um_px=tform_warp.tolist(),
     )
     out_json = save_path / "transform_params.json"
     transform_params.save(out_json)

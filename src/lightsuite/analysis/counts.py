@@ -23,6 +23,7 @@ from lightsuite.analysis.region_stats import TIDY_COLUMNS, attach_region_metadat
 from lightsuite.registration.points import cloud_xyz_to_volume_indices
 
 ATLAS_POINTS_KEY = "atlasptcoords"
+SAMPLE_POINTS_KEY = "regptcoords"
 
 
 def load_atlas_points(npz_path: Path, *, key: str = ATLAS_POINTS_KEY) -> np.ndarray:

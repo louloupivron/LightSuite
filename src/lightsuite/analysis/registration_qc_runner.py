@@ -44,8 +44,37 @@ def load_registration_qc_volumes(
     config: BrainPipelineConfig,
     *,
     channel: int = 1,
+    space: str = "atlas",
 ) -> tuple[np.ndarray, np.ndarray, Path, Path]:
     """Load registered channel volume and division labels for QC."""
+    space_key = space.strip().lower()
+    if space_key == "sample":
+        from lightsuite.export.brain_sample_space import sample_space_dir
+
+        save_path = config.sample.save_path.expanduser()
+        sample_dir = sample_space_dir(save_path)
+        manifest_path = sample_dir / "sample_space_manifest.json"
+        if not manifest_path.is_file():
+            msg = f"Missing {manifest_path}. Run export with sample space."
+            raise FileNotFoundError(msg)
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        ch_paths = manifest.get("channel_paths", {})
+        vol_key = str(channel)
+        if vol_key not in ch_paths:
+            msg = f"Channel {channel} not in sample_space manifest."
+            raise KeyError(msg)
+        vol_path = Path(ch_paths[vol_key])
+        labels_path = sample_dir / "division_labels_in_sample_20um.tif"
+        if not labels_path.is_file():
+            msg = f"Missing {labels_path}"
+            raise FileNotFoundError(msg)
+        volume = load_registration_volume(vol_path).astype(np.float32, copy=False)
+        labels = np.asarray(tifffile.imread(labels_path), dtype=np.int32)
+        if volume.shape != labels.shape:
+            msg = f"Channel volume {volume.shape} != sample labels {labels.shape}"
+            raise ValueError(msg)
+        return volume, labels, vol_path, labels_path
+
     paths = discover_division_viewer_paths(config)
     _, vol_path = _resolve_channel(paths, channel)
     volume = load_registration_volume(vol_path).astype(np.float32, copy=False)
@@ -77,14 +106,18 @@ def run_registration_qc(
     sweep_points: int = 9,
     headless: bool = False,
     force_division_rebuild: bool = False,
+    space: str = "atlas",
 ) -> RegistrationQcResult:
     """Compute (and optionally inspect / sweep) the unassigned division score."""
-    if force_division_rebuild:
+    space_key = space.strip().lower()
+    if force_division_rebuild and space_key == "atlas":
         transform_params = _load_transform_params(config.sample.save_path.expanduser())
         atlas = resolve_brain_atlas_with_config(transform_params.brain_atlas, config.atlas)
         ensure_division_map(atlas, force=True)
 
-    volume, labels, vol_path, _ = load_registration_qc_volumes(config, channel=channel)
+    volume, labels, vol_path, _ = load_registration_qc_volumes(
+        config, channel=channel, space=space_key
+    )
     thr = float(threshold) if threshold is not None else suggest_threshold(volume)
 
     if inspect and not headless:
@@ -101,7 +134,7 @@ def run_registration_qc(
 
     out_dir = _qc_output_dir(config)
     out_dir.mkdir(parents=True, exist_ok=True)
-    stem = f"chan{channel:02d}"
+    stem = f"chan{channel:02d}" + ("_sample" if space_key == "sample" else "")
 
     meta = {
         "sample": config.sample.name,
