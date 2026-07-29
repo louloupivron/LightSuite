@@ -772,36 +772,102 @@ def plot_cord_coloc_overlap(
     show: bool = False,
     save_csv: bool = True,
 ) -> tuple[plt.Figure, pd.DataFrame]:
-    """Bar chart of pairwise colocalization fractions (source → target)."""
+    """Bar chart of pairwise colocalization fractions.
+
+    Shows both directions side-by-side for each pair:
+    - Left (solid): fraction of SOURCE spots that overlap a TARGET neighbour.
+    - Right (hatched): fraction of TARGET spots that have a SOURCE neighbour.
+
+    Labels use the semantic ``_legend_label`` cleaner (strips ``imaris_`` prefix).
+    """
     if summary.empty:
         msg = "No colocalization overlap data to plot."
         raise ValueError(msg)
 
     work = summary.copy()
-    pairwise = work[work.get("comparison", "pairwise").astype(str) != "triple"].copy()
+    pairwise = work[work["comparison"].astype(str) != "triple"].copy() if "comparison" in work.columns else work.copy()
     if pairwise.empty:
         pairwise = work.copy()
-    pairwise["pair"] = pairwise["source"].astype(str) + " → " + pairwise["target"].astype(str)
-    pairwise = pairwise.sort_values("frac_of_source", ascending=True)
 
-    fig, ax = plt.subplots(figsize=(10, max(4.0, len(pairwise) * 0.5)))
-    y = np.arange(len(pairwise))
-    ax.barh(y, pairwise["frac_of_source"], color="#e15759", alpha=0.9)
-    ax.set_yticks(y)
-    ax.set_yticklabels(
-        [
-            f"{row.pair} ({int(row.n_overlap_source_to_target)}/{int(row.n_source)})"
-            for row in pairwise.itertuples(index=False)
-        ],
-        fontsize=8,
+    pairwise = pairwise.sort_values("frac_of_source", ascending=True).reset_index(drop=True)
+
+    def _clean(label: str) -> str:
+        return _legend_label(label)
+
+    pairwise["src_label"] = pairwise["source"].map(_clean)
+    pairwise["tgt_label"] = pairwise["target"].map(_clean)
+    pairwise["pair"] = pairwise["src_label"] + " → " + pairwise["tgt_label"]
+
+    n_pairs = len(pairwise)
+    bar_h = 0.35
+    y = np.arange(n_pairs)
+
+    _SRC_COLOR = "#e15759"
+    _TGT_COLOR = "#4e79a7"
+
+    fig, ax = plt.subplots(figsize=(10, max(4.2, n_pairs * 0.75)))
+
+    bars_src = ax.barh(
+        y + bar_h / 2,
+        pairwise["frac_of_source"],
+        height=bar_h,
+        color=_SRC_COLOR,
+        alpha=0.92,
+        edgecolor="white",
+        linewidth=0.5,
+        label="frac of source",
     )
-    xmax = float(pairwise["frac_of_source"].max(skipna=True)) if len(pairwise) else 1.0
-    ax.set_xlim(0, min(1.05, max(1.0, xmax * 1.1)))
+    bars_tgt = ax.barh(
+        y - bar_h / 2,
+        pairwise["frac_of_target"].fillna(0.0),
+        height=bar_h,
+        color=_TGT_COLOR,
+        alpha=0.92,
+        edgecolor="white",
+        linewidth=0.5,
+        label="frac of target",
+    )
+
+    for bar, row in zip(bars_src, pairwise.itertuples(index=False), strict=True):
+        w = float(bar.get_width())
+        ax.text(
+            w + 0.01,
+            bar.get_y() + bar.get_height() / 2.0,
+            f"{int(row.n_overlap_source_to_target)}/{int(row.n_source)} ({w:.0%})",
+            va="center",
+            ha="left",
+            fontsize=8,
+            color=_SRC_COLOR,
+        )
+
+    for bar, row in zip(bars_tgt, pairwise.itertuples(index=False), strict=True):
+        w = float(bar.get_width())
+        if pd.notna(row.frac_of_target):
+            ax.text(
+                w + 0.01,
+                bar.get_y() + bar.get_height() / 2.0,
+                f"{int(row.n_overlap_target_to_source)}/{int(row.n_target)} ({w:.0%})",
+                va="center",
+                ha="left",
+                fontsize=8,
+                color=_TGT_COLOR,
+            )
+
+    ax.set_yticks(y)
+    ax.set_yticklabels(pairwise["pair"], fontsize=9)
+    xmax = max(
+        float(pairwise["frac_of_source"].max(skipna=True)),
+        float(pairwise["frac_of_target"].fillna(0).max()),
+        1.0,
+    )
+    ax.set_xlim(0, min(1.45, xmax * 1.45))
+    ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"{v:.0%}"))
     ax.set_xlabel("Overlap fraction")
     ax.set_title(title or "Pairwise spot colocalization overlap", fontweight="bold")
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     ax.grid(axis="x", alpha=0.3, linestyle="--")
+    ax.legend(loc="lower right", fontsize=8, framealpha=0.92)
     fig.tight_layout()
 
     if output_path is not None:
