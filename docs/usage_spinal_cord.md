@@ -183,6 +183,12 @@ uv run lightsuite analysis plot-cord-df-subregion-heatmap \
   -c examples/config/spinal_cord/OP87F4.yaml \
   -o plots/OP87F4_laminae/df_subregion_heatmap.png \
   --channel 1 --metric median_intensity
+
+# Dorsal / ventral / central horn × segment
+uv run lightsuite analysis plot-cord-horn-heatmap \
+  -c examples/config/spinal_cord/OP87F4.yaml \
+  -o plots/OP87F4_horn/horn_heatmap.png \
+  --channel imaris_Coloc_pink_yellow --metric cell_count --hemisphere left
 ```
 
 | Command | Uses `rollup_level` | MATLAB equivalent |
@@ -196,6 +202,7 @@ uv run lightsuite analysis plot-cord-df-subregion-heatmap \
 | `plot-cord-laminae-pct-gm` | `structure` (laminae I–X) | % GM bar chart |
 | `plot-cord-laminae-level-bars` | `structure` (laminae I–X) | Level-grouped bar chart |
 | `plot-cord-df-subregion-heatmap` | `region` + `structure` (`df`) | Dorsal funiculus heatmap |
+| `plot-cord-horn-heatmap` | `horn` (`DH`, `VH`, `C`) | Dorsal/ventral horn heatmap |
 | `cord-coloc-overlap` | atlas-space spot coords | — |
 
 `plot-cord-segment-grouped-bars` compares several imported spot labels on one chart
@@ -221,6 +228,10 @@ level (default cervical / thoracic / lumbar). Override levels with
 (`dcs`, `cu`, `gr`, `psdc`) at finest `region` rollup, plus the combined
 `df` row from `structure` rollup. Disable the parent row with
 `--no-include-parent-df`.
+
+`plot-cord-horn-heatmap` shows dorsal horn (`DH`), ventral horn (`VH`), and
+central (`C`) regions at `horn` rollup (requires `analysis.rollups` to include
+`horn`). Use `--hemisphere left|right` when `split_hemispheres: true`.
 
 Enable left/right hemisegment stats in the YAML before running `region-stats`:
 

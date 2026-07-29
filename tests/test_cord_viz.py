@@ -590,6 +590,53 @@ def test_plot_cord_segment_anatomy_hemisphere_composite_writes_png(tmp_path: Pat
     assert out.is_file()
 
 
+def _horn_stats_rows() -> pd.DataFrame:
+    rows = []
+    for segment, horn, val in [
+        ("C1", "DH", 10.0),
+        ("C1", "VH", 5.0),
+        ("C1", "C", 2.0),
+        ("C2", "DH", 12.0),
+        ("C2", "VH", 8.0),
+        ("C2", "C", 1.0),
+        ("T1", "DH", 6.0),
+        ("T1", "VH", 9.0),
+        ("T1", "C", 3.0),
+    ]:
+        rows.append(
+            {
+                "sample": "op87",
+                "channel": 1,
+                "atlas": "fiederling",
+                "parcellation_index": 90 if horn == "DH" else 110 if horn == "VH" else 100,
+                "acronym": horn,
+                "name": horn,
+                "structure": horn,
+                "division": "GM",
+                "segment": segment,
+                "rollup_level": "horn",
+                "hemisphere": "whole",
+                "metric": "cell_count",
+                "value": val,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def test_plot_cord_horn_heatmap_writes_png(tmp_path: Path) -> None:
+    from lightsuite.analysis.viz.cord_plots import plot_cord_horn_heatmap
+
+    out = tmp_path / "horn_heatmap.png"
+    plot_cord_horn_heatmap(
+        _horn_stats_rows(),
+        segment_order=["C1", "C2", "T1"],
+        metric="cell_count",
+        output_path=out,
+    )
+    assert out.is_file()
+    assert out.with_suffix(".csv").is_file()
+
+
 @pytest.mark.skipif(
     __import__("importlib").util.find_spec("brainglobe_heatmap") is None,
     reason="brainglobe-heatmap not installed",

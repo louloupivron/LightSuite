@@ -30,6 +30,13 @@ LAMINAE_DISPLAY_LABELS: dict[str, str] = {
 DF_SUBREGION_ACRONYMS: tuple[str, ...] = ("dcs", "cu", "gr", "psdc")
 DF_SUBREGION_ORDER: tuple[str, ...] = DF_SUBREGION_ACRONYMS + ("df",)
 
+HORN_ACRONYMS: tuple[str, ...] = ("DH", "VH", "C")
+HORN_DISPLAY_LABELS: dict[str, str] = {
+    "DH": "Dorsal horn",
+    "VH": "Ventral horn",
+    "C": "Central",
+}
+
 
 def resolve_cord_region_stats_from_config(config_path: str | Path) -> Path:
     """Resolve ``volume_registered/region_stats.csv`` from a spinal cord YAML."""
@@ -632,6 +639,52 @@ def top_regions_table(
     return top[keep].reset_index(drop=True)
 
 
+def horn_heatmap_matrix(
+    df: pd.DataFrame,
+    *,
+    segment_order: list[str] | None = None,
+    crop_empty_segments: bool = False,
+) -> tuple[pd.DataFrame, list[str], list[str]]:
+    """Pivot horn rollup stats to a (DH/VH/C × segments) matrix."""
+    work = df.copy()
+    work["acronym"] = work["acronym"].astype(str)
+    work = work[work["acronym"].isin(HORN_ACRONYMS)]
+    if work.empty:
+        return pd.DataFrame(), [], []
+
+    matrix = work.pivot_table(
+        index="acronym",
+        columns="segment",
+        values="value",
+        aggfunc="mean",
+    )
+    row_labels = [acr for acr in HORN_ACRONYMS if acr in matrix.index]
+    matrix = matrix.reindex(row_labels)
+
+    if segment_order:
+        col_labels = [s for s in segment_order if s in set(matrix.columns)]
+        col_labels.extend(sorted(set(matrix.columns.astype(str)) - set(col_labels)))
+    else:
+        col_labels = sorted(matrix.columns.astype(str))
+    matrix = matrix.reindex(columns=col_labels)
+
+    if crop_empty_segments and not matrix.empty:
+        nonempty = [
+            col
+            for col in matrix.columns
+            if bool(matrix[col].notna().any()) and float(matrix[col].fillna(0.0).abs().sum()) > 0.0
+        ]
+        if nonempty:
+            cols = list(matrix.columns)
+            i0 = cols.index(nonempty[0])
+            i1 = cols.index(nonempty[-1])
+            matrix = matrix.iloc[:, i0 : i1 + 1]
+
+    display_index = [HORN_DISPLAY_LABELS.get(acr, acr) for acr in matrix.index]
+    matrix.index = display_index
+    return matrix, list(matrix.index), list(matrix.columns)
+
+
 __all__ = [
     "CORD_METRICS",
     "DF_SUBREGION_ACRONYMS",
@@ -643,6 +696,9 @@ __all__ = [
     "division_profile_table",
     "filter_cord_stats",
     "filter_cord_stats_multi",
+    "horn_heatmap_matrix",
+    "HORN_ACRONYMS",
+    "HORN_DISPLAY_LABELS",
     "laminae_level_table",
     "laminae_pct_gm_table",
     "load_cord_stats_csv",

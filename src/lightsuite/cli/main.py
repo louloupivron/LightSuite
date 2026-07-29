@@ -1104,6 +1104,47 @@ def analysis_plot_cord_df_subregion_heatmap(
     typer.echo(f"Saved: {out.resolve()}")
 
 
+@analysis_app.command("plot-cord-horn-heatmap")
+def analysis_plot_cord_horn_heatmap(
+    output: str = typer.Option(..., "--output", "-o", help="Output PNG path."),
+    input_path: str | None = typer.Option(None, "--input", "-i", help="Cord region_stats.csv."),
+    spinal_config: str | None = typer.Option(
+        None, "--config", "-c", help="Spinal YAML; uses volume_registered/region_stats.csv."
+    ),
+    channel: str = typer.Option("1", "--channel", help="Imaging channel or import label."),
+    metric: str = typer.Option("median_intensity", "--metric", help="Metric to plot."),
+    hemisphere: str | None = typer.Option(None, "--hemisphere", help="Filter to left or right."),
+    title: str | None = typer.Option(None, "--title", help="Figure title."),
+    dpi: int = typer.Option(200, "--dpi", help="Figure DPI."),
+    crop_empty_segments: bool = typer.Option(True, "--crop-empty-segments/--no-crop-empty-segments"),
+) -> None:
+    """Heatmap: dorsal/ventral/central horn (rows) × rostrocaudal segment (columns)."""
+    from lightsuite.analysis.viz.cord_io import filter_cord_stats, load_cord_stats_csv, parse_plot_channel
+    from lightsuite.analysis.viz.cord_plots import plot_cord_horn_heatmap
+
+    stats_path, _segments_csv, segment_order = _resolve_cord_plot_context(
+        input_path=input_path, spinal_config=spinal_config
+    )
+    table = filter_cord_stats(
+        load_cord_stats_csv(stats_path),
+        channel=parse_plot_channel(channel),
+        metric=metric,
+        rollup_level="horn",
+        hemisphere=hemisphere,
+    )
+    out = Path(output).expanduser()
+    plot_cord_horn_heatmap(
+        table,
+        segment_order=segment_order or None,
+        title=title,
+        metric=metric,
+        output_path=out,
+        dpi=dpi,
+        crop_empty_segments=crop_empty_segments,
+    )
+    typer.echo(f"Saved: {out.resolve()}")
+
+
 @analysis_app.command("plot-cord-segment-anatomy-slice")
 def analysis_plot_cord_segment_anatomy_slice(
     output: str = typer.Option(..., "--output", "-o", help="Output PNG path."),

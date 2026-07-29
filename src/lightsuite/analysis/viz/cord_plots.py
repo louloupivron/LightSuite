@@ -14,6 +14,7 @@ from lightsuite.analysis.viz.cord_io import (
     df_subregion_table,
     division_profile_table,
     filter_cord_stats,
+    horn_heatmap_matrix,
     laminae_level_table,
     laminae_pct_gm_table,
     segment_grouped_totals_table,
@@ -1274,10 +1275,86 @@ def plot_cord_structure_hemisphere_panel(
     return fig, aligned
 
 
+def plot_cord_horn_heatmap(
+    df: pd.DataFrame,
+    *,
+    segment_order: list[str] | None = None,
+    title: str | None = None,
+    metric: str | None = None,
+    output_path: Path | None = None,
+    dpi: int = 200,
+    show: bool = False,
+    save_csv: bool = True,
+    x_tick_stride: int | None = None,
+    crop_empty_segments: bool = True,
+    cmap: str = "magma",
+) -> tuple[plt.Figure, pd.DataFrame]:
+    """Heatmap: dorsal/ventral/central horn (rows) × rostrocaudal segment (columns)."""
+    matrix, row_labels, col_labels = horn_heatmap_matrix(
+        df,
+        segment_order=segment_order,
+        crop_empty_segments=crop_empty_segments,
+    )
+    if matrix.empty:
+        msg = "No horn-level data to plot."
+        raise ValueError(msg)
+
+    data = np.ma.masked_invalid(matrix.to_numpy(dtype=float))
+    fig_h = max(3.8, len(row_labels) * 0.9)
+    fig_w = max(8.0, len(col_labels) * 0.45)
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+
+    cmap_obj = plt.get_cmap(cmap).copy()
+    cmap_obj.set_bad("#d9d9d9")
+    im = ax.imshow(data, aspect="auto", cmap=cmap_obj, origin="upper")
+    metric_label = _METRIC_LABELS.get(metric or "", metric or "value")
+    cbar = fig.colorbar(im, ax=ax, fraction=0.03, pad=0.02)
+    cbar.set_label(metric_label, fontsize=9)
+
+    ax.set_yticks(range(len(row_labels)))
+    ax.set_yticklabels(row_labels, fontsize=9)
+    if x_tick_stride is None:
+        stride = 1 if len(col_labels) <= 24 else 2
+    else:
+        stride = max(1, int(x_tick_stride))
+    tick_idx = list(range(0, len(col_labels), stride))
+    ax.set_xticks(tick_idx)
+    ax.set_xticklabels([col_labels[i] for i in tick_idx], rotation=0, fontsize=8)
+    ax.set_xlabel("Segment")
+    ax.set_ylabel("Horn")
+    ax.set_title(title or f"Horn × segment ({metric_label})", fontweight="bold")
+    ax.text(
+        1.0,
+        -0.12,
+        "grey = no data",
+        transform=ax.transAxes,
+        ha="right",
+        va="top",
+        fontsize=8,
+        color="#666666",
+    )
+    fig.tight_layout()
+
+    if output_path is not None:
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
+        if save_csv:
+            matrix.to_csv(output_path.with_suffix(".csv"))
+
+    if show:
+        plt.show()
+    elif output_path is not None:
+        plt.close(fig)
+
+    return fig, matrix
+
+
 __all__ = [
     "plot_cord_coloc_overlap",
     "plot_cord_df_subregion_heatmap",
     "plot_cord_division_profile",
+    "plot_cord_horn_heatmap",
     "plot_cord_laminae_level_bars",
     "plot_cord_laminae_pct_gm_bars",
     "plot_cord_segment_bars",
