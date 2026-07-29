@@ -113,6 +113,45 @@ def test_plot_cord_division_profile_writes_png(tmp_path: Path) -> None:
     assert out.is_file()
 
 
+def test_division_profile_crops_empty_segments() -> None:
+    from lightsuite.analysis.viz.cord_io import division_profile_table
+
+    rows = _cord_stats_rows()
+    # Add empty leading/trailing segments with zero intensity.
+    extras = []
+    for seg, start, end, val in [("T1", 50, 60, 0.0), ("S1", 70, 80, 0.0)]:
+        for pidx, acr, name in [(71, "GM", "Gray Matter"), (130, "WM", "White matter")]:
+            extras.append(
+                {
+                    "sample": "op87",
+                    "channel": 1,
+                    "atlas": "fiederling",
+                    "parcellation_index": pidx,
+                    "acronym": acr,
+                    "name": name,
+                    "structure": "SC",
+                    "division": acr,
+                    "segment": seg,
+                    "rollup_level": "division",
+                    "hemisphere": "whole",
+                    "metric": "median_intensity",
+                    "value": val,
+                }
+            )
+    df = pd.concat([rows, pd.DataFrame(extras)], ignore_index=True)
+    sub = filter_cord_stats(df, channel=1, metric="median_intensity", rollup_level="division")
+    segments = pd.DataFrame(
+        {
+            "Segment": ["T1", "C1", "C2", "S1"],
+            "Start": [50, 1, 15, 70],
+            "End": [60, 14, 42, 80],
+        }
+    )
+    profile = division_profile_table(sub, segments, crop_empty_segments=True, drop_nonpositive=True)
+    assert set(profile["segment"].astype(str)) == {"C1", "C2"}
+    assert profile["value"].isna().sum() == 0
+
+
 def test_plot_cord_segment_bars_writes_png(tmp_path: Path) -> None:
     sub = filter_cord_stats(_cord_stats_rows(), channel=1, metric="cell_count", rollup_level="region")
     out = tmp_path / "segments.png"

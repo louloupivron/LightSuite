@@ -151,12 +151,33 @@ def division_profile_table(
     segments_df: pd.DataFrame,
     *,
     z_voxel_um: float = 20.0,
+    crop_empty_segments: bool = False,
+    drop_nonpositive: bool = False,
 ) -> pd.DataFrame:
-    """Long table with division, segment, center_mm, and value for line plots."""
+    """Long table with division, segment, center_mm, and value for line plots.
+
+    When ``crop_empty_segments`` is True, keep only the contiguous span between
+    the first and last segment that has any positive value across divisions.
+    When ``drop_nonpositive`` is True, replace non-positive values with NaN so
+    lines break instead of diving to zero outside coverage.
+    """
     centers = segment_centers_mm(segments_df, z_voxel_um=z_voxel_um)
     work = df.merge(centers[["Segment", "center_mm"]], left_on="segment", right_on="Segment", how="inner")
     work["division"] = work["acronym"].astype(str)
-    return work.sort_values(["division", "center_mm"])
+    work = work.sort_values(["division", "center_mm"]).reset_index(drop=True)
+
+    if crop_empty_segments and not work.empty:
+        positive = work[work["value"].astype(float) > 0.0]
+        if not positive.empty:
+            mm_min = float(positive["center_mm"].min())
+            mm_max = float(positive["center_mm"].max())
+            work = work[(work["center_mm"] >= mm_min) & (work["center_mm"] <= mm_max)].copy()
+
+    if drop_nonpositive and not work.empty:
+        work = work.copy()
+        work.loc[work["value"].astype(float) <= 0.0, "value"] = float("nan")
+
+    return work
 
 
 def segment_totals_table(df: pd.DataFrame) -> pd.DataFrame:

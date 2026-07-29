@@ -132,45 +132,95 @@ def plot_cord_division_profile(
     dpi: int = 200,
     show: bool = False,
     save_csv: bool = True,
-    x_tick_stride: int = 2,
+    x_tick_stride: int | None = None,
+    crop_empty_segments: bool = True,
 ) -> tuple[plt.Figure, pd.DataFrame]:
-    """Line plot: division signal vs rostrocaudal position (mm)."""
-    profile = division_profile_table(df, segments_df, z_voxel_um=z_voxel_um)
-    if profile.empty:
+    """Line plot: division signal vs rostrocaudal position (mm).
+
+    Crops leading/trailing empty segments by default and omits non-positive
+    values so lines do not falsely dive to zero outside coverage. A secondary
+    top axis shows position in mm while bottom ticks use segment names.
+    """
+    profile = division_profile_table(
+        df,
+        segments_df,
+        z_voxel_um=z_voxel_um,
+        crop_empty_segments=crop_empty_segments,
+        drop_nonpositive=True,
+    )
+    if profile.empty or not np.isfinite(profile["value"].to_numpy(dtype=float)).any():
         msg = "No division-level profile data to plot."
         raise ValueError(msg)
 
-    fig, ax = plt.subplots(figsize=(12, 5))
+    fig, ax = plt.subplots(figsize=(11, 5))
     divisions = sorted(profile["division"].astype(str).unique())
+    plotted: dict[str, pd.DataFrame] = {}
     for division in divisions:
-        sub = profile[profile["division"] == division]
+        sub = profile[profile["division"] == division].dropna(subset=["value"])
+        if sub.empty:
+            continue
+        plotted[division] = sub
         color = _DIVISION_COLORS.get(division, None)
         ax.plot(
             sub["center_mm"],
             sub["value"],
             marker="o",
-            markersize=3,
-            linewidth=1.5,
+            markersize=4,
+            linewidth=1.8,
             label=division,
             color=color,
         )
 
-    centers = sorted(profile["center_mm"].unique())
-    tick_centers = centers[:: max(1, x_tick_stride)]
-    tick_labels = []
-    center_to_segment = profile.drop_duplicates(subset="center_mm").set_index("center_mm")["segment"]
-    for center in tick_centers:
-        tick_labels.append(str(center_to_segment.get(center, "")))
+    # Soft fill between GM and WM when both are present (same x grid).
+    if "GM" in plotted and "WM" in plotted:
+        gm = plotted["GM"].set_index("center_mm")["value"]
+        wm = plotted["WM"].set_index("center_mm")["value"]
+        shared = gm.index.intersection(wm.index)
+        if len(shared) >= 2:
+            x = np.asarray(shared, dtype=float)
+            y_gm = gm.loc[shared].to_numpy(dtype=float)
+            y_wm = wm.loc[shared].to_numpy(dtype=float)
+            ax.fill_between(x, y_wm, y_gm, color="#2ca02c", alpha=0.12, linewidth=0)
+
+    tick_meta = (
+        profile.drop_duplicates(subset="center_mm")
+        .sort_values("center_mm")[["center_mm", "segment"]]
+        .reset_index(drop=True)
+    )
+    centers = tick_meta["center_mm"].tolist()
+    if x_tick_stride is None:
+        stride = 1 if len(centers) <= 20 else 2
+    else:
+        stride = max(1, int(x_tick_stride))
+    tick_centers = centers[::stride]
+    tick_labels = [str(s) for s in tick_meta["segment"].iloc[::stride].tolist()]
 
     ax.set_xticks(tick_centers)
     ax.set_xticklabels(tick_labels, fontsize=8)
-    ax.set_xlim(left=0)
-    ax.set_xlabel("Rostrocaudal position (mm)")
+    if centers:
+        pad = max(0.15, 0.04 * (centers[-1] - centers[0]))
+        ax.set_xlim(centers[0] - pad, centers[-1] + pad)
+    ax.set_xlabel("Segment")
     metric_label = _METRIC_LABELS.get(metric or "", metric or "value")
     ax.set_ylabel(metric_label)
     ax.set_title(title or f"Division profile ({metric_label})", fontweight="bold")
     ax.legend(loc="best", fontsize=9)
     ax.grid(True, alpha=0.25, linestyle="--")
+    ax.spines["top"].set_visible(False)
+
+    ax_mm = ax.secondary_xaxis("top")
+    ax_mm.set_xticks(tick_centers)
+    ax_mm.set_xticklabels([f"{c:.1f}" for c in tick_centers], fontsize=7, color="#555555")
+    ax_mm.set_xlabel("Rostrocaudal position (mm)", fontsize=9, color="#555555")
+
+    finite_vals = profile["value"].to_numpy(dtype=float)
+    finite_vals = finite_vals[np.isfinite(finite_vals)]
+    if finite_vals.size:
+        ymin = float(finite_vals.min())
+        ymax = float(finite_vals.max())
+        pad_y = max(1.0, 0.08 * (ymax - ymin))
+        ax.set_ylim(max(0.0, ymin - pad_y), ymax + pad_y)
+
     fig.tight_layout()
 
     if output_path is not None:

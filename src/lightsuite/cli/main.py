@@ -687,6 +687,11 @@ def analysis_plot_cord_division_profile(
     title: str | None = typer.Option(None, "--title", help="Figure title."),
     z_voxel_um: float = typer.Option(20.0, "--z-voxel-um", help="Atlas Z voxel size in µm for mm axis."),
     dpi: int = typer.Option(200, "--dpi", help="Figure DPI."),
+    crop_empty_segments: bool = typer.Option(
+        True,
+        "--crop-empty-segments/--no-crop-empty-segments",
+        help="Drop leading/trailing segments with no data (default: on).",
+    ),
 ) -> None:
     """Line plot: GM/WM signal vs rostrocaudal position."""
     import pandas as pd
@@ -714,6 +719,7 @@ def analysis_plot_cord_division_profile(
         z_voxel_um=z_voxel_um,
         output_path=out,
         dpi=dpi,
+        crop_empty_segments=crop_empty_segments,
     )
     typer.echo(f"Saved: {out.resolve()}")
 
