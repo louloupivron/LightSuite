@@ -233,6 +233,14 @@ def test_top_regions_table_orders_by_value() -> None:
     top = top_regions_table(sub, top_n=2)
     assert len(top) == 2
     assert top["value"].max() == sub["value"].max()
+    assert top["plot_label"].str.contains("—").all()
+
+
+def test_top_regions_table_omits_segment_suffix_when_filtered() -> None:
+    sub = filter_cord_stats(_cord_stats_rows(), channel=1, metric="cell_count", rollup_level="region")
+    top = top_regions_table(sub, top_n=2, segment="C1")
+    assert not top["plot_label"].str.contains("@").any()
+    assert top["plot_label"].str.startswith("5Sp").any() or top["plot_label"].str.contains("5Sp").any()
 
 
 def test_plot_cord_top_regions_writes_png(tmp_path: Path) -> None:

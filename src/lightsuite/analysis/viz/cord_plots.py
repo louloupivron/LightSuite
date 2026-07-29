@@ -682,24 +682,70 @@ def plot_cord_top_regions(
     dpi: int = 200,
     show: bool = False,
     save_csv: bool = True,
+    annotate: bool = True,
 ) -> tuple[plt.Figure, pd.DataFrame]:
-    """Horizontal bar chart of the top region × segment combinations."""
+    """Horizontal bar chart of the top region × segment combinations.
+
+    Labels lead with acronyms; when restricted to one segment the repeated
+    ``@ segment`` suffix is omitted. Bars are colored by division (GM/WM) when
+    available, with value and percent annotations.
+    """
     top = top_regions_table(df, top_n=top_n, segment=segment)
     if top.empty:
         msg = "No regions with positive values to plot."
         raise ValueError(msg)
 
-    top = top.sort_values("value", ascending=True)
-    fig, ax = plt.subplots(figsize=(10, max(4.0, len(top) * 0.35)))
-    ax.barh(range(len(top)), top["value"], color="#4C72B0", alpha=0.9)
-    ax.set_yticks(range(len(top)))
+    top = top.sort_values("value", ascending=True).reset_index(drop=True)
+    grand = float(top["value"].sum())
+    top["pct"] = 100.0 * top["value"] / grand if grand > 0 else 0.0
+
+    if "division" in top.columns:
+        colors = [
+            _DIVISION_COLORS.get(str(div), "#4C72B0") for div in top["division"].astype(str)
+        ]
+        use_div_legend = True
+    else:
+        colors = ["#4C72B0"] * len(top)
+        use_div_legend = False
+
+    fig, ax = plt.subplots(figsize=(11, max(4.2, len(top) * 0.42)))
+    y = np.arange(len(top))
+    bars = ax.barh(y, top["value"], color=colors, alpha=0.92, edgecolor="white", linewidth=0.5)
+    ax.set_yticks(y)
     ax.set_yticklabels(top["plot_label"], fontsize=8)
     metric_label = _METRIC_LABELS.get(metric or "", metric or "value")
     ax.set_xlabel(metric_label)
-    ax.set_title(title or f"Top {len(top)} regions ({metric_label.lower()})", fontweight="bold")
+    if title is None:
+        scope = f" @ {segment}" if segment else ""
+        title = f"Top {len(top)} regions{scope} ({metric_label.lower()}, n={grand:g})"
+    ax.set_title(title, fontweight="bold")
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     ax.grid(axis="x", alpha=0.3, linestyle="--")
+    xmax = float(top["value"].max()) if len(top) else 1.0
+    ax.set_xlim(0, xmax * 1.18)
+
+    if annotate:
+        for bar, value, pct in zip(bars, top["value"], top["pct"], strict=True):
+            width = float(value)
+            ax.text(
+                width + xmax * 0.015,
+                bar.get_y() + bar.get_height() / 2.0,
+                f"{width:g} ({pct:.0f}%)",
+                va="center",
+                ha="left",
+                fontsize=8,
+                color="#333333",
+            )
+
+    if use_div_legend:
+        present = [d for d in ("GM", "WM") if d in set(top["division"].astype(str))]
+        handles = [
+            plt.Rectangle((0, 0), 1, 1, color=_DIVISION_COLORS[d], label=d) for d in present
+        ]
+        if handles:
+            ax.legend(handles=handles, loc="lower right", fontsize=8, framealpha=0.92, title="Division")
+
     fig.tight_layout()
 
     if output_path is not None:

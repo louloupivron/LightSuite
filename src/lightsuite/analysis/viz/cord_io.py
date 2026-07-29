@@ -382,9 +382,21 @@ def top_regions_table(
     if work.empty:
         return work
 
-    work["plot_label"] = work["name"].astype(str) + " @ " + work["segment"].astype(str)
+    # Compact labels: acronym first; omit repeated "@ segment" when filtered.
+    names = work["name"].astype(str)
+    acronyms = work["acronym"].astype(str)
+    segments = work["segment"].astype(str)
+    if segment is not None:
+        work["plot_label"] = acronyms + " — " + names
+    else:
+        work["plot_label"] = acronyms + " — " + names + " @ " + segments
+
+    keep = ["plot_label", "name", "segment", "acronym", "value"]
+    for col in ("structure", "division"):
+        if col in work.columns:
+            keep.append(col)
     top = work.nlargest(int(top_n), "value")
-    return top[["plot_label", "name", "segment", "acronym", "value"]].reset_index(drop=True)
+    return top[keep].reset_index(drop=True)
 
 
 __all__ = [
