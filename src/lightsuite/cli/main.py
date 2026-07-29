@@ -643,6 +643,11 @@ def analysis_plot_cord_structure(
     metric: str = typer.Option("median_intensity", "--metric", help="Metric to plot."),
     title: str | None = typer.Option(None, "--title", help="Figure title."),
     dpi: int = typer.Option(200, "--dpi", help="Figure DPI."),
+    crop_empty_segments: bool = typer.Option(
+        True,
+        "--crop-empty-segments/--no-crop-empty-segments",
+        help="Drop leading/trailing segments with no data (default: on).",
+    ),
 ) -> None:
     """Heatmap: structure (rows) × rostrocaudal segment (columns)."""
     from lightsuite.analysis.viz.cord_io import filter_cord_stats, load_cord_stats_csv, parse_plot_channel
@@ -665,6 +670,7 @@ def analysis_plot_cord_structure(
         metric=metric,
         output_path=out,
         dpi=dpi,
+        crop_empty_segments=crop_empty_segments,
     )
     typer.echo(f"Saved: {out.resolve()}")
 

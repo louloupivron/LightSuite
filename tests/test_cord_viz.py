@@ -81,6 +81,21 @@ def test_structure_heatmap_matrix_shape() -> None:
     assert matrix.shape == (1, 2)
     assert row_labels == ["Lamina I Combined"]
     assert col_labels == ["C1", "C2"]
+    assert matrix.isna().sum().sum() == 0
+
+
+def test_structure_heatmap_matrix_keeps_nan_and_crops() -> None:
+    rows = _cord_stats_rows()
+    # Add an empty-leading segment with no structure rows, and a gap segment via reindex.
+    sub = filter_cord_stats(rows, channel=1, metric="median_intensity", rollup_level="structure")
+    matrix, _rows, cols = structure_heatmap_matrix(
+        sub,
+        segment_order=["T1", "C1", "C2", "S1"],
+        crop_empty_segments=True,
+    )
+    assert cols == ["C1", "C2"]
+    # Missing T1/S1 dropped; existing values preserved.
+    assert float(matrix.loc["Lamina I Combined", "C1"]) == 10.0
 
 
 def test_plot_cord_structure_heatmap_writes_png(tmp_path: Path) -> None:

@@ -101,8 +101,15 @@ def structure_heatmap_matrix(
     *,
     segment_order: list[str] | None = None,
     label_col: str = "name",
+    fill_missing: float | None = None,
+    crop_empty_segments: bool = False,
 ) -> tuple[pd.DataFrame, list[str], list[str]]:
-    """Pivot structure-level stats to a (structures × segments) matrix."""
+    """Pivot structure-level stats to a (structures × segments) matrix.
+
+    Missing structure×segment combinations stay as NaN unless ``fill_missing``
+    is set. When ``crop_empty_segments`` is True, leading/trailing columns with
+    no finite non-zero values are dropped (span between first and last data).
+    """
     work = df.copy()
     work[label_col] = work[label_col].astype(str).str.replace("_", " ", regex=False)
     labels = (
@@ -118,12 +125,25 @@ def structure_heatmap_matrix(
     else:
         col_labels = sorted(work["segment"].astype(str).unique())
 
-    matrix = (
-        work.pivot_table(index=label_col, columns="segment", values="value", aggfunc="mean")
-        .reindex(index=row_labels, columns=col_labels)
-        .fillna(0.0)
-    )
-    return matrix, row_labels, col_labels
+    matrix = work.pivot_table(
+        index=label_col, columns="segment", values="value", aggfunc="mean"
+    ).reindex(index=row_labels, columns=col_labels)
+    if fill_missing is not None:
+        matrix = matrix.fillna(float(fill_missing))
+
+    if crop_empty_segments and not matrix.empty:
+        nonempty = [
+            col
+            for col in matrix.columns
+            if bool(matrix[col].notna().any()) and float(matrix[col].fillna(0.0).abs().sum()) > 0.0
+        ]
+        if nonempty:
+            cols = list(matrix.columns)
+            i0 = cols.index(nonempty[0])
+            i1 = cols.index(nonempty[-1])
+            matrix = matrix.iloc[:, i0 : i1 + 1]
+
+    return matrix, list(matrix.index), list(matrix.columns)
 
 
 def division_profile_table(

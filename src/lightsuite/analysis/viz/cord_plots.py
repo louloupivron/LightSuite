@@ -51,32 +51,59 @@ def plot_cord_structure_heatmap(
     dpi: int = 200,
     show: bool = False,
     save_csv: bool = True,
-    x_tick_stride: int = 2,
+    x_tick_stride: int | None = None,
+    crop_empty_segments: bool = True,
+    cmap: str = "magma",
 ) -> tuple[plt.Figure, pd.DataFrame]:
-    """Heatmap: structure (rows) × rostrocaudal segment (columns)."""
-    matrix, row_labels, col_labels = structure_heatmap_matrix(df, segment_order=segment_order)
+    """Heatmap: structure (rows) × rostrocaudal segment (columns).
+
+    Missing structure×segment cells are shown in light grey (not as zero).
+    Empty leading/trailing segments are cropped by default so the figure
+    focuses on the imaged cord span.
+    """
+    matrix, row_labels, col_labels = structure_heatmap_matrix(
+        df,
+        segment_order=segment_order,
+        crop_empty_segments=crop_empty_segments,
+    )
     if matrix.empty:
         msg = "No structure-level data to plot."
         raise ValueError(msg)
 
-    data = matrix.to_numpy(dtype=float)
-    fig_h = max(6.0, len(row_labels) * 0.35)
-    fig_w = max(10.0, len(col_labels) * 0.25)
+    data = np.ma.masked_invalid(matrix.to_numpy(dtype=float))
+    fig_h = max(5.5, len(row_labels) * 0.38)
+    fig_w = max(8.0, len(col_labels) * 0.45)
     fig, ax = plt.subplots(figsize=(fig_w, fig_h))
 
-    im = ax.imshow(data, aspect="auto", cmap="hot", origin="upper")
-    fig.colorbar(im, ax=ax, fraction=0.02, pad=0.02)
+    cmap_obj = plt.get_cmap(cmap).copy()
+    cmap_obj.set_bad("#d9d9d9")
+    im = ax.imshow(data, aspect="auto", cmap=cmap_obj, origin="upper")
+    metric_label = _METRIC_LABELS.get(metric or "", metric or "value")
+    cbar = fig.colorbar(im, ax=ax, fraction=0.03, pad=0.02)
+    cbar.set_label(metric_label, fontsize=9)
 
     ax.set_yticks(range(len(row_labels)))
     ax.set_yticklabels(row_labels, fontsize=8)
-    tick_idx = list(range(0, len(col_labels), max(1, x_tick_stride)))
+    if x_tick_stride is None:
+        stride = 1 if len(col_labels) <= 24 else 2
+    else:
+        stride = max(1, int(x_tick_stride))
+    tick_idx = list(range(0, len(col_labels), stride))
     ax.set_xticks(tick_idx)
     ax.set_xticklabels([col_labels[i] for i in tick_idx], rotation=0, fontsize=8)
     ax.set_xlabel("Segment")
     ax.set_ylabel("Structure")
-
-    metric_label = _METRIC_LABELS.get(metric or "", metric or "value")
     ax.set_title(title or f"Structure × segment ({metric_label})", fontweight="bold")
+    ax.text(
+        1.0,
+        -0.12,
+        "grey = no data",
+        transform=ax.transAxes,
+        ha="right",
+        va="top",
+        fontsize=8,
+        color="#666666",
+    )
     fig.tight_layout()
 
     if output_path is not None:
@@ -336,11 +363,12 @@ def plot_cord_structure_panel(
         matrix, _row_labels, _col_labels = structure_heatmap_matrix(
             table,
             segment_order=segment_order,
+            crop_empty_segments=True,
         )
         matrices[str(channel)] = matrix
         arrays.append(matrix.to_numpy(dtype=float))
 
-    stacked = np.concatenate([arr.ravel() for arr in arrays if arr.size])
+    stacked = np.concatenate([arr[np.isfinite(arr)] for arr in arrays if arr.size])
     vmin, vmax = _percentile_limits(stacked)
 
     n_cols = len(channels)
@@ -348,12 +376,14 @@ def plot_cord_structure_panel(
     fig_h = max(6.0, sample_rows * 0.35)
     fig_w = max(10.0, n_cols * 4.5)
     fig, axes = plt.subplots(1, n_cols, figsize=(fig_w, fig_h), squeeze=False, constrained_layout=True)
+    cmap_obj = plt.get_cmap("magma").copy()
+    cmap_obj.set_bad("#d9d9d9")
 
     for idx, channel in enumerate(channels):
         ax = axes[0, idx]
         matrix = matrices[str(channel)]
-        data = matrix.to_numpy(dtype=float)
-        im = ax.imshow(data, aspect="auto", cmap="hot", origin="upper", vmin=vmin, vmax=vmax)
+        data = np.ma.masked_invalid(matrix.to_numpy(dtype=float))
+        im = ax.imshow(data, aspect="auto", cmap=cmap_obj, origin="upper", vmin=vmin, vmax=vmax)
         ax.set_title(_legend_label(channel), fontsize=9, fontweight="bold")
         ax.set_yticks(range(len(matrix.index)))
         ax.set_yticklabels(matrix.index.tolist(), fontsize=7)
