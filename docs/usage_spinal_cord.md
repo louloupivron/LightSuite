@@ -158,6 +158,28 @@ uv run lightsuite analysis plot-cord-top-regions \
 uv run lightsuite analysis cord-coloc-overlap \
   -c examples/config/spinal_cord/OP87F4.yaml \
   -o plots/op87_coloc_overlap.png
+
+# Rexed laminae: % GM occupied by signal intensity vs. cell density
+uv run lightsuite analysis plot-cord-laminae-pct-gm \
+  -c examples/config/spinal_cord/OP87F4.yaml \
+  -o plots/OP87F4_laminae/laminae_pct_gm.png \
+  --intensity-channel 1 \
+  --cell-channel imaris_Coloc_pink_yellow
+
+# Optional: restrict to cervical segments
+#   --segments C4,C5,C6,C7
+
+# Rexed laminae × cord level (cervical / thoracic / lumbar means)
+uv run lightsuite analysis plot-cord-laminae-level-bars \
+  -c examples/config/spinal_cord/OP87F4.yaml \
+  -o plots/OP87F4_laminae/laminae_level_bars.png \
+  --channel 1 --metric median_intensity
+
+# Dorsal funiculus subregions (dcs, cu, gr, psdc, df) × segment
+uv run lightsuite analysis plot-cord-df-subregion-heatmap \
+  -c examples/config/spinal_cord/OP87F4.yaml \
+  -o plots/OP87F4_laminae/df_subregion_heatmap.png \
+  --channel 1 --metric median_intensity
 ```
 
 | Command | Uses `rollup_level` | MATLAB equivalent |
@@ -168,6 +190,9 @@ uv run lightsuite analysis cord-coloc-overlap \
 | `plot-cord-segment-bars` | `region` (summed per segment) | — |
 | `plot-cord-segment-grouped-bars` | `region` (summed per segment, multiple labels) | — |
 | `plot-cord-top-regions` | `region` | — |
+| `plot-cord-laminae-pct-gm` | `structure` (laminae I–X) | % GM bar chart |
+| `plot-cord-laminae-level-bars` | `structure` (laminae I–X) | Level-grouped bar chart |
+| `plot-cord-df-subregion-heatmap` | `region` + `structure` (`df`) | Dorsal funiculus heatmap |
 | `cord-coloc-overlap` | atlas-space spot coords | — |
 
 `plot-cord-segment-grouped-bars` compares several imported spot labels on one chart
@@ -178,6 +203,21 @@ uv run lightsuite analysis cord-coloc-overlap \
 `cord-coloc-overlap` measures how many spots in one import label have a neighbor
 within `--tolerance-voxels` (default 2) in another label, using
 `*_atlas_coords.npz`. Writes a summary CSV and overlap bar chart.
+
+`plot-cord-laminae-pct-gm` compares volume-weighted signal intensity (gray bars)
+against cell-count share (red bars) across combined Rexed laminae I–X at
+`structure` rollup. Use `--intensity-channel` for the imaging channel and
+`--cell-channel` for an import label from `analysis.point_labels`. SEM error
+bars appear automatically when multiple samples are present in the CSV.
+
+`plot-cord-laminae-level-bars` averages a metric per lamina within each cord
+level (default cervical / thoracic / lumbar). Override levels with
+`--levels C,T,L,S` and filter segments with `--segments C4,C5,C6,C7`.
+
+`plot-cord-df-subregion-heatmap` shows dorsal funiculus subregions
+(`dcs`, `cu`, `gr`, `psdc`) at finest `region` rollup, plus the combined
+`df` row from `structure` rollup. Disable the parent row with
+`--no-include-parent-df`.
 
 Re-run `lightsuite spinal region-stats` after upgrading to pick up `volume_mm3` on
 point counts (enables structure/division `cell_density` rollups).

@@ -57,7 +57,7 @@ import:
 analysis:
   parcellate_intensities: true
   intensity_channels: [1]
-  rollups: [division, structure]
+  rollups: [division, structure, horn]
   count_points: true
   point_labels:
     - imaris_Coloc_pink_yellow

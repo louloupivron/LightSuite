@@ -10,7 +10,7 @@ import pandas as pd
 
 from lightsuite.analysis.cord_counts import CORD_HEMISPHERE, CORD_TIDY_COLUMNS
 
-RollupLevel = Literal["division", "structure"]
+RollupLevel = Literal["division", "structure", "horn"]
 
 _SUM_METRICS = frozenset({"cell_count", "volume_mm3"})
 _WEIGHTED_METRICS = frozenset({"median_intensity", "relative_median_intensity", "std"})
@@ -67,8 +67,11 @@ def resolve_rollup_targets(aggtype: RollupLevel, regions_df: pd.DataFrame) -> li
         target_keys = ["GM", "WM"]
     elif agg == "structure":
         target_keys = [str(rid) for rid in range(201, 211)] + ["df", "lf", "vf"]
+    elif agg == "horn":
+        # DH = Dorsal Horn, VH = Ventral Horn, C = Central (Lamina X + canal)
+        target_keys = ["DH", "VH", "C"]
     else:
-        msg = f"aggtype must be 'division' or 'structure', got {aggtype!r}"
+        msg = f"aggtype must be 'division', 'structure', or 'horn', got {aggtype!r}"
         raise ValueError(msg)
 
     targets: list[tuple[int, str, str]] = []
@@ -235,7 +238,7 @@ def apply_cord_rollups(
 
     for level in rollups:
         normalized = str(level).strip().lower()
-        if normalized not in ("division", "structure"):
+        if normalized not in ("division", "structure", "horn"):
             continue
         rolled = rollup_cord_tidy(finest, regions_df, normalized)  # type: ignore[arg-type]
         if len(rolled):

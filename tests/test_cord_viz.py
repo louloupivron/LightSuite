@@ -12,8 +12,11 @@ import pandas as pd
 import pytest
 
 from lightsuite.analysis.viz.cord_io import (
+    df_subregion_table,
     filter_cord_stats,
     filter_cord_stats_multi,
+    laminae_level_table,
+    laminae_pct_gm_table,
     load_cord_stats_csv,
     segment_grouped_totals_table,
     structure_heatmap_matrix,
@@ -21,7 +24,10 @@ from lightsuite.analysis.viz.cord_io import (
 )
 from lightsuite.analysis.viz.cord_plots import (
     plot_cord_coloc_overlap,
+    plot_cord_df_subregion_heatmap,
     plot_cord_division_profile,
+    plot_cord_laminae_level_bars,
+    plot_cord_laminae_pct_gm_bars,
     plot_cord_segment_bars,
     plot_cord_segment_grouped_bars,
     plot_cord_structure_heatmap,
@@ -61,6 +67,65 @@ def _cord_stats_rows() -> pd.DataFrame:
                 "value": val,
             }
         )
+    return pd.DataFrame(rows)
+
+
+def _laminae_stats_rows() -> pd.DataFrame:
+    rows = []
+    laminae = [
+        ("Lamina_I", 201, 8.0, 2.0, 1.0),
+        ("Lamina_V", 205, 10.0, 3.0, 1.2),
+        ("Lamina_IX", 209, 12.0, 60.0, 1.5),
+    ]
+    segments = ["C4", "C5", "T10", "L5"]
+    for seg in segments:
+        for acronym, pidx, intensity, cells, volume in laminae:
+            base = {
+                "sample": "op87",
+                "atlas": "fiederling",
+                "parcellation_index": pidx,
+                "acronym": acronym,
+                "name": acronym.replace("_", " "),
+                "structure": "DH" if pidx < 209 else "VH",
+                "division": "GM",
+                "segment": seg,
+                "rollup_level": "structure",
+                "hemisphere": "whole",
+            }
+            rows.append({**base, "channel": 1, "metric": "median_intensity", "value": intensity})
+            rows.append({**base, "channel": 1, "metric": "volume_mm3", "value": volume})
+            rows.append({**base, "channel": "imaris_cells", "metric": "cell_count", "value": cells})
+    return pd.DataFrame(rows)
+
+
+def _df_subregion_rows() -> pd.DataFrame:
+    rows = []
+    regions = [
+        ("dcs", 62, 20.0, "region"),
+        ("cu", 61, 8.0, "region"),
+        ("gr", 63, 2.0, "region"),
+        ("psdc", 64, 6.0, "region"),
+        ("df", 74, 15.0, "structure"),
+    ]
+    for seg in ["C4", "C5", "T10"]:
+        for acronym, pidx, val, level in regions:
+            rows.append(
+                {
+                    "sample": "op87",
+                    "channel": 1,
+                    "atlas": "fiederling",
+                    "parcellation_index": pidx,
+                    "acronym": acronym,
+                    "name": acronym,
+                    "structure": "WM",
+                    "division": "WM",
+                    "segment": seg,
+                    "rollup_level": level,
+                    "hemisphere": "whole",
+                    "metric": "median_intensity",
+                    "value": val,
+                }
+            )
     return pd.DataFrame(rows)
 
 
@@ -304,3 +369,67 @@ def test_load_cord_stats_csv_requires_segment_column(tmp_path: Path) -> None:
     pd.DataFrame({"metric": ["cell_count"], "value": [1], "channel": [1]}).to_csv(path, index=False)
     with pytest.raises(ValueError, match="segment"):
         load_cord_stats_csv(path)
+
+
+def test_laminae_pct_gm_table_normalizes_to_100() -> None:
+    table = laminae_pct_gm_table(
+        _laminae_stats_rows(),
+        intensity_channel=1,
+        cell_channel="imaris_cells",
+    )
+    assert pytest.approx(table["intensity_pct_gm"].sum(), rel=1e-6) == 100.0
+    assert pytest.approx(table["cell_pct_gm"].sum(), rel=1e-6) == 100.0
+    assert table.loc[table["acronym"] == "Lamina_IX", "cell_pct_gm"].iloc[0] > 50.0
+
+
+def test_laminae_level_table_groups_by_cord_level() -> None:
+    table = laminae_level_table(
+        _laminae_stats_rows(),
+        channel=1,
+        metric="median_intensity",
+        levels=("C", "T", "L"),
+    )
+    assert list(table.columns) == ["lamina", "C", "T", "L"]
+    assert table.loc[table["lamina"] == "IX", "C"].iloc[0] == 12.0
+
+
+def test_df_subregion_table_includes_parent_df() -> None:
+    table = df_subregion_table(_df_subregion_rows(), channel=1, metric="median_intensity")
+    assert set(table["acronym"]) == {"dcs", "cu", "gr", "psdc", "df"}
+
+
+def test_plot_cord_laminae_pct_gm_bars_writes_png(tmp_path: Path) -> None:
+    out = tmp_path / "laminae_pct_gm.png"
+    plot_cord_laminae_pct_gm_bars(
+        _laminae_stats_rows(),
+        intensity_channel=1,
+        cell_channel="imaris_cells",
+        output_path=out,
+    )
+    assert out.is_file()
+    assert out.with_suffix(".csv").is_file()
+
+
+def test_plot_cord_laminae_level_bars_writes_png(tmp_path: Path) -> None:
+    out = tmp_path / "laminae_level.png"
+    plot_cord_laminae_level_bars(
+        _laminae_stats_rows(),
+        channel=1,
+        metric="median_intensity",
+        output_path=out,
+    )
+    assert out.is_file()
+    assert out.with_suffix(".csv").is_file()
+
+
+def test_plot_cord_df_subregion_heatmap_writes_png(tmp_path: Path) -> None:
+    out = tmp_path / "df_subregion.png"
+    plot_cord_df_subregion_heatmap(
+        _df_subregion_rows(),
+        channel=1,
+        metric="median_intensity",
+        segment_order=["C4", "C5", "T10"],
+        output_path=out,
+    )
+    assert out.is_file()
+    assert out.with_suffix(".csv").is_file()

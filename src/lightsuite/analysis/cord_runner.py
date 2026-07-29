@@ -215,7 +215,7 @@ def run_cord_region_stats(
         write_cord_region_stats_csv(combined_path, combined)
         for level in config.analysis.rollups:
             normalized = str(level).strip().lower()
-            if normalized not in ("division", "structure"):
+            if normalized not in ("division", "structure", "horn"):
                 continue
             subset = combined[combined["rollup_level"] == normalized]
             if len(subset):

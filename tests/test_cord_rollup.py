@@ -175,6 +175,68 @@ def _point_count_frame() -> pd.DataFrame:
     return pd.DataFrame(rows).reindex(columns=CORD_TIDY_COLUMNS)
 
 
+def _mini_regions_with_vh() -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "id": [1, 18, 71, 90, 110, 130],
+            "name": ["Lamina1", "Lamina7", "Gray Matter", "Dorsal horn", "Ventral horn", "White matter"],
+            "acronym": ["1Sp", "7Sp", "GM", "DH", "VH", "WM"],
+            "parent_ID": [90, 110, 250, 71, 71, 250],
+            "parent_acronym": ["DH", "VH", "SC", "GM", "GM", "SC"],
+            "children_IDs": ["", "", "1,18", "1", "18", ""],
+        }
+    )
+
+
+def test_resolve_horn_targets() -> None:
+    regions = _mini_regions_with_vh()
+    targets = resolve_rollup_targets("horn", regions)
+    acronyms = {acr for _id, acr, _name in targets}
+    assert "DH" in acronyms
+    assert "VH" in acronyms
+
+
+def test_rollup_horn_splits_dorsal_ventral() -> None:
+    rows = [
+        dict(
+            sample="s1", channel=1, atlas="fiederling",
+            parcellation_index=1, acronym="1Sp", name="Lamina1",
+            structure="DH", division="GM", segment="C1",
+            rollup_level="region", hemisphere="whole",
+            metric="cell_count", value=5.0,
+        ),
+        dict(
+            sample="s1", channel=1, atlas="fiederling",
+            parcellation_index=1, acronym="1Sp", name="Lamina1",
+            structure="DH", division="GM", segment="C1",
+            rollup_level="region", hemisphere="whole",
+            metric="volume_mm3", value=2.0,
+        ),
+        dict(
+            sample="s1", channel=1, atlas="fiederling",
+            parcellation_index=18, acronym="7Sp", name="Lamina7",
+            structure="VH", division="GM", segment="C1",
+            rollup_level="region", hemisphere="whole",
+            metric="cell_count", value=20.0,
+        ),
+        dict(
+            sample="s1", channel=1, atlas="fiederling",
+            parcellation_index=18, acronym="7Sp", name="Lamina7",
+            structure="VH", division="GM", segment="C1",
+            rollup_level="region", hemisphere="whole",
+            metric="volume_mm3", value=4.0,
+        ),
+    ]
+    df = pd.DataFrame(rows).reindex(columns=CORD_TIDY_COLUMNS)
+    rolled = rollup_cord_tidy(df, _mini_regions_with_vh(), "horn")
+    dh = rolled[(rolled["rollup_level"] == "horn") & (rolled["acronym"] == "DH") & (rolled["metric"] == "cell_count")]
+    vh = rolled[(rolled["rollup_level"] == "horn") & (rolled["acronym"] == "VH") & (rolled["metric"] == "cell_count")]
+    assert len(dh) == 1
+    assert dh["value"].iloc[0] == 5.0
+    assert len(vh) == 1
+    assert vh["value"].iloc[0] == 20.0
+
+
 def test_rollup_division_cell_density_from_counts_and_volume() -> None:
     rolled = rollup_cord_tidy(_point_count_frame(), _mini_regions(), "division")
     gm_density = rolled[

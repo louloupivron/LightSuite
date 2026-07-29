@@ -18,6 +18,18 @@ CORD_METRICS = (
     "cell_density",
 )
 
+# Combined Rexed laminae (structure rollup targets 201–210).
+LAMINAE_STRUCTURE_ACRONYMS: tuple[str, ...] = tuple(
+    f"Lamina_{suffix}" for suffix in ("I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X")
+)
+LAMINAE_DISPLAY_LABELS: dict[str, str] = {
+    acronym: roman for acronym, roman in zip(LAMINAE_STRUCTURE_ACRONYMS, ("I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"), strict=True)
+}
+
+# Dorsal funiculus subregions (finest atlas level).
+DF_SUBREGION_ACRONYMS: tuple[str, ...] = ("dcs", "cu", "gr", "psdc")
+DF_SUBREGION_ORDER: tuple[str, ...] = DF_SUBREGION_ACRONYMS + ("df",)
+
 
 def resolve_cord_region_stats_from_config(config_path: str | Path) -> Path:
     """Resolve ``volume_registered/region_stats.csv`` from a spinal cord YAML."""
@@ -369,6 +381,219 @@ def segment_grouped_totals_table(
 
 
 
+def _filter_segments(work: pd.DataFrame, segments: list[str] | None) -> pd.DataFrame:
+    if not segments:
+        return work
+    wanted = {str(segment) for segment in segments}
+    return work[work["segment"].astype(str).isin(wanted)].copy()
+
+
+def _metric_pivot_for_laminae(
+    stats_df: pd.DataFrame,
+    *,
+    channel: int | str,
+    metric: str,
+    segments: list[str] | None = None,
+    sample: str | None = None,
+) -> pd.DataFrame:
+    work = filter_cord_stats(
+        stats_df,
+        channel=channel,
+        metric=metric,
+        rollup_level="structure",
+        sample=sample,
+    )
+    work = _filter_segments(work, segments)
+    work = work[work["acronym"].astype(str).isin(LAMINAE_STRUCTURE_ACRONYMS)].copy()
+    return work.pivot_table(
+        index=["sample", "segment"],
+        columns="acronym",
+        values="value",
+        aggfunc="first",
+    )
+
+
+def laminae_pct_gm_table(
+    stats_df: pd.DataFrame,
+    *,
+    intensity_channel: int | str,
+    cell_channel: int | str,
+    segments: list[str] | None = None,
+    intensity_metric: str = "median_intensity",
+) -> pd.DataFrame:
+    """Compute % GM share per combined Rexed lamina for intensity and cell counts.
+
+    Intensity share uses volume-weighted signal:
+    ``median_intensity * volume_mm3`` summed per lamina, normalized to GM laminae.
+    Cell share uses ``cell_count`` per lamina normalized to total GM laminae counts.
+    When multiple samples are present, returns mean/std/sem across samples.
+    """
+    if intensity_metric not in CORD_METRICS:
+        msg = f"Unknown intensity metric {intensity_metric!r}."
+        raise ValueError(msg)
+
+    samples = sorted(stats_df["sample"].astype(str).unique()) if "sample" in stats_df.columns else ["sample"]
+    records: list[dict[str, object]] = []
+
+    for sample in samples:
+        try:
+            intensity = _metric_pivot_for_laminae(
+                stats_df,
+                channel=intensity_channel,
+                metric=intensity_metric,
+                segments=segments,
+                sample=sample if "sample" in stats_df.columns else None,
+            )
+            volume = _metric_pivot_for_laminae(
+                stats_df,
+                channel=intensity_channel,
+                metric="volume_mm3",
+                segments=segments,
+                sample=sample if "sample" in stats_df.columns else None,
+            )
+            cells = _metric_pivot_for_laminae(
+                stats_df,
+                channel=cell_channel,
+                metric="cell_count",
+                segments=segments,
+                sample=sample if "sample" in stats_df.columns else None,
+            )
+        except ValueError:
+            continue
+
+        if intensity.empty or cells.empty:
+            continue
+
+        intensity_signal = intensity.fillna(0.0) * volume.reindex_like(intensity).fillna(0.0)
+        cell_totals = cells.fillna(0.0)
+        lamina_totals: dict[str, tuple[float, float]] = {}
+        for acronym in LAMINAE_STRUCTURE_ACRONYMS:
+            int_val = float(intensity_signal[acronym].sum()) if acronym in intensity_signal.columns else 0.0
+            cell_val = float(cell_totals[acronym].sum()) if acronym in cell_totals.columns else 0.0
+            if int_val > 0.0 or cell_val > 0.0:
+                lamina_totals[acronym] = (int_val, cell_val)
+
+        total_intensity = sum(v[0] for v in lamina_totals.values())
+        total_cells = sum(v[1] for v in lamina_totals.values())
+        if total_intensity <= 0.0 and total_cells <= 0.0:
+            continue
+
+        for acronym, (int_val, cell_val) in lamina_totals.items():
+            records.append(
+                {
+                    "sample": sample,
+                    "acronym": acronym,
+                    "lamina": LAMINAE_DISPLAY_LABELS[acronym],
+                    "intensity_pct_gm": 100.0 * int_val / total_intensity if total_intensity > 0 else 0.0,
+                    "cell_pct_gm": 100.0 * cell_val / total_cells if total_cells > 0 else 0.0,
+                }
+            )
+
+    if not records:
+        msg = "No laminae structure data for the requested channels/segments."
+        raise ValueError(msg)
+
+    work = pd.DataFrame.from_records(records)
+    grouped = (
+        work.groupby(["acronym", "lamina"], sort=False)[["intensity_pct_gm", "cell_pct_gm"]]
+        .agg(["mean", "std", "sem"])
+        .reset_index()
+    )
+    grouped.columns = [
+        "acronym",
+        "lamina",
+        "intensity_pct_gm",
+        "intensity_pct_gm_std",
+        "intensity_pct_gm_sem",
+        "cell_pct_gm",
+        "cell_pct_gm_std",
+        "cell_pct_gm_sem",
+    ]
+    order = {acr: idx for idx, acr in enumerate(LAMINAE_STRUCTURE_ACRONYMS)}
+    grouped["order"] = grouped["acronym"].map(order)
+    return grouped.sort_values("order").drop(columns="order").reset_index(drop=True)
+
+
+def laminae_level_table(
+    stats_df: pd.DataFrame,
+    *,
+    channel: int | str,
+    metric: str = "median_intensity",
+    segments: list[str] | None = None,
+    levels: tuple[str, ...] = ("C", "T", "L"),
+) -> pd.DataFrame:
+    """Mean metric per combined Rexed lamina, averaged across segments in each cord level."""
+    work = filter_cord_stats(
+        stats_df,
+        channel=channel,
+        metric=metric,
+        rollup_level="structure",
+    )
+    work = _filter_segments(work, segments)
+    work = work[work["acronym"].astype(str).isin(LAMINAE_STRUCTURE_ACRONYMS)].copy()
+    if work.empty:
+        msg = f"No laminae data for channel={channel!r}, metric={metric!r}."
+        raise ValueError(msg)
+
+    work["level"] = work["segment"].map(segment_level_class)
+    work = work[work["level"].isin(levels)].copy()
+    if work.empty:
+        msg = f"No laminae data for levels={levels!r}."
+        raise ValueError(msg)
+
+    grouped = (
+        work.groupby(["acronym", "level"], sort=False)["value"]
+        .mean()
+        .reset_index()
+    )
+    pivot = grouped.pivot(index="acronym", columns="level", values="value")
+    pivot = pivot.reindex(index=[acr for acr in LAMINAE_STRUCTURE_ACRONYMS if acr in pivot.index])
+    pivot = pivot.reindex(columns=[level for level in levels if level in pivot.columns])
+    pivot.index = [LAMINAE_DISPLAY_LABELS.get(str(acr), str(acr)) for acr in pivot.index]
+    pivot.index.name = "lamina"
+    return pivot.reset_index()
+
+
+def df_subregion_table(
+    stats_df: pd.DataFrame,
+    *,
+    channel: int | str,
+    metric: str = "median_intensity",
+    segments: list[str] | None = None,
+    include_parent_df: bool = True,
+) -> pd.DataFrame:
+    """Long table for dorsal funiculus subregions at finest (region) rollup level."""
+    work = filter_cord_stats(
+        stats_df,
+        channel=channel,
+        metric=metric,
+        rollup_level="region",
+    )
+    work = _filter_segments(work, segments)
+    work = work[work["acronym"].astype(str).isin(DF_SUBREGION_ACRONYMS)].copy()
+
+    frames = [work] if not work.empty else []
+    if include_parent_df:
+        try:
+            parent = filter_cord_stats(
+                stats_df,
+                channel=channel,
+                metric=metric,
+                rollup_level="structure",
+            )
+            parent = _filter_segments(parent, segments)
+            parent = parent[parent["acronym"].astype(str) == "df"].copy()
+            if not parent.empty:
+                frames.append(parent)
+        except ValueError:
+            pass
+
+    if not frames:
+        msg = f"No dorsal funiculus subregion data for channel={channel!r}, metric={metric!r}."
+        raise ValueError(msg)
+    return pd.concat(frames, ignore_index=True)
+
+
 def top_regions_table(
     df: pd.DataFrame,
     *,
@@ -403,10 +628,17 @@ def top_regions_table(
 
 __all__ = [
     "CORD_METRICS",
+    "DF_SUBREGION_ACRONYMS",
+    "DF_SUBREGION_ORDER",
+    "LAMINAE_DISPLAY_LABELS",
+    "LAMINAE_STRUCTURE_ACRONYMS",
     "align_structure_heatmap_matrices",
+    "df_subregion_table",
     "division_profile_table",
     "filter_cord_stats",
     "filter_cord_stats_multi",
+    "laminae_level_table",
+    "laminae_pct_gm_table",
     "load_cord_stats_csv",
     "load_segment_order",
     "parse_plot_channel",

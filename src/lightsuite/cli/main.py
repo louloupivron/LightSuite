@@ -912,6 +912,146 @@ def analysis_plot_cord_top_regions(
     typer.echo(f"Saved: {out.resolve()}")
 
 
+def _parse_segment_list(value: str | None) -> list[str] | None:
+    if value is None:
+        return None
+    segments = [part.strip() for part in str(value).split(",") if part.strip()]
+    return segments or None
+
+
+@analysis_app.command("plot-cord-laminae-pct-gm")
+def analysis_plot_cord_laminae_pct_gm(
+    output: str = typer.Option(..., "--output", "-o", help="Output PNG path."),
+    input_path: str | None = typer.Option(None, "--input", "-i", help="Cord region_stats.csv."),
+    spinal_config: str | None = typer.Option(
+        None, "--config", "-c", help="Spinal YAML; uses volume_registered/region_stats.csv."
+    ),
+    intensity_channel: str = typer.Option("1", "--intensity-channel", help="Imaging channel for signal intensity."),
+    cell_channel: str = typer.Option(..., "--cell-channel", help="Import label for cell counts."),
+    intensity_metric: str = typer.Option(
+        "median_intensity",
+        "--intensity-metric",
+        help="Intensity metric for % GM bars.",
+    ),
+    segments: str | None = typer.Option(
+        None,
+        "--segments",
+        help="Comma-separated segment filter (e.g. C4,C5,C6,C7).",
+    ),
+    title: str | None = typer.Option(None, "--title", help="Figure title."),
+    dpi: int = typer.Option(200, "--dpi", help="Figure DPI."),
+) -> None:
+    """Bar chart: % GM occupied by signal intensity vs. cell density across Rexed laminae."""
+    from lightsuite.analysis.viz.cord_io import load_cord_stats_csv, parse_plot_channel
+    from lightsuite.analysis.viz.cord_plots import plot_cord_laminae_pct_gm_bars
+
+    stats_path, _segments_csv, _segment_order = _resolve_cord_plot_context(
+        input_path=input_path, spinal_config=spinal_config
+    )
+    out = Path(output).expanduser()
+    plot_cord_laminae_pct_gm_bars(
+        load_cord_stats_csv(stats_path),
+        intensity_channel=parse_plot_channel(intensity_channel),
+        cell_channel=parse_plot_channel(cell_channel),
+        segments=_parse_segment_list(segments),
+        intensity_metric=intensity_metric,
+        title=title,
+        output_path=out,
+        dpi=dpi,
+    )
+    typer.echo(f"Saved: {out.resolve()}")
+
+
+@analysis_app.command("plot-cord-laminae-level-bars")
+def analysis_plot_cord_laminae_level_bars(
+    output: str = typer.Option(..., "--output", "-o", help="Output PNG path."),
+    input_path: str | None = typer.Option(None, "--input", "-i", help="Cord region_stats.csv."),
+    spinal_config: str | None = typer.Option(
+        None, "--config", "-c", help="Spinal YAML; uses volume_registered/region_stats.csv."
+    ),
+    channel: str = typer.Option("1", "--channel", help="Imaging channel or import label."),
+    metric: str = typer.Option("median_intensity", "--metric", help="Metric to plot."),
+    levels: str = typer.Option("C,T,L", "--levels", help="Comma-separated cord levels (C,T,L,S)."),
+    segments: str | None = typer.Option(
+        None,
+        "--segments",
+        help="Comma-separated segment filter.",
+    ),
+    title: str | None = typer.Option(None, "--title", help="Figure title."),
+    dpi: int = typer.Option(200, "--dpi", help="Figure DPI."),
+) -> None:
+    """Grouped bar chart: metric per Rexed lamina averaged across cervical/thoracic/lumbar levels."""
+    from lightsuite.analysis.viz.cord_io import load_cord_stats_csv, parse_plot_channel
+    from lightsuite.analysis.viz.cord_plots import plot_cord_laminae_level_bars
+
+    stats_path, _segments_csv, _segment_order = _resolve_cord_plot_context(
+        input_path=input_path, spinal_config=spinal_config
+    )
+    level_tuple = tuple(part.strip() for part in levels.split(",") if part.strip())
+    out = Path(output).expanduser()
+    plot_cord_laminae_level_bars(
+        load_cord_stats_csv(stats_path),
+        channel=parse_plot_channel(channel),
+        metric=metric,
+        segments=_parse_segment_list(segments),
+        levels=level_tuple,  # type: ignore[arg-type]
+        title=title,
+        output_path=out,
+        dpi=dpi,
+    )
+    typer.echo(f"Saved: {out.resolve()}")
+
+
+@analysis_app.command("plot-cord-df-subregion-heatmap")
+def analysis_plot_cord_df_subregion_heatmap(
+    output: str = typer.Option(..., "--output", "-o", help="Output PNG path."),
+    input_path: str | None = typer.Option(None, "--input", "-i", help="Cord region_stats.csv."),
+    spinal_config: str | None = typer.Option(
+        None, "--config", "-c", help="Spinal YAML; uses volume_registered/region_stats.csv."
+    ),
+    channel: str = typer.Option("1", "--channel", help="Imaging channel or import label."),
+    metric: str = typer.Option("median_intensity", "--metric", help="Metric to plot."),
+    segments: str | None = typer.Option(
+        None,
+        "--segments",
+        help="Comma-separated segment filter.",
+    ),
+    include_parent_df: bool = typer.Option(
+        True,
+        "--include-parent-df/--no-include-parent-df",
+        help="Include combined dorsal funiculus (df) row from structure rollup.",
+    ),
+    title: str | None = typer.Option(None, "--title", help="Figure title."),
+    dpi: int = typer.Option(200, "--dpi", help="Figure DPI."),
+    crop_empty_segments: bool = typer.Option(
+        True,
+        "--crop-empty-segments/--no-crop-empty-segments",
+        help="Drop leading/trailing segments with no data (default: on).",
+    ),
+) -> None:
+    """Heatmap: dorsal funiculus subregions (dcs, cu, gr, psdc, df) × rostrocaudal segment."""
+    from lightsuite.analysis.viz.cord_io import load_cord_stats_csv, parse_plot_channel
+    from lightsuite.analysis.viz.cord_plots import plot_cord_df_subregion_heatmap
+
+    stats_path, _segments_csv, segment_order = _resolve_cord_plot_context(
+        input_path=input_path, spinal_config=spinal_config
+    )
+    out = Path(output).expanduser()
+    plot_cord_df_subregion_heatmap(
+        load_cord_stats_csv(stats_path),
+        channel=parse_plot_channel(channel),
+        metric=metric,
+        segments=_parse_segment_list(segments),
+        segment_order=segment_order or None,
+        include_parent_df=include_parent_df,
+        title=title,
+        output_path=out,
+        dpi=dpi,
+        crop_empty_segments=crop_empty_segments,
+    )
+    typer.echo(f"Saved: {out.resolve()}")
+
+
 @analysis_app.command("cord-coloc-overlap")
 def analysis_cord_coloc_overlap(
     output: str = typer.Option(..., "--output", "-o", help="Output PNG path."),

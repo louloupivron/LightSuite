@@ -333,7 +333,7 @@ class AnalysisConfig(BaseModel):
     )
     rollups: list[str] = Field(
         default_factory=list,
-        description='Spinal cord rollups to append: "division" (GM/WM) and/or "structure" (laminas/funiculi).',
+        description='Spinal cord rollups to append: "division" (GM/WM), "structure" (laminas/funiculi), and/or "horn" (DH/VH/C dorsal–ventral split).',
     )
 
 

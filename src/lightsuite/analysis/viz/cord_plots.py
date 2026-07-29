@@ -9,9 +9,13 @@ import numpy as np
 import pandas as pd
 
 from lightsuite.analysis.viz.cord_io import (
+    DF_SUBREGION_ORDER,
     align_structure_heatmap_matrices,
+    df_subregion_table,
     division_profile_table,
     filter_cord_stats,
+    laminae_level_table,
+    laminae_pct_gm_table,
     segment_grouped_totals_table,
     segment_level_class,
     segment_totals_table,
@@ -885,9 +889,285 @@ def plot_cord_coloc_overlap(
     return fig, work
 
 
+def plot_cord_laminae_pct_gm_bars(
+    stats_df: pd.DataFrame,
+    *,
+    intensity_channel: int | str,
+    cell_channel: int | str,
+    segments: list[str] | None = None,
+    intensity_metric: str = "median_intensity",
+    title: str | None = None,
+    output_path: Path | None = None,
+    dpi: int = 200,
+    show: bool = False,
+    save_csv: bool = True,
+) -> tuple[plt.Figure, pd.DataFrame]:
+    """Grouped bar chart: % GM share of intensity vs. cell counts across Rexed laminae I–X."""
+    table = laminae_pct_gm_table(
+        stats_df,
+        intensity_channel=intensity_channel,
+        cell_channel=cell_channel,
+        segments=segments,
+        intensity_metric=intensity_metric,
+    )
+    if table.empty:
+        msg = "No laminae % GM data to plot."
+        raise ValueError(msg)
+
+    x = np.arange(len(table))
+    width = 0.36
+    fig, ax = plt.subplots(figsize=(max(10.0, len(table) * 0.85), 5.5))
+
+    int_err = table["intensity_pct_gm_sem"].fillna(0.0).to_numpy(dtype=float)
+    cell_err = table["cell_pct_gm_sem"].fillna(0.0).to_numpy(dtype=float)
+    show_int_err = bool(np.any(int_err > 0))
+    show_cell_err = bool(np.any(cell_err > 0))
+
+    ax.bar(
+        x - width / 2.0,
+        table["intensity_pct_gm"],
+        width=width,
+        color="#7f7f7f",
+        alpha=0.92,
+        edgecolor="white",
+        linewidth=0.6,
+        label="Signal intensity",
+        yerr=int_err if show_int_err else None,
+        capsize=3,
+        error_kw={"elinewidth": 1.0, "ecolor": "#555555"},
+    )
+    ax.bar(
+        x + width / 2.0,
+        table["cell_pct_gm"],
+        width=width,
+        color="#d62728",
+        alpha=0.92,
+        edgecolor="white",
+        linewidth=0.6,
+        label="Cell density",
+        yerr=cell_err if show_cell_err else None,
+        capsize=3,
+        error_kw={"elinewidth": 1.0, "ecolor": "#8b1a1a"},
+    )
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(table["lamina"], fontsize=9)
+    ax.set_xlabel("Rexed lamina")
+    ax.set_ylabel("% of gray matter")
+    ax.set_title(title or "% GM occupied by signal intensity vs. cell density", fontweight="bold")
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.grid(axis="y", alpha=0.3, linestyle="--")
+    ymax = float(
+        max(
+            (table["intensity_pct_gm"] + (int_err if show_int_err else 0)).max(),
+            (table["cell_pct_gm"] + (cell_err if show_cell_err else 0)).max(),
+            1.0,
+        )
+    )
+    ax.set_ylim(0, ymax * 1.12)
+    ax.legend(loc="upper right", fontsize=8, framealpha=0.92)
+    fig.tight_layout()
+
+    if output_path is not None:
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
+        if save_csv:
+            table.to_csv(output_path.with_suffix(".csv"), index=False)
+
+    if show:
+        plt.show()
+    elif output_path is not None:
+        plt.close(fig)
+
+    return fig, table
+
+
+_LEVEL_BAR_STYLES = {
+    "C": {"color": "#1b5e20", "hatch": "", "label": "Cervical"},
+    "T": {"color": "#43a047", "hatch": "///", "label": "Thoracic"},
+    "L": {"color": "#a5d6a7", "hatch": "...", "label": "Lumbar"},
+    "S": {"color": "#c8e6c9", "hatch": "xx", "label": "Sacral"},
+}
+
+
+def plot_cord_laminae_level_bars(
+    stats_df: pd.DataFrame,
+    *,
+    channel: int | str,
+    metric: str = "median_intensity",
+    segments: list[str] | None = None,
+    levels: tuple[str, ...] = ("C", "T", "L"),
+    title: str | None = None,
+    output_path: Path | None = None,
+    dpi: int = 200,
+    show: bool = False,
+    save_csv: bool = True,
+) -> tuple[plt.Figure, pd.DataFrame]:
+    """Grouped bar chart: metric per Rexed lamina, averaged across cervical/thoracic/lumbar levels."""
+    table = laminae_level_table(
+        stats_df,
+        channel=channel,
+        metric=metric,
+        segments=segments,
+        levels=levels,
+    )
+    if table.empty:
+        msg = "No laminae level data to plot."
+        raise ValueError(msg)
+
+    laminae = table["lamina"].astype(str).tolist()
+    level_cols = [col for col in table.columns if col != "lamina"]
+    x = np.arange(len(laminae))
+    n_levels = len(level_cols)
+    width = 0.8 / max(n_levels, 1)
+    fig, ax = plt.subplots(figsize=(max(10.0, len(laminae) * 0.85), 5.5))
+
+    for idx, level in enumerate(level_cols):
+        style = _LEVEL_BAR_STYLES.get(level, {"color": _GROUPED_BAR_COLORS[idx % len(_GROUPED_BAR_COLORS)], "hatch": "", "label": level})
+        offset = (idx - (n_levels - 1) / 2.0) * width
+        ax.bar(
+            x + offset,
+            table[level],
+            width=width,
+            color=style["color"],
+            hatch=style["hatch"],
+            edgecolor="#333333",
+            linewidth=0.5,
+            alpha=0.95,
+            label=style["label"],
+        )
+
+    metric_label = _METRIC_LABELS.get(metric, metric)
+    ax.set_xticks(x)
+    ax.set_xticklabels(laminae, fontsize=9)
+    ax.set_xlabel("Rexed lamina")
+    ax.set_ylabel(metric_label)
+    ax.set_title(title or f"{metric_label} by lamina and cord level", fontweight="bold")
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.grid(axis="y", alpha=0.3, linestyle="--")
+    ymax = float(table[level_cols].to_numpy(dtype=float).max()) if level_cols else 1.0
+    ax.set_ylim(0, ymax * 1.12)
+    ax.legend(loc="upper right", fontsize=8, framealpha=0.92, title="Level")
+    fig.tight_layout()
+
+    if output_path is not None:
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
+        if save_csv:
+            table.to_csv(output_path.with_suffix(".csv"), index=False)
+
+    if show:
+        plt.show()
+    elif output_path is not None:
+        plt.close(fig)
+
+    return fig, table
+
+
+def plot_cord_df_subregion_heatmap(
+    stats_df: pd.DataFrame,
+    *,
+    channel: int | str,
+    metric: str = "median_intensity",
+    segments: list[str] | None = None,
+    segment_order: list[str] | None = None,
+    include_parent_df: bool = True,
+    title: str | None = None,
+    output_path: Path | None = None,
+    dpi: int = 200,
+    show: bool = False,
+    save_csv: bool = True,
+    x_tick_stride: int | None = None,
+    crop_empty_segments: bool = True,
+    cmap: str = "inferno",
+) -> tuple[plt.Figure, pd.DataFrame]:
+    """Heatmap: dorsal funiculus subregions (dcs, cu, gr, psdc, df) × rostrocaudal segment."""
+    table = df_subregion_table(
+        stats_df,
+        channel=channel,
+        metric=metric,
+        segments=segments,
+        include_parent_df=include_parent_df,
+    )
+    row_order = [acr for acr in DF_SUBREGION_ORDER if acr in set(table["acronym"].astype(str))]
+    if not row_order:
+        msg = "No dorsal funiculus subregion rows to plot."
+        raise ValueError(msg)
+
+    matrix, row_labels, col_labels = structure_heatmap_matrix(
+        table,
+        segment_order=segment_order,
+        label_col="acronym",
+        crop_empty_segments=crop_empty_segments,
+    )
+    ordered_rows = [row for row in row_order if row in matrix.index]
+    matrix = matrix.reindex(ordered_rows)
+    row_labels = ordered_rows
+    if matrix.empty:
+        msg = "No dorsal funiculus subregion data to plot."
+        raise ValueError(msg)
+
+    data = np.ma.masked_invalid(matrix.to_numpy(dtype=float))
+    fig_h = max(4.5, len(row_labels) * 0.55)
+    fig_w = max(8.0, len(col_labels) * 0.45)
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+
+    cmap_obj = plt.get_cmap(cmap).copy()
+    cmap_obj.set_bad("#d9d9d9")
+    im = ax.imshow(data, aspect="auto", cmap=cmap_obj, origin="upper")
+    metric_label = _METRIC_LABELS.get(metric, metric)
+    cbar = fig.colorbar(im, ax=ax, fraction=0.03, pad=0.02)
+    cbar.set_label(metric_label, fontsize=9)
+
+    ax.set_yticks(range(len(row_labels)))
+    ax.set_yticklabels(row_labels, fontsize=9)
+    if x_tick_stride is None:
+        stride = 1 if len(col_labels) <= 24 else 2
+    else:
+        stride = max(1, int(x_tick_stride))
+    tick_idx = list(range(0, len(col_labels), stride))
+    ax.set_xticks(tick_idx)
+    ax.set_xticklabels([col_labels[i] for i in tick_idx], rotation=0, fontsize=8)
+    ax.set_xlabel("Segment")
+    ax.set_ylabel("Dorsal funiculus subregion")
+    ax.set_title(title or f"Dorsal funiculus subregions × segment ({metric_label})", fontweight="bold")
+    ax.text(
+        1.0,
+        -0.12,
+        "grey = no data",
+        transform=ax.transAxes,
+        ha="right",
+        va="top",
+        fontsize=8,
+        color="#666666",
+    )
+    fig.tight_layout()
+
+    if output_path is not None:
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
+        if save_csv:
+            matrix.to_csv(output_path.with_suffix(".csv"))
+
+    if show:
+        plt.show()
+    elif output_path is not None:
+        plt.close(fig)
+
+    return fig, matrix
+
+
 __all__ = [
     "plot_cord_coloc_overlap",
+    "plot_cord_df_subregion_heatmap",
     "plot_cord_division_profile",
+    "plot_cord_laminae_level_bars",
+    "plot_cord_laminae_pct_gm_bars",
     "plot_cord_segment_bars",
     "plot_cord_segment_grouped_bars",
     "plot_cord_structure_heatmap",
