@@ -122,3 +122,65 @@ def test_apply_cord_rollups_appends_levels() -> None:
     combined = apply_cord_rollups(_finest_frame(), _mini_regions(), ["division"])
     assert set(combined["rollup_level"]) == {"region", "division"}
     assert len(combined) > len(_finest_frame())
+
+
+def _point_count_frame() -> pd.DataFrame:
+    rows = [
+        dict(
+            sample="s1",
+            channel="spots_a",
+            atlas="fiederling",
+            parcellation_index=1,
+            acronym="1Sp",
+            name="Lamina1",
+            structure="DH",
+            division="GM",
+            segment="C1",
+            rollup_level="region",
+            hemisphere="whole",
+            metric="cell_count",
+            value=10.0,
+        ),
+        dict(
+            sample="s1",
+            channel="spots_a",
+            atlas="fiederling",
+            parcellation_index=1,
+            acronym="1Sp",
+            name="Lamina1",
+            structure="DH",
+            division="GM",
+            segment="C1",
+            rollup_level="region",
+            hemisphere="whole",
+            metric="volume_mm3",
+            value=1.0,
+        ),
+        dict(
+            sample="s1",
+            channel="spots_a",
+            atlas="fiederling",
+            parcellation_index=1,
+            acronym="1Sp",
+            name="Lamina1",
+            structure="DH",
+            division="GM",
+            segment="C1",
+            rollup_level="region",
+            hemisphere="whole",
+            metric="cell_density",
+            value=10.0,
+        ),
+    ]
+    return pd.DataFrame(rows).reindex(columns=CORD_TIDY_COLUMNS)
+
+
+def test_rollup_division_cell_density_from_counts_and_volume() -> None:
+    rolled = rollup_cord_tidy(_point_count_frame(), _mini_regions(), "division")
+    gm_density = rolled[
+        (rolled["rollup_level"] == "division")
+        & (rolled["acronym"] == "GM")
+        & (rolled["metric"] == "cell_density")
+    ]
+    assert len(gm_density) == 1
+    assert gm_density["value"].iloc[0] == 10.0

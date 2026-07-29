@@ -612,6 +612,26 @@ def _resolve_cord_plot_context(
     raise typer.BadParameter("Provide --input or --config (spinal cord YAML).")
 
 
+def _resolve_cord_channel_list(
+    channels: str | None,
+    spinal_config: str | None,
+) -> list[str]:
+    from lightsuite.analysis.viz.cord_io import parse_plot_channels
+
+    channel_list = parse_plot_channels(channels)
+    if channel_list:
+        return channel_list
+    if spinal_config is None:
+        raise typer.BadParameter("Provide --channels or --config with analysis.point_labels.")
+    from lightsuite.config.loader import load_spinal_config
+
+    cfg = load_spinal_config(spinal_config)
+    labels = cfg.analysis.point_labels
+    if not labels:
+        raise typer.BadParameter("No --channels given and analysis.point_labels is empty in config.")
+    return [str(label) for label in labels]
+
+
 @analysis_app.command("plot-cord-structure")
 def analysis_plot_cord_structure(
     output: str = typer.Option(..., "--output", "-o", help="Output PNG path."),
@@ -727,6 +747,183 @@ def analysis_plot_cord_segment_bars(
         dpi=dpi,
     )
     typer.echo(f"Saved: {out.resolve()}")
+
+
+@analysis_app.command("plot-cord-segment-grouped-bars")
+def analysis_plot_cord_segment_grouped_bars(
+    output: str = typer.Option(..., "--output", "-o", help="Output PNG path."),
+    input_path: str | None = typer.Option(None, "--input", "-i", help="Cord region_stats.csv."),
+    spinal_config: str | None = typer.Option(
+        None, "--config", "-c", help="Spinal YAML; uses volume_registered/region_stats.csv."
+    ),
+    channels: str | None = typer.Option(
+        None,
+        "--channels",
+        help="Comma-separated import labels (default: analysis.point_labels from --config).",
+    ),
+    metric: str = typer.Option("cell_count", "--metric", help="Metric to plot."),
+    title: str | None = typer.Option(None, "--title", help="Figure title."),
+    min_total: float = typer.Option(
+        0.0,
+        "--min-total",
+        help="Drop segments whose summed metric across labels is below this threshold.",
+    ),
+    dpi: int = typer.Option(200, "--dpi", help="Figure DPI."),
+) -> None:
+    """Grouped bar chart: compare coloc import labels per rostrocaudal segment."""
+    from lightsuite.analysis.viz.cord_io import (
+        filter_cord_stats_multi,
+        load_cord_stats_csv,
+        parse_plot_channels,
+    )
+    from lightsuite.analysis.viz.cord_plots import plot_cord_segment_grouped_bars
+
+    stats_path, _segments_csv, segment_order = _resolve_cord_plot_context(
+        input_path=input_path, spinal_config=spinal_config
+    )
+    channel_list = _resolve_cord_channel_list(channels, spinal_config)
+
+    table = filter_cord_stats_multi(
+        load_cord_stats_csv(stats_path),
+        channels=channel_list,
+        metric=metric,
+        rollup_level="region",
+    )
+    out = Path(output).expanduser()
+    plot_cord_segment_grouped_bars(
+        table,
+        channels=channel_list,
+        segment_order=segment_order or None,
+        title=title,
+        metric=metric,
+        min_total=min_total,
+        output_path=out,
+        dpi=dpi,
+    )
+    typer.echo(f"Saved: {out.resolve()}")
+
+
+@analysis_app.command("plot-cord-structure-panel")
+def analysis_plot_cord_structure_panel(
+    output: str = typer.Option(..., "--output", "-o", help="Output PNG path."),
+    input_path: str | None = typer.Option(None, "--input", "-i", help="Cord region_stats.csv."),
+    spinal_config: str | None = typer.Option(
+        None, "--config", "-c", help="Spinal YAML; uses volume_registered/region_stats.csv."
+    ),
+    channels: str | None = typer.Option(
+        None,
+        "--channels",
+        help="Comma-separated import labels (default: analysis.point_labels from --config).",
+    ),
+    metric: str = typer.Option("cell_count", "--metric", help="Metric to plot."),
+    rollup_level: str = typer.Option("structure", "--rollup-level", help="Rollup level."),
+    title: str | None = typer.Option(None, "--title", help="Figure title."),
+    dpi: int = typer.Option(200, "--dpi", help="Figure DPI."),
+) -> None:
+    """Side-by-side structure heatmaps for several import labels."""
+    from lightsuite.analysis.viz.cord_io import load_cord_stats_csv
+    from lightsuite.analysis.viz.cord_plots import plot_cord_structure_panel
+
+    stats_path, _segments_csv, segment_order = _resolve_cord_plot_context(
+        input_path=input_path, spinal_config=spinal_config
+    )
+    channel_list = _resolve_cord_channel_list(channels, spinal_config)
+    out = Path(output).expanduser()
+    plot_cord_structure_panel(
+        load_cord_stats_csv(stats_path),
+        channels=channel_list,
+        metric=metric,
+        rollup_level=rollup_level,
+        segment_order=segment_order or None,
+        title=title,
+        output_path=out,
+        dpi=dpi,
+    )
+    typer.echo(f"Saved: {out.resolve()}")
+
+
+@analysis_app.command("plot-cord-top-regions")
+def analysis_plot_cord_top_regions(
+    output: str = typer.Option(..., "--output", "-o", help="Output PNG path."),
+    input_path: str | None = typer.Option(None, "--input", "-i", help="Cord region_stats.csv."),
+    spinal_config: str | None = typer.Option(
+        None, "--config", "-c", help="Spinal YAML; uses volume_registered/region_stats.csv."
+    ),
+    channel: str = typer.Option(..., "--channel", help="Imaging channel or import label."),
+    metric: str = typer.Option("cell_count", "--metric", help="Metric to plot."),
+    top_n: int = typer.Option(15, "--top-n", help="Number of top region × segment rows."),
+    segment: str | None = typer.Option(None, "--segment", help="Restrict to one segment (e.g. L5)."),
+    title: str | None = typer.Option(None, "--title", help="Figure title."),
+    dpi: int = typer.Option(200, "--dpi", help="Figure DPI."),
+) -> None:
+    """Horizontal bar chart of top region × segment combinations."""
+    from lightsuite.analysis.viz.cord_io import filter_cord_stats, load_cord_stats_csv, parse_plot_channel
+    from lightsuite.analysis.viz.cord_plots import plot_cord_top_regions
+
+    stats_path, _segments_csv, _segment_order = _resolve_cord_plot_context(
+        input_path=input_path, spinal_config=spinal_config
+    )
+    table = filter_cord_stats(
+        load_cord_stats_csv(stats_path),
+        channel=parse_plot_channel(channel),
+        metric=metric,
+        rollup_level="region",
+    )
+    out = Path(output).expanduser()
+    plot_cord_top_regions(
+        table,
+        top_n=top_n,
+        segment=segment,
+        title=title,
+        metric=metric,
+        output_path=out,
+        dpi=dpi,
+    )
+    typer.echo(f"Saved: {out.resolve()}")
+
+
+@analysis_app.command("cord-coloc-overlap")
+def analysis_cord_coloc_overlap(
+    output: str = typer.Option(..., "--output", "-o", help="Output PNG path."),
+    spinal_config: str = typer.Option(..., "--config", "-c", help="Spinal cord YAML config."),
+    channels: str | None = typer.Option(
+        None,
+        "--channels",
+        help="Comma-separated import labels (default: analysis.point_labels).",
+    ),
+    tolerance_voxels: float = typer.Option(
+        2.0,
+        "--tolerance-voxels",
+        help="Max atlas-voxel distance to call two spots colocalized.",
+    ),
+    title: str | None = typer.Option(None, "--title", help="Figure title."),
+    dpi: int = typer.Option(200, "--dpi", help="Figure DPI."),
+) -> None:
+    """Compute and plot pairwise colocalization overlap between imported spot labels."""
+    from lightsuite.analysis.cord_coloc import run_cord_coloc_overlap
+    from lightsuite.analysis.viz.cord_plots import plot_cord_coloc_overlap
+    from lightsuite.config.loader import load_spinal_config
+
+    cfg = load_spinal_config(spinal_config)
+    channel_list = _resolve_cord_channel_list(channels, spinal_config)
+    out = Path(output).expanduser()
+    csv_path = out.with_suffix(".csv")
+    result = run_cord_coloc_overlap(
+        cfg,
+        labels=channel_list,
+        tolerance_voxels=tolerance_voxels,
+        output_csv=csv_path,
+    )
+    plot_cord_coloc_overlap(
+        result.summary,
+        title=title,
+        output_path=out,
+        dpi=dpi,
+        save_csv=False,
+    )
+    typer.echo(f"Saved: {out.resolve()}")
+    if result.summary_path is not None:
+        typer.echo(f"Summary: {result.summary_path.resolve()}")
 
 
 @analysis_app.command("build-division-map")

@@ -141,13 +141,46 @@ uv run lightsuite analysis plot-cord-segment-bars \
   -c examples/config/spinal_cord/OP87F4.yaml \
   -o plots/op87_segment_counts.png \
   --channel imaris_Coloc_pink_yellow --metric cell_count
+
+uv run lightsuite analysis plot-cord-segment-grouped-bars \
+  -c examples/config/spinal_cord/OP87F4.yaml \
+  -o plots/op87_coloc_segment_counts.png
+
+uv run lightsuite analysis plot-cord-structure-panel \
+  -c examples/config/spinal_cord/OP87F4.yaml \
+  -o plots/op87_coloc_structure_panel.png
+
+uv run lightsuite analysis plot-cord-top-regions \
+  -c examples/config/spinal_cord/OP87F4.yaml \
+  -o plots/op87_top_regions.png \
+  --channel imaris_Coloc_pink_yellow --segment L5
+
+uv run lightsuite analysis cord-coloc-overlap \
+  -c examples/config/spinal_cord/OP87F4.yaml \
+  -o plots/op87_coloc_overlap.png
 ```
 
 | Command | Uses `rollup_level` | MATLAB equivalent |
 |---------|---------------------|-------------------|
 | `plot-cord-structure` | `structure` | Top-row `imagesc` heatmap |
+| `plot-cord-structure-panel` | `structure` (multi-label) | Multi-channel `imagesc` row |
 | `plot-cord-division-profile` | `division` | Bottom-row GM/WM line plot |
 | `plot-cord-segment-bars` | `region` (summed per segment) | — |
+| `plot-cord-segment-grouped-bars` | `region` (summed per segment, multiple labels) | — |
+| `plot-cord-top-regions` | `region` | — |
+| `cord-coloc-overlap` | atlas-space spot coords | — |
+
+`plot-cord-segment-grouped-bars` compares several imported spot labels on one chart
+(e.g. Imaris coloc components). With `--config`, labels default to
+`analysis.point_labels`; override with `--channels label_a,label_b`. Use
+`--min-total 1` to hide segments with zero cells across all labels.
+
+`cord-coloc-overlap` measures how many spots in one import label have a neighbor
+within `--tolerance-voxels` (default 2) in another label, using
+`*_atlas_coords.npz`. Writes a summary CSV and overlap bar chart.
+
+Re-run `lightsuite spinal region-stats` after upgrading to pick up `volume_mm3` on
+point counts (enables structure/division `cell_density` rollups).
 
 Use `--input region_stats.csv` instead of `--config` when plotting from a copied CSV.
 Each command also writes a sidecar `.csv` next to the PNG.

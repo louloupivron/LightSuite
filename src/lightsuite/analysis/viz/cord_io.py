@@ -151,15 +151,118 @@ def segment_totals_table(df: pd.DataFrame) -> pd.DataFrame:
     return totals.sort_values("total", ascending=False)
 
 
+def parse_plot_channels(value: str | None) -> list[str]:
+    """Parse comma-separated CLI ``--channels`` into normalized label strings."""
+    if value is None:
+        return []
+    return [part.strip() for part in str(value).split(",") if part.strip()]
+
+
+def filter_cord_stats_multi(
+    df: pd.DataFrame,
+    *,
+    channels: list[str],
+    metric: str = "cell_count",
+    rollup_level: str = "region",
+    sample: str | None = None,
+) -> pd.DataFrame:
+    """Filter cord stats to several import labels (or channels) at one rollup level."""
+    if not channels:
+        msg = "At least one channel/label is required."
+        raise ValueError(msg)
+    if metric not in CORD_METRICS:
+        msg = f"Unknown metric {metric!r}. Expected one of {CORD_METRICS}."
+        raise ValueError(msg)
+
+    wanted = {_normalize_channel(channel) for channel in channels}
+    work = df[df["metric"] == metric].copy()
+    work["channel_norm"] = work["channel"].map(_normalize_channel)
+    work = work[work["channel_norm"].isin(wanted)]
+    if sample is not None:
+        work = work[work["sample"].astype(str) == str(sample)]
+    level = str(rollup_level).strip().lower()
+    work = work[work["rollup_level"].astype(str).str.lower() == level]
+    if work.empty:
+        msg = (
+            f"No rows for channels={channels!r}, metric={metric!r}, "
+            f"rollup_level={rollup_level!r}."
+        )
+        raise ValueError(msg)
+    return work.reindex(columns=[c for c in CORD_TIDY_COLUMNS if c in work.columns])
+
+
+def segment_grouped_totals_table(
+    df: pd.DataFrame,
+    *,
+    channels: list[str],
+    segment_order: list[str] | None = None,
+) -> pd.DataFrame:
+    """Pivot summed metric values to one row per segment, one column per label."""
+    if not channels:
+        msg = "At least one channel/label is required."
+        raise ValueError(msg)
+
+    work = df.copy()
+    work["channel_norm"] = work["channel"].map(_normalize_channel)
+    wanted = [_normalize_channel(channel) for channel in channels]
+    work = work[work["channel_norm"].isin(set(wanted))]
+
+    totals = (
+        work.groupby(["segment", "channel_norm"], sort=False)["value"]
+        .sum()
+        .reset_index()
+    )
+    pivot = totals.pivot(index="segment", columns="channel_norm", values="value").fillna(0.0)
+    col_order = [channel for channel in wanted if channel in pivot.columns]
+    missing = [channel for channel in wanted if channel not in pivot.columns]
+    if missing:
+        msg = f"No data for channel(s): {missing}"
+        raise ValueError(msg)
+    pivot = pivot.reindex(columns=col_order)
+
+    if segment_order:
+        order = [segment for segment in segment_order if segment in pivot.index]
+        order.extend(segment for segment in pivot.index if segment not in order)
+        pivot = pivot.reindex(order)
+    else:
+        pivot = pivot.sort_index()
+
+    return pivot.reset_index()
+
+
+def top_regions_table(
+    df: pd.DataFrame,
+    *,
+    top_n: int = 15,
+    segment: str | None = None,
+    min_value: float = 0.0,
+) -> pd.DataFrame:
+    """Select top region × segment rows by metric value."""
+    work = df.copy()
+    if segment is not None:
+        work = work[work["segment"].astype(str) == str(segment)]
+    work = work[work["value"] > float(min_value)]
+    if work.empty:
+        return work
+
+    work["plot_label"] = work["name"].astype(str) + " @ " + work["segment"].astype(str)
+    top = work.nlargest(int(top_n), "value")
+    return top[["plot_label", "name", "segment", "acronym", "value"]].reset_index(drop=True)
+
+
 __all__ = [
     "CORD_METRICS",
     "division_profile_table",
     "filter_cord_stats",
+    "filter_cord_stats_multi",
     "load_cord_stats_csv",
     "load_segment_order",
+    "parse_plot_channels",
     "resolve_cord_region_stats_from_config",
     "segment_centers_mm",
+    "segment_grouped_totals_table",
     "segment_totals_table",
     "structure_heatmap_matrix",
+    "top_regions_table",
     "parse_plot_channel",
 ]

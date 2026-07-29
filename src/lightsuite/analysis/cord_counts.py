@@ -189,6 +189,15 @@ def count_points_in_cord_regions(
                     "parcellation_index": int(rid),
                     "segment": seg,
                     "hemisphere": CORD_HEMISPHERE,
+                    "metric": "volume_mm3",
+                    "value": region_volume_mm3,
+                }
+            )
+            records.append(
+                {
+                    "parcellation_index": int(rid),
+                    "segment": seg,
+                    "hemisphere": CORD_HEMISPHERE,
                     "metric": "cell_density",
                     "value": count / region_volume_mm3,
                 }
