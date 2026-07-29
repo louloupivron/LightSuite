@@ -9,12 +9,14 @@ import numpy as np
 import pandas as pd
 
 from lightsuite.analysis.viz.cord_io import (
+    align_structure_heatmap_matrices,
     division_profile_table,
     filter_cord_stats,
     segment_grouped_totals_table,
     segment_level_class,
     segment_totals_table,
     structure_heatmap_matrix,
+    structure_names_ordered,
     top_regions_table,
 )
 
@@ -553,15 +555,20 @@ def plot_cord_structure_panel(
     dpi: int = 200,
     show: bool = False,
     save_csv: bool = True,
-    x_tick_stride: int = 2,
+    x_tick_stride: int | None = None,
+    crop_empty_segments: bool = True,
 ) -> tuple[plt.Figure, dict[str, pd.DataFrame]]:
-    """Side-by-side structure heatmaps for several import labels."""
+    """Side-by-side structure heatmaps for several import labels.
+
+    Panels share the same structure rows and segment columns (cropped to the
+    union data span) so coloc labels can be compared directly. Subplot titles
+    use semantic colors and per-label totals.
+    """
     if not channels:
         msg = "At least one channel/label is required."
         raise ValueError(msg)
 
-    matrices: dict[str, pd.DataFrame] = {}
-    arrays: list[np.ndarray] = []
+    raw_matrices: dict[str, pd.DataFrame] = {}
     for channel in channels:
         table = filter_cord_stats(
             stats_df,
@@ -572,32 +579,60 @@ def plot_cord_structure_panel(
         matrix, _row_labels, _col_labels = structure_heatmap_matrix(
             table,
             segment_order=segment_order,
-            crop_empty_segments=True,
+            crop_empty_segments=crop_empty_segments,
         )
-        matrices[str(channel)] = matrix
-        arrays.append(matrix.to_numpy(dtype=float))
+        raw_matrices[str(channel)] = matrix
 
+    row_order = structure_names_ordered(
+        stats_df,
+        channels=channels,
+        metric=metric,
+        rollup_level=rollup_level,
+    )
+    matrices, row_labels, col_labels = align_structure_heatmap_matrices(
+        raw_matrices,
+        segment_order=segment_order,
+        row_order=row_order or None,
+        drop_empty_rows=True,
+    )
+    if not matrices or not row_labels or not col_labels:
+        msg = "No structure-level panel data to plot."
+        raise ValueError(msg)
+
+    arrays = [m.to_numpy(dtype=float) for m in matrices.values() if m.size]
     stacked = np.concatenate([arr[np.isfinite(arr)] for arr in arrays if arr.size])
     vmin, vmax = _percentile_limits(stacked)
 
     n_cols = len(channels)
-    sample_rows = max(len(next(iter(matrices.values())).index), 1)
-    fig_h = max(6.0, sample_rows * 0.35)
-    fig_w = max(10.0, n_cols * 4.5)
+    fig_h = max(5.5, len(row_labels) * 0.38)
+    fig_w = max(10.0, n_cols * 4.8)
     fig, axes = plt.subplots(1, n_cols, figsize=(fig_w, fig_h), squeeze=False, constrained_layout=True)
     cmap_obj = plt.get_cmap("magma").copy()
     cmap_obj.set_bad("#d9d9d9")
 
+    if x_tick_stride is None:
+        stride = 1 if len(col_labels) <= 20 else 2
+    else:
+        stride = max(1, int(x_tick_stride))
+    tick_idx = list(range(0, len(col_labels), stride))
+
+    im = None
     for idx, channel in enumerate(channels):
         ax = axes[0, idx]
-        matrix = matrices[str(channel)]
+        key = str(channel)
+        matrix = matrices[key]
         data = np.ma.masked_invalid(matrix.to_numpy(dtype=float))
         im = ax.imshow(data, aspect="auto", cmap=cmap_obj, origin="upper", vmin=vmin, vmax=vmax)
-        ax.set_title(_legend_label(channel), fontsize=9, fontweight="bold")
-        ax.set_yticks(range(len(matrix.index)))
-        ax.set_yticklabels(matrix.index.tolist(), fontsize=7)
-        col_labels = matrix.columns.tolist()
-        tick_idx = list(range(0, len(col_labels), max(1, x_tick_stride)))
+        label_total = float(matrix.fillna(0).to_numpy(dtype=float).sum())
+        title_color = _color_for_import_label(channel, idx)
+        ax.set_title(
+            f"{_legend_label(channel)} (n={label_total:g})",
+            fontsize=9,
+            fontweight="bold",
+            color=title_color,
+        )
+        ax.set_yticks(range(len(row_labels)))
+        ax.set_yticklabels(row_labels, fontsize=7)
         ax.set_xticks(tick_idx)
         ax.set_xticklabels([col_labels[i] for i in tick_idx], rotation=0, fontsize=7)
         if idx == 0:
@@ -606,7 +641,18 @@ def plot_cord_structure_panel(
 
     metric_label = _METRIC_LABELS.get(metric, metric)
     fig.suptitle(title or f"Structure × segment ({metric_label})", fontweight="bold")
-    fig.colorbar(im, ax=axes.ravel().tolist(), fraction=0.02, pad=0.02)
+    if im is not None:
+        cbar = fig.colorbar(im, ax=axes.ravel().tolist(), fraction=0.02, pad=0.02)
+        cbar.set_label(metric_label, fontsize=9)
+    fig.text(
+        0.99,
+        0.01,
+        "grey = no data",
+        ha="right",
+        va="bottom",
+        fontsize=8,
+        color="#666666",
+    )
 
     if output_path is not None:
         output_path = Path(output_path)

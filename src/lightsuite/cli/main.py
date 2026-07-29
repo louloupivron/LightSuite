@@ -843,6 +843,11 @@ def analysis_plot_cord_structure_panel(
     rollup_level: str = typer.Option("structure", "--rollup-level", help="Rollup level."),
     title: str | None = typer.Option(None, "--title", help="Figure title."),
     dpi: int = typer.Option(200, "--dpi", help="Figure DPI."),
+    crop_empty_segments: bool = typer.Option(
+        True,
+        "--crop-empty-segments/--no-crop-empty-segments",
+        help="Drop leading/trailing segments with no data (default: on).",
+    ),
 ) -> None:
     """Side-by-side structure heatmaps for several import labels."""
     from lightsuite.analysis.viz.cord_io import load_cord_stats_csv
@@ -862,6 +867,7 @@ def analysis_plot_cord_structure_panel(
         title=title,
         output_path=out,
         dpi=dpi,
+        crop_empty_segments=crop_empty_segments,
     )
     typer.echo(f"Saved: {out.resolve()}")
 

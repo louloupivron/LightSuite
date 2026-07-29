@@ -146,6 +146,86 @@ def structure_heatmap_matrix(
     return matrix, list(matrix.index), list(matrix.columns)
 
 
+def structure_names_ordered(
+    stats_df: pd.DataFrame,
+    *,
+    channels: list[str],
+    metric: str,
+    rollup_level: str = "structure",
+) -> list[str]:
+    """Atlas structure names in parcellation order for panel alignment."""
+    from lightsuite.analysis.viz.io import _normalize_channel
+
+    work = stats_df[stats_df["metric"] == metric].copy()
+    work = work[work["rollup_level"].astype(str).str.lower() == str(rollup_level).lower()]
+    wanted = {_normalize_channel(channel) for channel in channels}
+    work["channel_norm"] = work["channel"].map(_normalize_channel)
+    work = work[work["channel_norm"].isin(wanted)]
+    if work.empty:
+        return []
+    labels = work[["name", "parcellation_index"]].drop_duplicates(subset="name")
+    labels["name"] = labels["name"].astype(str).str.replace("_", " ", regex=False)
+    labels = labels.sort_values("parcellation_index")
+    return labels["name"].tolist()
+
+
+def align_structure_heatmap_matrices(
+    matrices: dict[str, pd.DataFrame],
+    *,
+    segment_order: list[str] | None = None,
+    row_order: list[str] | None = None,
+    drop_empty_rows: bool = True,
+) -> tuple[dict[str, pd.DataFrame], list[str], list[str]]:
+    """Reindex panel matrices to shared rows/columns and crop to the data span."""
+    if not matrices:
+        return {}, [], []
+
+    all_cols: set[str] = set()
+    for matrix in matrices.values():
+        all_cols.update(matrix.columns.astype(str))
+
+    if segment_order:
+        col_labels = [s for s in segment_order if s in all_cols]
+        col_labels.extend(sorted(all_cols - set(col_labels)))
+    else:
+        col_labels = sorted(all_cols)
+
+    nonempty_cols: list[str] = []
+    for col in col_labels:
+        for matrix in matrices.values():
+            if col in matrix.columns and float(matrix[col].fillna(0).sum()) > 0:
+                nonempty_cols.append(col)
+                break
+    if nonempty_cols:
+        i0 = col_labels.index(nonempty_cols[0])
+        i1 = col_labels.index(nonempty_cols[-1])
+        col_labels = col_labels[i0 : i1 + 1]
+
+    if row_order:
+        all_row_set: set[str] = set()
+        for matrix in matrices.values():
+            all_row_set.update(str(r) for r in matrix.index)
+        row_labels = [r for r in row_order if r in all_row_set]
+        row_labels.extend(sorted(all_row_set - set(row_labels)))
+    else:
+        row_labels = sorted({str(r) for matrix in matrices.values() for r in matrix.index})
+
+    aligned: dict[str, pd.DataFrame] = {}
+    for key, matrix in matrices.items():
+        aligned[key] = matrix.reindex(index=row_labels, columns=col_labels)
+
+    if drop_empty_rows and row_labels:
+        keep_rows = []
+        for row in row_labels:
+            if any(float(aligned[k].loc[row].fillna(0).sum()) > 0 for k in aligned):
+                keep_rows.append(row)
+        row_labels = keep_rows
+        for key in aligned:
+            aligned[key] = aligned[key].reindex(keep_rows)
+
+    return aligned, row_labels, col_labels
+
+
 def division_profile_table(
     df: pd.DataFrame,
     segments_df: pd.DataFrame,
@@ -321,6 +401,8 @@ __all__ = [
     "segment_level_class",
     "segment_totals_table",
     "structure_heatmap_matrix",
+    "structure_names_ordered",
+    "align_structure_heatmap_matrices",
     "top_regions_table",
     "parse_plot_channel",
 ]

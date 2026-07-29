@@ -243,6 +243,8 @@ def test_plot_cord_top_regions_writes_png(tmp_path: Path) -> None:
 
 
 def test_plot_cord_structure_panel_writes_png(tmp_path: Path) -> None:
+    from lightsuite.analysis.viz.cord_io import align_structure_heatmap_matrices
+
     df = _cord_stats_rows()
     out = tmp_path / "panel.png"
     plot_cord_structure_panel(
@@ -254,6 +256,17 @@ def test_plot_cord_structure_panel_writes_png(tmp_path: Path) -> None:
         output_path=out,
     )
     assert out.is_file()
+
+    m1 = pd.DataFrame({"C1": [1.0], "C2": [0.0]}, index=["A"])
+    m2 = pd.DataFrame({"C1": [0.0], "C2": [2.0]}, index=["B"])
+    aligned, rows, cols = align_structure_heatmap_matrices(
+        {"a": m1, "b": m2},
+        row_order=["A", "B"],
+        drop_empty_rows=True,
+    )
+    assert rows == ["A", "B"]
+    assert cols == ["C1", "C2"]
+    assert float(aligned["a"].loc["B"].fillna(0).sum()) == 0.0
 
 
 def test_plot_cord_coloc_overlap_writes_png(tmp_path: Path) -> None:
