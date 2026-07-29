@@ -64,4 +64,6 @@ analysis:
     - imaris_Coloc_pink_yellow
     - imaris_coloc_cyan_pink
     - imaris_Coloc_cyan_yellow
+  # Optional: override default plot output dir (sample.save_path/plots)
+  # plots_dir: /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP87F4/registered/plots
 

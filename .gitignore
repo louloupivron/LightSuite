@@ -14,3 +14,6 @@ script_analyze_slices.m
 script_analyze_slices_in_batch.m
 batch_run_colm_suite.m
 *CellClassifierNet.mat
+
+# Local analysis figures (write under sample.save_path/plots instead)
+plots/

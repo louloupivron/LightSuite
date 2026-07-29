@@ -347,6 +347,17 @@ class AnalysisConfig(BaseModel):
         default=False,
         description="When split_hemispheres is true, also emit whole-cord summary rows.",
     )
+    plots_dir: Path | None = Field(
+        default=None,
+        description="Directory for matplotlib analysis outputs; default is sample.save_path/plots.",
+    )
+
+    @field_validator("plots_dir")
+    @classmethod
+    def expand_plots_dir(cls, value: Path | None) -> Path | None:
+        if value is None:
+            return None
+        return value.expanduser()
 
 
 class AnnotationFormat(str, Enum):

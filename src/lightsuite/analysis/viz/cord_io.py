@@ -50,6 +50,28 @@ def resolve_cord_region_stats_from_config(config_path: str | Path) -> Path:
     return stats
 
 
+def resolve_cord_plots_dir(config_path: str | Path) -> Path:
+    """Return the analysis plots directory for a spinal cord sample (created on demand)."""
+    from lightsuite.config.loader import load_spinal_config
+
+    cfg = load_spinal_config(config_path)
+    if cfg.analysis.plots_dir is not None:
+        plots_dir = cfg.analysis.plots_dir.expanduser().resolve()
+    else:
+        plots_dir = cfg.sample.save_path.expanduser().resolve() / "plots"
+    plots_dir.mkdir(parents=True, exist_ok=True)
+    return plots_dir
+
+
+def resolve_cord_plot_output(config_path: str | Path, filename: str) -> Path:
+    """Resolve an output path under the sample plots directory."""
+    name = Path(filename).name
+    if not name:
+        msg = "Plot filename must not be empty."
+        raise ValueError(msg)
+    return resolve_cord_plots_dir(config_path) / name
+
+
 def load_cord_stats_csv(path: str | Path) -> pd.DataFrame:
     csv_path = Path(path).expanduser().resolve()
     if not csv_path.is_file():
@@ -705,6 +727,8 @@ __all__ = [
     "load_segment_order",
     "parse_plot_channel",
     "parse_plot_channels",
+    "resolve_cord_plot_output",
+    "resolve_cord_plots_dir",
     "resolve_cord_region_stats_from_config",
     "segment_centers_mm",
     "segment_grouped_totals_table",

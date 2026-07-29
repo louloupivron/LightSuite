@@ -7,6 +7,7 @@ from pathlib import Path
 import yaml
 
 from lightsuite.config.loader import load_spinal_config
+from lightsuite.analysis.viz.cord_io import resolve_cord_plot_output, resolve_cord_plots_dir
 
 
 def test_load_spinal_config(tmp_path: Path) -> None:
@@ -110,3 +111,54 @@ def test_spinal_config_channels_rejects_channelperfile(tmp_path: Path) -> None:
     config_path.write_text(yaml.dump(config_data), encoding="utf-8")
     with pytest.raises(ValidationError, match="planeperfile"):
         load_spinal_config(config_path)
+
+
+def _minimal_spinal_config(tmp_path: Path, *, analysis: dict | None = None) -> Path:
+    atlas = tmp_path / "atlas"
+    atlas.mkdir()
+    (atlas / "Template.tif").write_bytes(b"")
+    (atlas / "Annotation.tif").write_bytes(b"")
+    (atlas / "Segments.csv").write_text("Segment,Start,End\nC1,0,1\n", encoding="utf-8")
+    (atlas / "Atlas_Regions.csv").write_text("id,name,children_IDs\n1,gm,1\n", encoding="utf-8")
+
+    sample = tmp_path / "sample"
+    sample.mkdir()
+    save = tmp_path / "results"
+    save.mkdir()
+
+    config_data: dict = {
+        "sample": {
+            "name": "test_cord",
+            "source": {"path": str(sample), "tiff_type": "channelperfile"},
+            "scratch": str(tmp_path / "scratch"),
+            "save_path": str(save),
+            "voxel_um": [20.0, 20.0, 20.0],
+        },
+        "atlas": {"atlas_dir": str(atlas)},
+    }
+    if analysis is not None:
+        config_data["analysis"] = analysis
+    config_path = tmp_path / "spinal.yaml"
+    config_path.write_text(yaml.dump(config_data), encoding="utf-8")
+    return config_path
+
+
+def test_resolve_cord_plots_dir_default(tmp_path: Path) -> None:
+    config_path = _minimal_spinal_config(tmp_path)
+    plots_dir = resolve_cord_plots_dir(config_path)
+    assert plots_dir == (tmp_path / "results" / "plots").resolve()
+    assert plots_dir.is_dir()
+
+
+def test_resolve_cord_plots_dir_override(tmp_path: Path) -> None:
+    custom = tmp_path / "custom_plots"
+    config_path = _minimal_spinal_config(tmp_path, analysis={"plots_dir": str(custom)})
+    plots_dir = resolve_cord_plots_dir(config_path)
+    assert plots_dir == custom.resolve()
+    assert plots_dir.is_dir()
+
+
+def test_resolve_cord_plot_output(tmp_path: Path) -> None:
+    config_path = _minimal_spinal_config(tmp_path)
+    out = resolve_cord_plot_output(config_path, "structure.png")
+    assert out == (tmp_path / "results" / "plots" / "structure.png").resolve()

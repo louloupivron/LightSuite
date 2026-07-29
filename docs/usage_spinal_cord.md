@@ -127,45 +127,51 @@ atlas package; rows are labeled `left` / `right`, with optional `hemisphere_flip
 
 ### Cord plots
 
-After `region-stats`, generate matplotlib figures (requires the `gui` extra / matplotlib):
+After `region-stats`, generate matplotlib figures (requires the `gui` extra / matplotlib).
+
+Write outputs under the sample **data** folder (`sample.save_path/plots/`), not inside the
+LightSuite repository. Override with `analysis.plots_dir` in the YAML if needed.
 
 ```bash
+PLOTS=/media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP87F4/registered/plots
+mkdir -p "$PLOTS"
+
 uv run lightsuite analysis plot-cord-structure \
   -c examples/config/spinal_cord/OP87F4.yaml \
-  -o plots/op87_structure.png \
+  -o "$PLOTS/structure.png" \
   --channel 1 --metric median_intensity
 
 uv run lightsuite analysis plot-cord-division-profile \
   -c examples/config/spinal_cord/OP87F4.yaml \
-  -o plots/op87_division_profile.png \
+  -o "$PLOTS/division_profile.png" \
   --channel 1 --metric median_intensity
 
 uv run lightsuite analysis plot-cord-segment-bars \
   -c examples/config/spinal_cord/OP87F4.yaml \
-  -o plots/op87_segment_counts.png \
+  -o "$PLOTS/segment_counts.png" \
   --channel imaris_Coloc_pink_yellow --metric cell_count
 
 uv run lightsuite analysis plot-cord-segment-grouped-bars \
   -c examples/config/spinal_cord/OP87F4.yaml \
-  -o plots/op87_coloc_segment_counts.png
+  -o "$PLOTS/coloc_segment_counts.png"
 
 uv run lightsuite analysis plot-cord-structure-panel \
   -c examples/config/spinal_cord/OP87F4.yaml \
-  -o plots/op87_coloc_structure_panel.png
+  -o "$PLOTS/coloc_structure_panel.png"
 
 uv run lightsuite analysis plot-cord-top-regions \
   -c examples/config/spinal_cord/OP87F4.yaml \
-  -o plots/op87_top_regions.png \
+  -o "$PLOTS/top_regions.png" \
   --channel imaris_Coloc_pink_yellow --segment L5
 
 uv run lightsuite analysis cord-coloc-overlap \
   -c examples/config/spinal_cord/OP87F4.yaml \
-  -o plots/op87_coloc_overlap.png
+  -o "$PLOTS/coloc_overlap.png"
 
 # Rexed laminae: % GM occupied by signal intensity vs. cell density
 uv run lightsuite analysis plot-cord-laminae-pct-gm \
   -c examples/config/spinal_cord/OP87F4.yaml \
-  -o plots/OP87F4_laminae/laminae_pct_gm.png \
+  -o "$PLOTS/laminae_pct_gm.png" \
   --intensity-channel 1 \
   --cell-channel imaris_Coloc_pink_yellow
 
@@ -175,19 +181,19 @@ uv run lightsuite analysis plot-cord-laminae-pct-gm \
 # Rexed laminae × cord level (cervical / thoracic / lumbar means)
 uv run lightsuite analysis plot-cord-laminae-level-bars \
   -c examples/config/spinal_cord/OP87F4.yaml \
-  -o plots/OP87F4_laminae/laminae_level_bars.png \
+  -o "$PLOTS/laminae_level_bars.png" \
   --channel 1 --metric median_intensity
 
 # Dorsal funiculus subregions (dcs, cu, gr, psdc, df) × segment
 uv run lightsuite analysis plot-cord-df-subregion-heatmap \
   -c examples/config/spinal_cord/OP87F4.yaml \
-  -o plots/OP87F4_laminae/df_subregion_heatmap.png \
+  -o "$PLOTS/df_subregion_heatmap.png" \
   --channel 1 --metric median_intensity
 
 # Dorsal / ventral / central horn × segment
 uv run lightsuite analysis plot-cord-horn-heatmap \
   -c examples/config/spinal_cord/OP87F4.yaml \
-  -o plots/OP87F4_horn/horn_heatmap.png \
+  -o "$PLOTS/horn_heatmap.png" \
   --channel imaris_Coloc_pink_yellow --metric cell_count --hemisphere left
 ```
 
@@ -245,14 +251,16 @@ analysis:
 Then plot one side or both:
 
 ```bash
+PLOTS=/media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP87F4/registered/plots
+
 uv run lightsuite analysis plot-cord-structure \
   -c examples/config/spinal_cord/OP87F4.yaml \
-  -o plots/op87_structure_right.png \
+  -o "$PLOTS/structure_right.png" \
   --channel 1 --metric median_intensity --hemisphere right
 
 uv run lightsuite analysis plot-cord-structure-hemisphere-panel \
   -c examples/config/spinal_cord/OP87F4.yaml \
-  -o plots/op87_structure_lr_panel.png \
+  -o "$PLOTS/structure_lr_panel.png" \
   --channel 1 --metric median_intensity
 ```
 

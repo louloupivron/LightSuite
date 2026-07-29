@@ -621,23 +621,28 @@ Simple matplotlib plots read `region_stats.csv`, legacy `chanXX_intensities.csv`
 
 ### Per-subject plots
 
+Write figures under `sample.save_path/plots/` (not inside the LightSuite repository).
+
 ```bash
+PLOTS=/media/gbm/NVME2/ALICe-pipelines-data/JulieBuron/registered_allen/plots
+mkdir -p "$PLOTS"
+
 # From brain config (resolves volume_registered/region_stats.csv)
 uv run lightsuite analysis plot-division-bars \
-  -c examples/JulieBuron.yaml -o ./plots/julie_division_bars.png --channel 1
+  -c examples/config/mesoSPIM/JulieBuron.yaml -o "$PLOTS/division_bars.png" --channel 1
 
 uv run lightsuite analysis plot-lr-scatter \
-  -c examples/JulieBuron.yaml -o ./plots/julie_lr_scatter.png \
+  -c examples/config/mesoSPIM/JulieBuron.yaml -o "$PLOTS/lr_scatter.png" \
   --keep-division Isocortex --keep-division Thalamus
 
 uv run lightsuite analysis plot-top-regions \
-  -c examples/JulieBuron.yaml -o ./plots/julie_top_regions.png \
+  -c examples/config/mesoSPIM/JulieBuron.yaml -o "$PLOTS/top_regions.png" \
   --metric cell_count --top-n 15 --channel 1
 
 # Or pass a CSV directly
 uv run lightsuite analysis plot-division-bars \
   -i /data/M001/volume_registered/region_stats.csv \
-  -o division_bars.png --metric median_intensity --channel 1
+  -o /data/M001/plots/division_bars.png --metric median_intensity --channel 1
 ```
 
 | Command | Description |
