@@ -734,6 +734,11 @@ def analysis_plot_cord_segment_bars(
     channel: str = typer.Option("1", "--channel", help="Imaging channel or import label."),
     metric: str = typer.Option("cell_count", "--metric", help="Metric to plot."),
     title: str | None = typer.Option(None, "--title", help="Figure title."),
+    min_total: float = typer.Option(
+        0.0,
+        "--min-total",
+        help="Drop segments whose total is below this threshold.",
+    ),
     dpi: int = typer.Option(200, "--dpi", help="Figure DPI."),
 ) -> None:
     """Bar chart: total metric per segment (summed over finest regions)."""
@@ -755,6 +760,7 @@ def analysis_plot_cord_segment_bars(
         segment_order=segment_order or None,
         title=title,
         metric=metric,
+        min_total=min_total,
         output_path=out,
         dpi=dpi,
     )

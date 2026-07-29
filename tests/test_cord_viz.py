@@ -153,10 +153,17 @@ def test_division_profile_crops_empty_segments() -> None:
 
 
 def test_plot_cord_segment_bars_writes_png(tmp_path: Path) -> None:
+    from lightsuite.analysis.viz.cord_io import segment_level_class
+
+    assert segment_level_class("L5") == "L"
+    assert segment_level_class("Co2") == "Co"
     sub = filter_cord_stats(_cord_stats_rows(), channel=1, metric="cell_count", rollup_level="region")
     out = tmp_path / "segments.png"
     plot_cord_segment_bars(sub, segment_order=["C1", "C2"], output_path=out)
     assert out.is_file()
+    csv = pd.read_csv(out.with_suffix(".csv"))
+    assert "level" in csv.columns
+    assert "pct" in csv.columns
 
 
 def test_segment_grouped_totals_table_shape() -> None:

@@ -12,6 +12,7 @@ from lightsuite.analysis.viz.cord_io import (
     division_profile_table,
     filter_cord_stats,
     segment_grouped_totals_table,
+    segment_level_class,
     segment_totals_table,
     structure_heatmap_matrix,
     top_regions_table,
@@ -20,6 +21,23 @@ from lightsuite.analysis.viz.cord_io import (
 _DIVISION_COLORS = {
     "GM": "#2ca02c",
     "WM": "#9467bd",
+}
+
+_LEVEL_COLORS = {
+    "C": "#4e79a7",
+    "T": "#f28e2b",
+    "L": "#59a14f",
+    "S": "#e15759",
+    "Co": "#b07aa1",
+    "?": "#9c9c9c",
+}
+
+_LEVEL_LABELS = {
+    "C": "Cervical",
+    "T": "Thoracic",
+    "L": "Lumbar",
+    "S": "Sacral",
+    "Co": "Coccygeal",
 }
 
 _GROUPED_BAR_COLORS = [
@@ -248,31 +266,67 @@ def plot_cord_segment_bars(
     dpi: int = 200,
     show: bool = False,
     save_csv: bool = True,
+    min_total: float = 0.0,
+    annotate: bool = True,
 ) -> tuple[plt.Figure, pd.DataFrame]:
-    """Bar chart: total metric per rostrocaudal segment (summed over regions)."""
-    totals = segment_totals_table(df)
+    """Bar chart: total metric per rostrocaudal segment (summed over regions).
+
+    Bars are colored by cord level (C/T/L/S/Co) and optionally annotated with
+    the numeric total so a dominant segment (e.g. L5) does not hide smaller counts.
+    """
+    totals = segment_totals_table(df, min_total=min_total)
     if totals.empty:
         msg = "No segment totals to plot."
         raise ValueError(msg)
 
     if segment_order:
-        order = [s for s in segment_order if s in set(totals["segment"])]
-        order.extend(s for s in totals["segment"] if s not in order)
+        order = [s for s in segment_order if s in set(totals["segment"].astype(str))]
+        order.extend(s for s in totals["segment"].astype(str) if s not in order)
         totals = totals.set_index("segment").reindex(order).reset_index()
-    totals = totals.dropna(subset=["total"])
+    totals = totals.dropna(subset=["total"]).reset_index(drop=True)
+    totals["level"] = totals["segment"].map(segment_level_class)
+    totals["pct"] = 100.0 * totals["total"] / float(totals["total"].sum())
 
-    fig, ax = plt.subplots(figsize=(max(10, len(totals) * 0.35), 5))
+    colors = [_LEVEL_COLORS.get(level, _LEVEL_COLORS["?"]) for level in totals["level"]]
+    fig, ax = plt.subplots(figsize=(max(9.0, len(totals) * 0.55), 5.2))
     x = np.arange(len(totals))
-    ax.bar(x, totals["total"], color="#4C72B0", alpha=0.9)
+    bars = ax.bar(x, totals["total"], color=colors, alpha=0.92, edgecolor="white", linewidth=0.6)
     ax.set_xticks(x)
-    ax.set_xticklabels(totals["segment"], rotation=45, ha="right", fontsize=8)
+    ax.set_xticklabels(totals["segment"], rotation=0, fontsize=9)
     metric_label = _METRIC_LABELS.get(metric or "", metric or "value")
     ax.set_ylabel(metric_label)
     ax.set_xlabel("Segment")
-    ax.set_title(title or f"Total {metric_label.lower()} per segment", fontweight="bold")
+    grand = float(totals["total"].sum())
+    default_title = f"Total {metric_label.lower()} per segment (n={grand:g})"
+    ax.set_title(title or default_title, fontweight="bold")
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     ax.grid(axis="y", alpha=0.3, linestyle="--")
+    ymax = float(totals["total"].max()) if len(totals) else 1.0
+    ax.set_ylim(0, ymax * 1.14)
+
+    if annotate:
+        for bar, total, pct in zip(bars, totals["total"], totals["pct"], strict=True):
+            height = float(total)
+            label = f"{height:g}" if pct < 8 else f"{height:g}\n({pct:.0f}%)"
+            ax.text(
+                bar.get_x() + bar.get_width() / 2.0,
+                height + ymax * 0.015,
+                label,
+                ha="center",
+                va="bottom",
+                fontsize=7.5,
+                color="#333333",
+            )
+
+    present_levels = [level for level in ("C", "T", "L", "S", "Co") if level in set(totals["level"])]
+    handles = [
+        plt.Rectangle((0, 0), 1, 1, color=_LEVEL_COLORS[level], label=_LEVEL_LABELS[level])
+        for level in present_levels
+    ]
+    if handles:
+        ax.legend(handles=handles, loc="upper right", fontsize=8, framealpha=0.92, title="Level")
+
     fig.tight_layout()
 
     if output_path is not None:

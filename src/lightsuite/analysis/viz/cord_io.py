@@ -180,8 +180,12 @@ def division_profile_table(
     return work
 
 
-def segment_totals_table(df: pd.DataFrame) -> pd.DataFrame:
-    """Sum metric values across regions for each segment."""
+def segment_totals_table(
+    df: pd.DataFrame,
+    *,
+    min_total: float = 0.0,
+) -> pd.DataFrame:
+    """Sum metric values across regions for each segment (unsorted)."""
     work = df.copy()
     totals = (
         work.groupby("segment", sort=False)["value"]
@@ -189,7 +193,19 @@ def segment_totals_table(df: pd.DataFrame) -> pd.DataFrame:
         .reset_index()
         .rename(columns={"value": "total"})
     )
-    return totals.sort_values("total", ascending=False)
+    if min_total > 0:
+        totals = totals[totals["total"] >= float(min_total)].reset_index(drop=True)
+    return totals
+
+
+def segment_level_class(segment: str) -> str:
+    """Map a Fiederling segment label to C/T/L/S/Co."""
+    text = str(segment).strip()
+    if text.startswith("Co"):
+        return "Co"
+    if text[:1] in {"C", "T", "L", "S"}:
+        return text[:1]
+    return "?"
 
 
 def parse_plot_channels(value: str | None) -> list[str]:
@@ -302,6 +318,7 @@ __all__ = [
     "resolve_cord_region_stats_from_config",
     "segment_centers_mm",
     "segment_grouped_totals_table",
+    "segment_level_class",
     "segment_totals_table",
     "structure_heatmap_matrix",
     "top_regions_table",
