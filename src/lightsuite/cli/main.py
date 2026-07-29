@@ -1104,6 +1104,216 @@ def analysis_plot_cord_df_subregion_heatmap(
     typer.echo(f"Saved: {out.resolve()}")
 
 
+@analysis_app.command("plot-cord-segment-anatomy-slice")
+def analysis_plot_cord_segment_anatomy_slice(
+    output: str = typer.Option(..., "--output", "-o", help="Output PNG path."),
+    segments: str = typer.Option(
+        ...,
+        "--segments",
+        help="Comma-separated segment list (e.g. T10,T12,T13,L2,S1).",
+    ),
+    spinal_config: str = typer.Option(
+        ..., "--config", "-c", help="Spinal YAML (registered volumes + region_stats)."
+    ),
+    channel: str = typer.Option("1", "--channel", help="Imaging channel or import label."),
+    metric: str = typer.Option("median_intensity", "--metric", help="Metric to plot."),
+    rollup_level: str = typer.Option(
+        "region",
+        "--rollup-level",
+        help="Rollup level for region values (region, structure, division, horn).",
+    ),
+    hemisphere: str | None = typer.Option(
+        None,
+        "--hemisphere",
+        help="Optional left/right hemisegment mask (single-side mode only).",
+    ),
+    hemisphere_panel: bool = typer.Option(
+        False,
+        "--hemisphere-panel",
+        help="Left/right columns per segment (requires hemisphere_registered.tiff).",
+    ),
+    hemisphere_composite: bool = typer.Option(
+        False,
+        "--hemisphere-composite",
+        help="Both hemisegments on one cross-section per segment.",
+    ),
+    title: str | None = typer.Option(None, "--title", help="Figure title."),
+    dpi: int = typer.Option(200, "--dpi", help="Figure DPI."),
+    cmap: str = typer.Option("inferno", "--cmap", help="Matplotlib colormap."),
+    vmin: float | None = typer.Option(None, "--vmin", help="Shared color scale minimum."),
+    vmax: float | None = typer.Option(None, "--vmax", help="Shared color scale maximum."),
+    ncol_max: int = typer.Option(4, "--ncol-max", help="Maximum columns in the panel grid."),
+) -> None:
+    """Per-segment anatomical heatmaps from registered annotation slices."""
+    from lightsuite.analysis.viz.cord_io import load_cord_stats_csv, parse_plot_channel
+    from lightsuite.analysis.viz.cord_segment_anatomy import (
+        plot_cord_segment_anatomy_slice,
+        plot_cord_segment_anatomy_slice_hemisphere_composite,
+        plot_cord_segment_anatomy_slice_hemisphere_panel,
+    )
+    from lightsuite.config.loader import load_spinal_config
+    from lightsuite.export.cord_registered import discover_registered_cord_paths
+
+    if hemisphere_panel and hemisphere_composite:
+        raise typer.BadParameter("Use only one of --hemisphere-panel or --hemisphere-composite.")
+    if hemisphere and (hemisphere_panel or hemisphere_composite):
+        raise typer.BadParameter(
+            "--hemisphere is for single-side mode; use --hemisphere-panel or --hemisphere-composite instead."
+        )
+
+    segment_list = _parse_segment_list(segments)
+    if not segment_list:
+        raise typer.BadParameter("--segments must list at least one segment.")
+
+    stats_path, segments_csv, _segment_order = _resolve_cord_plot_context(
+        input_path=None, spinal_config=spinal_config
+    )
+    if segments_csv is None:
+        raise typer.BadParameter("Segments.csv not found from config atlas_dir.")
+
+    cfg = load_spinal_config(spinal_config)
+    reg_paths = discover_registered_cord_paths(cfg)
+    hem_path = reg_paths.volume_registered_dir / "hemisphere_registered.tiff"
+    if (hemisphere_panel or hemisphere_composite) and not hem_path.is_file():
+        raise typer.BadParameter(
+            f"Missing {hem_path}. Run region-stats with analysis.split_hemispheres: true."
+        )
+
+    out = Path(output).expanduser()
+    stats = load_cord_stats_csv(stats_path)
+    channel_parsed = parse_plot_channel(channel)
+    hemisphere_flip = bool(getattr(cfg.analysis, "hemisphere_flip", False))
+
+    if hemisphere_panel:
+        plot_cord_segment_anatomy_slice_hemisphere_panel(
+            stats,
+            segments=segment_list,
+            annotation_path=reg_paths.annotation_path,
+            segments_csv=segments_csv,
+            hemisphere_volume_path=hem_path,
+            channel=channel_parsed,
+            metric=metric,
+            rollup_level=rollup_level,
+            hemisphere_flip=hemisphere_flip,
+            title=title,
+            output_path=out,
+            dpi=dpi,
+            cmap=cmap,
+            vmin=vmin,
+            vmax=vmax,
+        )
+    elif hemisphere_composite:
+        plot_cord_segment_anatomy_slice_hemisphere_composite(
+            stats,
+            segments=segment_list,
+            annotation_path=reg_paths.annotation_path,
+            segments_csv=segments_csv,
+            hemisphere_volume_path=hem_path,
+            channel=channel_parsed,
+            metric=metric,
+            rollup_level=rollup_level,
+            hemisphere_flip=hemisphere_flip,
+            title=title,
+            output_path=out,
+            dpi=dpi,
+            cmap=cmap,
+            vmin=vmin,
+            vmax=vmax,
+            ncol_max=ncol_max,
+        )
+    else:
+        hemisphere_path = hem_path if hem_path.is_file() else None
+        plot_cord_segment_anatomy_slice(
+            stats,
+            segments=segment_list,
+            annotation_path=reg_paths.annotation_path,
+            segments_csv=segments_csv,
+            hemisphere_volume_path=hemisphere_path,
+            channel=channel_parsed,
+            metric=metric,
+            rollup_level=rollup_level,
+            hemisphere=hemisphere,
+            title=title,
+            output_path=out,
+            dpi=dpi,
+            cmap=cmap,
+            vmin=vmin,
+            vmax=vmax,
+            ncol_max=ncol_max,
+        )
+    typer.echo(f"Saved: {out.resolve()}")
+
+
+@analysis_app.command("plot-cord-segment-anatomy-bgh")
+def analysis_plot_cord_segment_anatomy_bgh(
+    output: str = typer.Option(..., "--output", "-o", help="Output PNG path."),
+    segments: str = typer.Option(
+        ...,
+        "--segments",
+        help="Comma-separated segment list (e.g. T10,T12,T13,L2,S1).",
+    ),
+    spinal_config: str = typer.Option(
+        ..., "--config", "-c", help="Spinal YAML (uses volume_registered/region_stats.csv)."
+    ),
+    channel: str = typer.Option("1", "--channel", help="Imaging channel or import label."),
+    metric: str = typer.Option("median_intensity", "--metric", help="Metric to plot."),
+    rollup_level: str = typer.Option(
+        "region",
+        "--rollup-level",
+        help="Rollup level for region values (region, structure, division, horn).",
+    ),
+    hemisphere: str | None = typer.Option(
+        None,
+        "--hemisphere",
+        help="Optional left or right hemisegment (brainrender mesh clipping).",
+    ),
+    title: str | None = typer.Option(None, "--title", help="Figure title."),
+    dpi: int = typer.Option(200, "--dpi", help="Figure DPI."),
+    cmap: str = typer.Option("inferno", "--cmap", help="Matplotlib colormap."),
+    vmin: float | None = typer.Option(None, "--vmin", help="Shared color scale minimum."),
+    vmax: float | None = typer.Option(None, "--vmax", help="Shared color scale maximum."),
+    ncol_max: int = typer.Option(3, "--ncol-max", help="Maximum columns in the panel grid."),
+    thickness_um: float = typer.Option(
+        400.0,
+        "--thickness-um",
+        help="Slice thickness passed to brainglobe-heatmap.",
+    ),
+) -> None:
+    """Per-segment anatomical heatmaps via brainglobe-heatmap (optional viz extra)."""
+    from lightsuite.analysis.viz.cord_io import load_cord_stats_csv, parse_plot_channel
+    from lightsuite.analysis.viz.cord_segment_anatomy import plot_cord_segment_anatomy_bgh
+
+    segment_list = _parse_segment_list(segments)
+    if not segment_list:
+        raise typer.BadParameter("--segments must list at least one segment.")
+
+    stats_path, segments_csv, _segment_order = _resolve_cord_plot_context(
+        input_path=None, spinal_config=spinal_config
+    )
+    if segments_csv is None:
+        raise typer.BadParameter("Segments.csv not found from config atlas_dir.")
+
+    out = Path(output).expanduser()
+    plot_cord_segment_anatomy_bgh(
+        load_cord_stats_csv(stats_path),
+        segments=segment_list,
+        segments_csv=segments_csv,
+        channel=parse_plot_channel(channel),
+        metric=metric,
+        rollup_level=rollup_level,
+        hemisphere=hemisphere,
+        title=title,
+        output_path=out,
+        dpi=dpi,
+        cmap=cmap,
+        vmin=vmin,
+        vmax=vmax,
+        ncol_max=ncol_max,
+        thickness_um=thickness_um,
+    )
+    typer.echo(f"Saved: {out.resolve()}")
+
+
 @analysis_app.command("cord-coloc-overlap")
 def analysis_cord_coloc_overlap(
     output: str = typer.Option(..., "--output", "-o", help="Output PNG path."),

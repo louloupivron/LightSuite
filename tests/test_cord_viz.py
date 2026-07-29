@@ -433,3 +433,180 @@ def test_plot_cord_df_subregion_heatmap_writes_png(tmp_path: Path) -> None:
     )
     assert out.is_file()
     assert out.with_suffix(".csv").is_file()
+
+
+def _tiny_annotation_volume() -> np.ndarray:
+    import numpy as np
+
+    volume = np.zeros((32, 32, 3), dtype=np.uint16)
+    volume[8:24, 8:24, 0] = 7
+    volume[8:24, 8:24, 1] = 8
+    volume[8:24, 8:24, 2] = 9
+    return volume
+
+
+def _segment_anatomy_stats_rows() -> pd.DataFrame:
+    rows = []
+    for segment, pidx, acr, val in [
+        ("C1", 7, "5Sp", 10.0),
+        ("C2", 8, "5SpL", 20.0),
+        ("C3", 9, "5SpM", 30.0),
+    ]:
+        rows.append(
+            {
+                "sample": "op87",
+                "channel": 1,
+                "atlas": "fiederling",
+                "parcellation_index": pidx,
+                "acronym": acr,
+                "name": acr,
+                "structure": "DH",
+                "division": "GM",
+                "segment": segment,
+                "rollup_level": "region",
+                "hemisphere": "whole",
+                "metric": "median_intensity",
+                "value": val,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _tiny_hemisphere_volume() -> np.ndarray:
+    import numpy as np
+
+    volume = np.zeros((32, 32, 3), dtype=np.uint8)
+    volume[:, :16, :] = 0
+    volume[:, 16:, :] = 255
+    return volume
+
+
+def _bilateral_segment_stats_rows() -> pd.DataFrame:
+    rows = []
+    for segment, pidx, acr, left_val, right_val in [
+        ("C1", 7, "5Sp", 10.0, 30.0),
+        ("C2", 8, "5SpL", 20.0, 40.0),
+    ]:
+        for hemisphere, value in (("left", left_val), ("right", right_val)):
+            rows.append(
+                {
+                    "sample": "op87",
+                    "channel": 1,
+                    "atlas": "fiederling",
+                    "parcellation_index": pidx,
+                    "acronym": acr,
+                    "name": acr,
+                    "structure": "DH",
+                    "division": "GM",
+                    "segment": segment,
+                    "rollup_level": "region",
+                    "hemisphere": hemisphere,
+                    "metric": "median_intensity",
+                    "value": value,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def test_plot_cord_segment_anatomy_slice_writes_png(tmp_path: Path) -> None:
+    import tifffile
+
+    from lightsuite.analysis.viz.cord_segment_anatomy import plot_cord_segment_anatomy_slice
+
+    ann_path = tmp_path / "annotation_registered.tiff"
+    tifffile.imwrite(ann_path, _tiny_annotation_volume())
+    segments_csv = tmp_path / "Segments.csv"
+    segments_csv.write_text("Segment,Ref_Section,Start,End\nC1,1,0,0\nC2,2,1,1\nC3,3,2,2\n")
+
+    out = tmp_path / "segment_slice.png"
+    plot_cord_segment_anatomy_slice(
+        _segment_anatomy_stats_rows(),
+        segments=["C1", "C2", "C3"],
+        annotation_path=ann_path,
+        segments_csv=segments_csv,
+        channel=1,
+        metric="median_intensity",
+        output_path=out,
+        draw_outlines=False,
+    )
+    assert out.is_file()
+
+
+def test_plot_cord_segment_anatomy_hemisphere_panel_writes_png(tmp_path: Path) -> None:
+    import tifffile
+
+    from lightsuite.analysis.viz.cord_segment_anatomy import (
+        plot_cord_segment_anatomy_slice_hemisphere_panel,
+    )
+
+    ann_path = tmp_path / "annotation_registered.tiff"
+    hem_path = tmp_path / "hemisphere_registered.tiff"
+    tifffile.imwrite(ann_path, _tiny_annotation_volume())
+    tifffile.imwrite(hem_path, _tiny_hemisphere_volume())
+    segments_csv = tmp_path / "Segments.csv"
+    segments_csv.write_text("Segment,Ref_Section,Start,End\nC1,1,0,0\nC2,2,1,1\n")
+
+    out = tmp_path / "segment_lr_panel.png"
+    plot_cord_segment_anatomy_slice_hemisphere_panel(
+        _bilateral_segment_stats_rows(),
+        segments=["C1", "C2"],
+        annotation_path=ann_path,
+        segments_csv=segments_csv,
+        hemisphere_volume_path=hem_path,
+        channel=1,
+        metric="median_intensity",
+        output_path=out,
+        draw_outlines=False,
+    )
+    assert out.is_file()
+
+
+def test_plot_cord_segment_anatomy_hemisphere_composite_writes_png(tmp_path: Path) -> None:
+    import tifffile
+
+    from lightsuite.analysis.viz.cord_segment_anatomy import (
+        plot_cord_segment_anatomy_slice_hemisphere_composite,
+    )
+
+    ann_path = tmp_path / "annotation_registered.tiff"
+    hem_path = tmp_path / "hemisphere_registered.tiff"
+    tifffile.imwrite(ann_path, _tiny_annotation_volume())
+    tifffile.imwrite(hem_path, _tiny_hemisphere_volume())
+    segments_csv = tmp_path / "Segments.csv"
+    segments_csv.write_text("Segment,Ref_Section,Start,End\nC1,1,0,0\nC2,2,1,1\n")
+
+    out = tmp_path / "segment_lr_composite.png"
+    plot_cord_segment_anatomy_slice_hemisphere_composite(
+        _bilateral_segment_stats_rows(),
+        segments=["C1", "C2"],
+        annotation_path=ann_path,
+        segments_csv=segments_csv,
+        hemisphere_volume_path=hem_path,
+        channel=1,
+        metric="median_intensity",
+        output_path=out,
+        draw_outlines=False,
+    )
+    assert out.is_file()
+
+
+@pytest.mark.skipif(
+    __import__("importlib").util.find_spec("brainglobe_heatmap") is None,
+    reason="brainglobe-heatmap not installed",
+)
+def test_plot_cord_segment_anatomy_bgh_writes_png(tmp_path: Path) -> None:
+    from lightsuite.analysis.viz.cord_segment_anatomy import plot_cord_segment_anatomy_bgh
+
+    segments_csv = tmp_path / "Segments.csv"
+    segments_csv.write_text("Segment,Ref_Section,Start,End\nC1,1,0,0\n")
+
+    out = tmp_path / "segment_bgh.png"
+    plot_cord_segment_anatomy_bgh(
+        _segment_anatomy_stats_rows(),
+        segments=["C1"],
+        segments_csv=segments_csv,
+        channel=1,
+        metric="median_intensity",
+        output_path=out,
+    )
+    assert out.is_file()
