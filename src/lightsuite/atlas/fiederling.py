@@ -19,6 +19,7 @@ class FiederlingAtlasPaths:
     atlas_dir: Path
     template_path: Path
     annotation_path: Path
+    hemisphere_path: Path
     segments_csv: Path
     regions_csv: Path
 
@@ -39,6 +40,7 @@ def resolve_fiederling_paths(atlas_dir: Path) -> FiederlingAtlasPaths:
         atlas_dir=root,
         template_path=root / "Template.tif",
         annotation_path=root / "Annotation.tif",
+        hemisphere_path=root / "Hemisphere_Annotation.tif",
         segments_csv=root / "Segments.csv",
         regions_csv=root / "Atlas_Regions.csv",
     )

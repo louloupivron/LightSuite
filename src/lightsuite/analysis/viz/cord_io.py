@@ -67,6 +67,7 @@ def filter_cord_stats(
     metric: str = "median_intensity",
     rollup_level: str = "structure",
     sample: str | None = None,
+    hemisphere: str | None = None,
 ) -> pd.DataFrame:
     """Filter a cord tidy table to one channel, metric, rollup level, and optional sample."""
     if metric not in CORD_METRICS:
@@ -79,6 +80,8 @@ def filter_cord_stats(
         work = work[work["channel"].map(_normalize_channel) == want]
     if sample is not None:
         work = work[work["sample"].astype(str) == str(sample)]
+    if hemisphere is not None:
+        work = work[work["hemisphere"].astype(str).str.lower() == str(hemisphere).lower()]
     level = str(rollup_level).strip().lower()
     work = work[work["rollup_level"].astype(str).str.lower() == level]
     if work.empty:
@@ -561,6 +564,7 @@ def df_subregion_table(
     metric: str = "median_intensity",
     segments: list[str] | None = None,
     include_parent_df: bool = True,
+    hemisphere: str | None = None,
 ) -> pd.DataFrame:
     """Long table for dorsal funiculus subregions at finest (region) rollup level."""
     work = filter_cord_stats(
@@ -568,6 +572,7 @@ def df_subregion_table(
         channel=channel,
         metric=metric,
         rollup_level="region",
+        hemisphere=hemisphere,
     )
     work = _filter_segments(work, segments)
     work = work[work["acronym"].astype(str).isin(DF_SUBREGION_ACRONYMS)].copy()
@@ -580,6 +585,7 @@ def df_subregion_table(
                 channel=channel,
                 metric=metric,
                 rollup_level="structure",
+                hemisphere=hemisphere,
             )
             parent = _filter_segments(parent, segments)
             parent = parent[parent["acronym"].astype(str) == "df"].copy()

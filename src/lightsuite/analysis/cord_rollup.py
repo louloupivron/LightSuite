@@ -8,7 +8,7 @@ from typing import Literal
 import numpy as np
 import pandas as pd
 
-from lightsuite.analysis.cord_counts import CORD_HEMISPHERE, CORD_TIDY_COLUMNS
+from lightsuite.analysis.cord_counts import CORD_TIDY_COLUMNS
 
 RollupLevel = Literal["division", "structure", "horn"]
 
@@ -190,7 +190,6 @@ def rollup_cord_tidy(
                 **group_info,
                 **meta,
                 "rollup_level": aggtype.lower(),
-                "hemisphere": CORD_HEMISPHERE,
             }
 
             metrics = [m for m in subset.columns if m != "cell_density"]

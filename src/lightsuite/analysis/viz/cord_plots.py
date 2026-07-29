@@ -1076,6 +1076,7 @@ def plot_cord_df_subregion_heatmap(
     segments: list[str] | None = None,
     segment_order: list[str] | None = None,
     include_parent_df: bool = True,
+    hemisphere: str | None = None,
     title: str | None = None,
     output_path: Path | None = None,
     dpi: int = 200,
@@ -1092,6 +1093,7 @@ def plot_cord_df_subregion_heatmap(
         metric=metric,
         segments=segments,
         include_parent_df=include_parent_df,
+        hemisphere=hemisphere,
     )
     row_order = [acr for acr in DF_SUBREGION_ORDER if acr in set(table["acronym"].astype(str))]
     if not row_order:
@@ -1162,6 +1164,116 @@ def plot_cord_df_subregion_heatmap(
     return fig, matrix
 
 
+def plot_cord_structure_hemisphere_panel(
+    stats_df: pd.DataFrame,
+    *,
+    channel: int | str,
+    metric: str = "median_intensity",
+    rollup_level: str = "structure",
+    segment_order: list[str] | None = None,
+    title: str | None = None,
+    output_path: Path | None = None,
+    dpi: int = 200,
+    show: bool = False,
+    save_csv: bool = True,
+    x_tick_stride: int | None = None,
+    crop_empty_segments: bool = True,
+    cmap: str = "inferno",
+) -> tuple[plt.Figure, dict[str, pd.DataFrame]]:
+    """Side-by-side structure heatmaps for left and right hemisegments."""
+    hemispheres = ("left", "right")
+    matrices: dict[str, pd.DataFrame] = {}
+    for hemi in hemispheres:
+        table = filter_cord_stats(
+            stats_df,
+            channel=channel,
+            metric=metric,
+            rollup_level=rollup_level,
+            hemisphere=hemi,
+        )
+        matrix, _row_labels, _col_labels = structure_heatmap_matrix(
+            table,
+            segment_order=segment_order,
+            crop_empty_segments=crop_empty_segments,
+        )
+        matrices[hemi] = matrix
+
+    row_order = structure_names_ordered(
+        stats_df,
+        channels=[channel],
+        metric=metric,
+        rollup_level=rollup_level,
+    )
+    aligned, row_labels, col_labels = align_structure_heatmap_matrices(
+        matrices,
+        segment_order=segment_order,
+        row_order=row_order or None,
+        drop_empty_rows=True,
+    )
+    if not aligned or not row_labels or not col_labels:
+        msg = "No left/right structure panel data to plot."
+        raise ValueError(msg)
+
+    arrays = [m.to_numpy(dtype=float) for m in aligned.values() if m.size]
+    stacked = np.concatenate([arr[np.isfinite(arr)] for arr in arrays if arr.size])
+    vmin, vmax = _percentile_limits(stacked)
+
+    fig_h = max(5.5, len(row_labels) * 0.38)
+    fig_w = max(10.0, len(hemispheres) * 5.0)
+    fig, axes = plt.subplots(1, 2, figsize=(fig_w, fig_h), squeeze=False, constrained_layout=True)
+    cmap_obj = plt.get_cmap(cmap).copy()
+    cmap_obj.set_bad("#d9d9d9")
+
+    if x_tick_stride is None:
+        stride = 1 if len(col_labels) <= 20 else 2
+    else:
+        stride = max(1, int(x_tick_stride))
+    tick_idx = list(range(0, len(col_labels), stride))
+
+    _HEMI_COLORS = {"left": "#4e79a7", "right": "#e15759"}
+    im = None
+    for idx, hemi in enumerate(hemispheres):
+        ax = axes[0, idx]
+        matrix = aligned[hemi]
+        data = np.ma.masked_invalid(matrix.to_numpy(dtype=float))
+        im = ax.imshow(data, aspect="auto", cmap=cmap_obj, origin="upper", vmin=vmin, vmax=vmax)
+        ax.set_title(
+            hemi.capitalize(),
+            fontsize=10,
+            fontweight="bold",
+            color=_HEMI_COLORS.get(hemi, "#333333"),
+        )
+        ax.set_yticks(range(len(row_labels)))
+        ax.set_yticklabels(row_labels, fontsize=7)
+        ax.set_xticks(tick_idx)
+        ax.set_xticklabels([col_labels[i] for i in tick_idx], rotation=0, fontsize=7)
+        if idx == 0:
+            ax.set_ylabel("Structure")
+        ax.set_xlabel("Segment")
+
+    metric_label = _METRIC_LABELS.get(metric, metric)
+    fig.suptitle(title or f"Structure × segment ({metric_label}) — left vs right", fontweight="bold")
+    if im is not None:
+        cbar = fig.colorbar(im, ax=axes.ravel().tolist(), fraction=0.02, pad=0.02)
+        cbar.set_label(metric_label, fontsize=9)
+    fig.text(0.99, 0.01, "grey = no data", ha="right", va="bottom", fontsize=8, color="#666666")
+
+    if output_path is not None:
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
+        if save_csv:
+            for hemi, matrix in aligned.items():
+                matrix.to_csv(output_path.with_name(f"{output_path.stem}_{hemi}.csv"))
+
+    if show:
+        plt.show()
+    elif output_path is not None:
+        plt.close(fig)
+
+    return fig, aligned
+
+
 __all__ = [
     "plot_cord_coloc_overlap",
     "plot_cord_df_subregion_heatmap",
@@ -1171,6 +1283,7 @@ __all__ = [
     "plot_cord_segment_bars",
     "plot_cord_segment_grouped_bars",
     "plot_cord_structure_heatmap",
+    "plot_cord_structure_hemisphere_panel",
     "plot_cord_structure_panel",
     "plot_cord_top_regions",
 ]

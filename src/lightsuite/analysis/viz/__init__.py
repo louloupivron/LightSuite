@@ -12,6 +12,7 @@ from lightsuite.analysis.viz.cord_plots import (
     plot_cord_segment_bars,
     plot_cord_segment_grouped_bars,
     plot_cord_structure_heatmap,
+    plot_cord_structure_hemisphere_panel,
     plot_cord_structure_panel,
     plot_cord_top_regions,
 )
@@ -31,6 +32,7 @@ __all__ = [
     "plot_cord_segment_bars",
     "plot_cord_segment_grouped_bars",
     "plot_cord_structure_heatmap",
+    "plot_cord_structure_hemisphere_panel",
     "plot_cord_structure_panel",
     "plot_cord_top_regions",
     "plot_division_bars",

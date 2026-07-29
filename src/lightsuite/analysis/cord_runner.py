@@ -18,6 +18,7 @@ from lightsuite.analysis.cord_counts import (
 )
 from lightsuite.analysis.cord_parcellation import parcellate_cord_intensities
 from lightsuite.analysis.cord_rollup import apply_cord_rollups
+from lightsuite.analysis.cord_hemisphere import cord_hemisphere_side_volume
 from lightsuite.analysis.counts import SAMPLE_POINTS_KEY
 from lightsuite.analysis.cord_ontology import load_cord_region_table
 from lightsuite.atlas.fiederling import resolve_fiederling_paths
@@ -26,6 +27,7 @@ from lightsuite.export.cord_registered import (
     REGISTERED_ANNOTATION_FILENAME,
     compute_registered_annotation_volume,
     discover_registered_cord_paths,
+    load_registered_hemisphere_volume,
     load_registered_stack,
     volume_registered_dir,
 )
@@ -113,6 +115,28 @@ def run_cord_region_stats(
 
     if "atlas" in spaces_set:
         annotation: np.ndarray | None = None
+        hemisphere_side: np.ndarray | None = None
+        split_hemispheres = bool(config.analysis.split_hemispheres)
+        keep_whole = bool(config.analysis.hemisphere_keep_whole)
+
+        def _ensure_annotation() -> np.ndarray:
+            nonlocal annotation, hemisphere_side
+            if annotation is None:
+                annotation = _load_atlas_annotation(config, register_path)
+            if split_hemispheres and hemisphere_side is None:
+                hemisphere_mask = load_registered_hemisphere_volume(config, register_path)
+                if hemisphere_mask.shape != annotation.shape:
+                    msg = (
+                        f"Hemisphere mask shape {hemisphere_mask.shape} != annotation {annotation.shape}. "
+                        "Re-run 'lightsuite spinal export'."
+                    )
+                    raise ValueError(msg)
+                hemisphere_side = cord_hemisphere_side_volume(
+                    hemisphere_mask,
+                    annotation,
+                    flip=bool(config.analysis.hemisphere_flip),
+                )
+            return annotation
 
         if do_intensities:
             try:
@@ -125,24 +149,27 @@ def run_cord_region_stats(
             else:
                 channel_paths = _resolve_intensity_channels(config, available=cord_paths.registered_channels)
                 if channel_paths:
-                    annotation = _load_atlas_annotation(config, register_path)
+                    ann = _ensure_annotation()
                     relative_to = config.analysis.relative_intensity_to
                     for ichan, ch_path in sorted(channel_paths.items()):
                         volume = load_registered_stack(ch_path)
-                        if volume.shape != annotation.shape:
+                        if volume.shape != ann.shape:
                             msg = (
-                                f"{ch_path.name} shape {volume.shape} != annotation {annotation.shape}. "
+                                f"{ch_path.name} shape {volume.shape} != annotation {ann.shape}. "
                                 "Re-run 'lightsuite spinal export'."
                             )
                             raise ValueError(msg)
                         tidy = parcellate_cord_intensities(
                             volume,
-                            annotation,
+                            ann,
                             segments,
                             sample=config.sample.name,
                             channel=ichan,
                             region_table=region_table,
                             relative_to=relative_to,
+                            hemisphere_side=hemisphere_side,
+                            split_hemispheres=split_hemispheres,
+                            keep_whole=keep_whole,
                         )
                         if len(tidy):
                             per_chan_path = register_path / f"chan{ichan:02d}_region_stats.csv"
@@ -151,8 +178,7 @@ def run_cord_region_stats(
                             intensity_channels.append(ichan)
 
         if do_counts:
-            if annotation is None:
-                annotation = _load_atlas_annotation(config, register_path)
+            ann = _ensure_annotation()
             for npz_path in sorted(register_path.glob("*_atlas_coords.npz")):
                 label = npz_path.stem.replace("_atlas_coords", "")
                 if wanted_labels is not None and label not in wanted_labels:
@@ -160,11 +186,14 @@ def run_cord_region_stats(
                 points = load_atlas_points(npz_path)
                 tidy = count_points_in_cord_regions(
                     points,
-                    annotation,
+                    ann,
                     segments,
                     sample=config.sample.name,
                     channel=label,
                     region_table=region_table,
+                    hemisphere_side=hemisphere_side,
+                    split_hemispheres=split_hemispheres,
+                    keep_whole=keep_whole,
                 )
                 if len(tidy):
                     per_label_path = register_path / f"{label}_region_counts.csv"

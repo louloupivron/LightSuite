@@ -10,6 +10,10 @@ import numpy as np
 import tifffile
 from rich.console import Console
 
+from lightsuite.analysis.cord_hemisphere import (
+    REGISTERED_HEMISPHERE_FILENAME,
+    load_fiederling_hemisphere_native,
+)
 from lightsuite.atlas.fiederling import load_fiederling_atlas_volumes
 from lightsuite.config.models import SpinalCordPipelineConfig
 from lightsuite.preprocess.cord_checkpoint import (
@@ -105,6 +109,44 @@ def _load_transform_params(save_path: Path) -> CordTransformParamsCheckpoint:
         msg = f"Missing {json_path}. Run 'lightsuite spinal register' first."
         raise FileNotFoundError(msg)
     return CordTransformParamsCheckpoint.load(json_path)
+
+
+def compute_registered_hemisphere_volume(config: SpinalCordPipelineConfig) -> np.ndarray:
+    """Return the Fiederling hemisphere mask in registered export layout (Y, X, Z)."""
+    return export_layout_from_native(
+        load_fiederling_hemisphere_native(config.atlas.atlas_dir).astype(np.uint8)
+    )
+
+
+def ensure_registered_hemisphere_volume(
+    config: SpinalCordPipelineConfig,
+    *,
+    paths: CordRegisteredInspectPaths | None = None,
+    force_recompute: bool = False,
+) -> Path:
+    """Write hemisphere_registered.tiff if missing (or when forced)."""
+    paths = paths or discover_registered_cord_paths(config)
+    out_path = paths.volume_registered_dir / REGISTERED_HEMISPHERE_FILENAME
+    if out_path.is_file() and not force_recompute:
+        return out_path
+
+    console.print("Computing registered hemisphere volume...")
+    hemisphere = compute_registered_hemisphere_volume(config)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    tifffile.imwrite(out_path, hemisphere, imagej=True)
+    console.print(f"Wrote {out_path}")
+    return out_path
+
+
+def load_registered_hemisphere_volume(
+    config: SpinalCordPipelineConfig,
+    register_path: Path,
+) -> np.ndarray:
+    """Load or create the registered hemisphere mask aligned to annotation_registered.tiff."""
+    out_path = register_path / REGISTERED_HEMISPHERE_FILENAME
+    if not out_path.is_file():
+        ensure_registered_hemisphere_volume(config)
+    return load_registered_stack(out_path).astype(np.uint8, copy=False)
 
 
 def compute_registered_annotation_volume(

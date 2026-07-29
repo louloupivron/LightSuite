@@ -120,7 +120,10 @@ Rolled rows are appended to `region_stats.csv` with `rollup_level` =
 `region_stats_division.csv`, `region_stats_structure.csv`.
 
 Each row includes `segment` (e.g. `C5`, `L3`), `parcellation_index`, region name/acronym,
-and `hemisphere` = `whole` (cord has no left/right split).
+and `hemisphere` = `whole` (cord has no left/right split) unless
+`analysis.split_hemispheres: true` is set (uses `Hemisphere_Annotation.tif` from the
+atlas package; rows are labeled `left` / `right`, with optional `hemisphere_flip` and
+`hemisphere_keep_whole`).
 
 ### Cord plots
 
@@ -218,6 +221,29 @@ level (default cervical / thoracic / lumbar). Override levels with
 (`dcs`, `cu`, `gr`, `psdc`) at finest `region` rollup, plus the combined
 `df` row from `structure` rollup. Disable the parent row with
 `--no-include-parent-df`.
+
+Enable left/right hemisegment stats in the YAML before running `region-stats`:
+
+```yaml
+analysis:
+  split_hemispheres: true
+  hemisphere_flip: false          # swap 0/255 assignment if needed
+  hemisphere_keep_whole: false    # also emit whole-cord rows
+```
+
+Then plot one side or both:
+
+```bash
+uv run lightsuite analysis plot-cord-structure \
+  -c examples/config/spinal_cord/OP87F4.yaml \
+  -o plots/op87_structure_right.png \
+  --channel 1 --metric median_intensity --hemisphere right
+
+uv run lightsuite analysis plot-cord-structure-hemisphere-panel \
+  -c examples/config/spinal_cord/OP87F4.yaml \
+  -o plots/op87_structure_lr_panel.png \
+  --channel 1 --metric median_intensity
+```
 
 Re-run `lightsuite spinal region-stats` after upgrading to pick up `volume_mm3` on
 point counts (enables structure/division `cell_density` rollups).

@@ -14,6 +14,7 @@ from lightsuite.analysis.cord_counts import (
     CORD_TIDY_COLUMNS,
     assign_segment_names,
 )
+from lightsuite.analysis.cord_hemisphere import hemisphere_label_from_side
 from lightsuite.analysis.cord_ontology import CordRegionTable
 
 _META_COLUMNS = ["acronym", "name", "structure", "division"]
@@ -43,8 +44,10 @@ def _flatten_region_segment_values(
     registered_volume: np.ndarray,
     annotation: np.ndarray,
     segments: pd.DataFrame,
+    *,
+    hemisphere_side: np.ndarray | None = None,
 ) -> pd.DataFrame:
-    """Return long table of (region_id, segment, value) for in-atlas voxels."""
+    """Return long table of (region_id, segment, value[, side]) for in-atlas voxels."""
     av = np.asarray(annotation)
     values = np.asarray(registered_volume)
     if av.shape != values.shape:
@@ -52,6 +55,9 @@ def _flatten_region_segment_values(
         raise ValueError(msg)
     if av.ndim != 3:
         msg = f"Expected 3D volumes, got shape {av.shape}"
+        raise ValueError(msg)
+    if hemisphere_side is not None and np.asarray(hemisphere_side).shape != av.shape:
+        msg = f"Hemisphere side shape {hemisphere_side.shape} != annotation {av.shape}"
         raise ValueError(msg)
 
     _, _, nz = av.shape
@@ -67,13 +73,17 @@ def _flatten_region_segment_values(
     if not np.any(valid):
         return pd.DataFrame(columns=["parcellation_index", "segment", "value"])
 
-    return pd.DataFrame(
+    out = pd.DataFrame(
         {
             "parcellation_index": flat_av[valid].astype(np.int64),
             "segment": flat_seg[valid].astype(str),
             "value": flat_vals[valid],
         }
     )
+    if hemisphere_side is not None:
+        sides = np.asarray(hemisphere_side, dtype=np.int8).ravel()[valid]
+        out["side"] = sides
+    return out
 
 
 def _background_median_by_segment(long: pd.DataFrame) -> pd.Series:
@@ -81,6 +91,41 @@ def _background_median_by_segment(long: pd.DataFrame) -> pd.Series:
     if bg.empty:
         return pd.Series(dtype=np.float64)
     return bg.groupby("segment", sort=False)["value"].median()
+
+
+def _aggregate_intensity_groups(
+    long: pd.DataFrame,
+    *,
+    voxel_mm3: float,
+    rel_mode: str,
+    background_source: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    """Aggregate voxel table to one row per region × segment × hemisphere."""
+    if long.empty:
+        return pd.DataFrame()
+
+    grouped = (
+        long.groupby(["parcellation_index", "segment", "hemisphere"], sort=True)
+        .agg(
+            median_intensity=("value", "median"),
+            std=("value", lambda s: float(np.std(s.to_numpy(dtype=np.float64), ddof=0)) if len(s) > 1 else 0.0),
+            n_voxels=("value", "count"),
+        )
+        .reset_index()
+    )
+    grouped["volume_mm3"] = grouped["n_voxels"].astype(np.float64) * voxel_mm3
+
+    if rel_mode == "background":
+        bg_medians = _background_median_by_segment(background_source if background_source is not None else long)
+        if not bg_medians.empty:
+            grouped["relative_median_intensity"] = grouped.apply(
+                lambda row: _relative_to_background(
+                    float(row["median_intensity"]),
+                    float(bg_medians.get(row["segment"], np.nan)),
+                ),
+                axis=1,
+            )
+    return grouped
 
 
 def parcellate_cord_intensities(
@@ -95,51 +140,72 @@ def parcellate_cord_intensities(
     atlas_id: str = CORD_ATLAS_ID,
     relative_to: str = "none",
     drop_background_regions: bool = True,
+    hemisphere_side: np.ndarray | None = None,
+    split_hemispheres: bool = False,
+    keep_whole: bool = False,
 ) -> pd.DataFrame:
     """Compute median intensity, std, and volume per Fiederling region and segment."""
-    long = _flatten_region_segment_values(registered_volume, annotation, segments)
+    long = _flatten_region_segment_values(
+        registered_volume,
+        annotation,
+        segments,
+        hemisphere_side=hemisphere_side if split_hemispheres else None,
+    )
     if long.empty:
         return pd.DataFrame(columns=CORD_TIDY_COLUMNS)
 
-    grouped = (
-        long.groupby(["parcellation_index", "segment"], sort=True)
-        .agg(
-            median_intensity=("value", "median"),
-            std=("value", lambda s: float(np.std(s.to_numpy(dtype=np.float64), ddof=0)) if len(s) > 1 else 0.0),
-            n_voxels=("value", "count"),
-        )
-        .reset_index()
-    )
-    if drop_background_regions:
-        grouped = grouped[grouped["parcellation_index"] > 0].copy()
-    if grouped.empty:
-        return pd.DataFrame(columns=CORD_TIDY_COLUMNS)
-
-    voxel_mm3 = _voxel_mm3_yxz(voxel_um_yxz)
-    grouped["volume_mm3"] = grouped["n_voxels"].astype(np.float64) * voxel_mm3
-
     rel_mode = str(relative_to).strip().lower()
-    if rel_mode == "background":
-        bg_medians = _background_median_by_segment(long)
-        if not bg_medians.empty:
-            grouped["relative_median_intensity"] = grouped.apply(
-                lambda row: _relative_to_background(
-                    float(row["median_intensity"]),
-                    float(bg_medians.get(row["segment"], np.nan)),
-                ),
-                axis=1,
+    voxel_mm3 = _voxel_mm3_yxz(voxel_um_yxz)
+    frames: list[pd.DataFrame] = []
+
+    if split_hemispheres:
+        if hemisphere_side is None:
+            msg = "hemisphere_side is required when split_hemispheres=True."
+            raise ValueError(msg)
+        split_long = long.copy()
+        split_long["hemisphere"] = split_long["side"].map(hemisphere_label_from_side)
+        split_long = split_long[split_long["hemisphere"].notna()].drop(columns="side")
+        if drop_background_regions:
+            split_long = split_long[split_long["parcellation_index"] > 0].copy()
+        if not split_long.empty:
+            frames.append(
+                _aggregate_intensity_groups(
+                    split_long,
+                    voxel_mm3=voxel_mm3,
+                    rel_mode=rel_mode,
+                    background_source=long,
+                )
             )
 
-    records: list[dict] = []
+    if not split_hemispheres or keep_whole:
+        whole_long = long.drop(columns="side", errors="ignore").copy()
+        whole_long["hemisphere"] = CORD_HEMISPHERE
+        if drop_background_regions:
+            whole_long = whole_long[whole_long["parcellation_index"] > 0].copy()
+        if not whole_long.empty:
+            frames.append(
+                _aggregate_intensity_groups(
+                    whole_long,
+                    voxel_mm3=voxel_mm3,
+                    rel_mode=rel_mode,
+                    background_source=long,
+                )
+            )
+
+    if not frames:
+        return pd.DataFrame(columns=CORD_TIDY_COLUMNS)
+
+    grouped = pd.concat(frames, ignore_index=True)
     metric_columns = ["median_intensity", "std", "volume_mm3"]
     if rel_mode == "background" and "relative_median_intensity" in grouped.columns:
         metric_columns.append("relative_median_intensity")
 
+    records: list[dict] = []
     for row in grouped.itertuples(index=False):
         base = {
             "parcellation_index": int(row.parcellation_index),
             "segment": str(row.segment),
-            "hemisphere": CORD_HEMISPHERE,
+            "hemisphere": str(row.hemisphere),
         }
         for metric in metric_columns:
             value = float(getattr(row, metric))

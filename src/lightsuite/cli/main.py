@@ -641,6 +641,11 @@ def analysis_plot_cord_structure(
     ),
     channel: str = typer.Option("1", "--channel", help="Imaging channel or import label."),
     metric: str = typer.Option("median_intensity", "--metric", help="Metric to plot."),
+    hemisphere: str | None = typer.Option(
+        None,
+        "--hemisphere",
+        help="Filter to left or right hemisegment (requires split_hemispheres in region-stats).",
+    ),
     title: str | None = typer.Option(None, "--title", help="Figure title."),
     dpi: int = typer.Option(200, "--dpi", help="Figure DPI."),
     crop_empty_segments: bool = typer.Option(
@@ -661,6 +666,7 @@ def analysis_plot_cord_structure(
         channel=parse_plot_channel(channel),
         metric=metric,
         rollup_level="structure",
+        hemisphere=hemisphere,
     )
     out = Path(output).expanduser()
     plot_cord_structure_heatmap(
@@ -668,6 +674,46 @@ def analysis_plot_cord_structure(
         segment_order=segment_order or None,
         title=title,
         metric=metric,
+        output_path=out,
+        dpi=dpi,
+        crop_empty_segments=crop_empty_segments,
+    )
+    typer.echo(f"Saved: {out.resolve()}")
+
+
+@analysis_app.command("plot-cord-structure-hemisphere-panel")
+def analysis_plot_cord_structure_hemisphere_panel(
+    output: str = typer.Option(..., "--output", "-o", help="Output PNG path."),
+    input_path: str | None = typer.Option(None, "--input", "-i", help="Cord region_stats.csv."),
+    spinal_config: str | None = typer.Option(
+        None, "--config", "-c", help="Spinal YAML; uses volume_registered/region_stats.csv."
+    ),
+    channel: str = typer.Option("1", "--channel", help="Imaging channel or import label."),
+    metric: str = typer.Option("median_intensity", "--metric", help="Metric to plot."),
+    rollup_level: str = typer.Option("structure", "--rollup-level", help="Rollup level."),
+    title: str | None = typer.Option(None, "--title", help="Figure title."),
+    dpi: int = typer.Option(200, "--dpi", help="Figure DPI."),
+    crop_empty_segments: bool = typer.Option(
+        True,
+        "--crop-empty-segments/--no-crop-empty-segments",
+        help="Drop leading/trailing segments with no data (default: on).",
+    ),
+) -> None:
+    """Side-by-side structure heatmaps for left and right hemisegments."""
+    from lightsuite.analysis.viz.cord_io import load_cord_stats_csv, parse_plot_channel
+    from lightsuite.analysis.viz.cord_plots import plot_cord_structure_hemisphere_panel
+
+    stats_path, _segments_csv, segment_order = _resolve_cord_plot_context(
+        input_path=input_path, spinal_config=spinal_config
+    )
+    out = Path(output).expanduser()
+    plot_cord_structure_hemisphere_panel(
+        load_cord_stats_csv(stats_path),
+        channel=parse_plot_channel(channel),
+        metric=metric,
+        rollup_level=rollup_level,
+        segment_order=segment_order or None,
+        title=title,
         output_path=out,
         dpi=dpi,
         crop_empty_segments=crop_empty_segments,
@@ -1021,6 +1067,11 @@ def analysis_plot_cord_df_subregion_heatmap(
         "--include-parent-df/--no-include-parent-df",
         help="Include combined dorsal funiculus (df) row from structure rollup.",
     ),
+    hemisphere: str | None = typer.Option(
+        None,
+        "--hemisphere",
+        help="Filter to left or right hemisegment.",
+    ),
     title: str | None = typer.Option(None, "--title", help="Figure title."),
     dpi: int = typer.Option(200, "--dpi", help="Figure DPI."),
     crop_empty_segments: bool = typer.Option(
@@ -1044,6 +1095,7 @@ def analysis_plot_cord_df_subregion_heatmap(
         segments=_parse_segment_list(segments),
         segment_order=segment_order or None,
         include_parent_df=include_parent_df,
+        hemisphere=hemisphere,
         title=title,
         output_path=out,
         dpi=dpi,
