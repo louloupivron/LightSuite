@@ -350,7 +350,36 @@ def _legend_label(channel: str) -> str:
         if text.lower().startswith(prefix):
             text = text[len(prefix) :]
             break
-    return text.replace("_", " ")
+    parts = [part for part in text.replace("_", " ").split() if part]
+    pretty: list[str] = []
+    for part in parts:
+        low = part.lower()
+        if low == "coloc":
+            pretty.append("Coloc")
+        else:
+            pretty.append(part.capitalize())
+    return " ".join(pretty)
+
+
+def _color_for_import_label(channel: str, fallback_idx: int) -> str:
+    """Pick a color from coloc color-name tokens when present."""
+    low = str(channel).lower().replace("-", " ").replace("_", " ")
+    has_pink = "pink" in low
+    has_cyan = "cyan" in low or "blue" in low
+    has_yellow = "yellow" in low or "green" in low
+    if has_pink and has_yellow:
+        return "#e15759"
+    if has_cyan and has_pink:
+        return "#4e79a7"
+    if has_cyan and has_yellow:
+        return "#edc949"
+    if has_pink:
+        return "#e15759"
+    if has_cyan:
+        return "#4e79a7"
+    if has_yellow:
+        return "#edc949"
+    return _GROUPED_BAR_COLORS[fallback_idx % len(_GROUPED_BAR_COLORS)]
 
 
 def plot_cord_segment_grouped_bars(
@@ -365,8 +394,14 @@ def plot_cord_segment_grouped_bars(
     show: bool = False,
     save_csv: bool = True,
     min_total: float = 0.0,
+    show_composition: bool = True,
 ) -> tuple[plt.Figure, pd.DataFrame]:
-    """Grouped bar chart: compare import labels per rostrocaudal segment."""
+    """Grouped bar chart: compare import labels per rostrocaudal segment.
+
+    Uses semantic colors from label color-names when possible. Optionally adds a
+    second panel with 100% stacked bars so relative composition stays readable
+    when one segment (e.g. L5) dominates absolute counts.
+    """
     pivot = segment_grouped_totals_table(
         df,
         channels=channels,
@@ -384,32 +419,102 @@ def plot_cord_segment_grouped_bars(
     n_labels = len(label_cols)
     bar_width = 0.8 / max(n_labels, 1)
     x = np.arange(n_segments)
+    colors = [_color_for_import_label(channel, idx) for idx, channel in enumerate(label_cols)]
+    pretty = [_legend_label(channel) for channel in label_cols]
+    totals_per_label = {channel: float(pivot[channel].sum()) for channel in label_cols}
 
-    fig_w = max(10.0, n_segments * 0.35)
-    fig, ax = plt.subplots(figsize=(fig_w, 5))
+    fig_w = max(10.0, n_segments * 0.7)
+    if show_composition:
+        fig, (ax, ax_comp) = plt.subplots(
+            2,
+            1,
+            figsize=(fig_w, 7.2),
+            sharex=True,
+            gridspec_kw={"height_ratios": [2.2, 1.2], "hspace": 0.12},
+            constrained_layout=True,
+        )
+    else:
+        fig, ax = plt.subplots(figsize=(fig_w, 5.0))
+        ax_comp = None
+
     for idx, channel in enumerate(label_cols):
         offset = (idx - (n_labels - 1) / 2.0) * bar_width
-        color = _GROUPED_BAR_COLORS[idx % len(_GROUPED_BAR_COLORS)]
+        label = f"{pretty[idx]} (n={totals_per_label[channel]:g})"
         ax.bar(
             x + offset,
             pivot[channel],
             width=bar_width,
-            label=_legend_label(channel),
-            color=color,
-            alpha=0.9,
+            label=label,
+            color=colors[idx],
+            alpha=0.92,
+            edgecolor="white",
+            linewidth=0.4,
         )
 
-    ax.set_xticks(x)
-    ax.set_xticklabels(pivot["segment"], rotation=45, ha="right", fontsize=8)
     metric_label = _METRIC_LABELS.get(metric or "", metric or "value")
     ax.set_ylabel(metric_label)
-    ax.set_xlabel("Segment")
     ax.set_title(title or f"Colocalization {metric_label.lower()} per segment", fontweight="bold")
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     ax.grid(axis="y", alpha=0.3, linestyle="--")
-    ax.legend(loc="upper right", fontsize=8, framealpha=0.9)
-    fig.tight_layout()
+    ax.legend(loc="upper right", fontsize=8, framealpha=0.92)
+    ymax = float(pivot[label_cols].to_numpy(dtype=float).max()) if n_segments else 1.0
+    ax.set_ylim(0, ymax * 1.12)
+
+    # Annotate the tallest bar in each segment group.
+    for seg_i, (_, row) in enumerate(pivot.iterrows()):
+        vals = [float(row[channel]) for channel in label_cols]
+        peak = max(vals) if vals else 0.0
+        if peak <= 0:
+            continue
+        peak_idx = int(np.argmax(vals))
+        offset = (peak_idx - (n_labels - 1) / 2.0) * bar_width
+        ax.text(
+            float(seg_i) + offset,
+            peak + ymax * 0.015,
+            f"{peak:g}",
+            ha="center",
+            va="bottom",
+            fontsize=7,
+            color="#333333",
+        )
+
+    if ax_comp is not None:
+        bottoms = np.zeros(n_segments, dtype=float)
+        row_sums = pivot[label_cols].sum(axis=1).to_numpy(dtype=float)
+        row_sums = np.where(row_sums > 0, row_sums, 1.0)
+        for idx, channel in enumerate(label_cols):
+            shares = pivot[channel].to_numpy(dtype=float) / row_sums
+            ax_comp.bar(
+                x,
+                shares,
+                bottom=bottoms,
+                width=0.72,
+                color=colors[idx],
+                alpha=0.92,
+                edgecolor="white",
+                linewidth=0.4,
+                label=pretty[idx],
+            )
+            bottoms = bottoms + shares
+        ax_comp.set_ylim(0, 1.0)
+        ax_comp.set_ylabel("Share of segment")
+        ax_comp.set_yticks([0, 0.25, 0.5, 0.75, 1.0])
+        ax_comp.set_yticklabels(["0%", "25%", "50%", "75%", "100%"], fontsize=8)
+        ax_comp.spines["top"].set_visible(False)
+        ax_comp.spines["right"].set_visible(False)
+        ax_comp.grid(axis="y", alpha=0.25, linestyle="--")
+        ax_comp.set_xlabel("Segment")
+        ax.tick_params(labelbottom=False)
+        ax_set = ax_comp
+    else:
+        ax.set_xlabel("Segment")
+        ax_set = ax
+
+    ax_set.set_xticks(x)
+    ax_set.set_xticklabels(pivot["segment"].tolist(), rotation=0, fontsize=9)
+    if ax_comp is None:
+        fig.tight_layout()
 
     if output_path is not None:
         output_path = Path(output_path)

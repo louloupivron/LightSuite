@@ -786,6 +786,11 @@ def analysis_plot_cord_segment_grouped_bars(
         "--min-total",
         help="Drop segments whose summed metric across labels is below this threshold.",
     ),
+    show_composition: bool = typer.Option(
+        True,
+        "--composition/--no-composition",
+        help="Add a 100% stacked composition panel under the counts (default: on).",
+    ),
     dpi: int = typer.Option(200, "--dpi", help="Figure DPI."),
 ) -> None:
     """Grouped bar chart: compare coloc import labels per rostrocaudal segment."""
@@ -815,6 +820,7 @@ def analysis_plot_cord_segment_grouped_bars(
         title=title,
         metric=metric,
         min_total=min_total,
+        show_composition=show_composition,
         output_path=out,
         dpi=dpi,
     )
