@@ -367,6 +367,8 @@ def segment_grouped_totals_table(
     return pivot.reset_index()
 
 
+
+
 def top_regions_table(
     df: pd.DataFrame,
     *,
@@ -401,11 +403,13 @@ def top_regions_table(
 
 __all__ = [
     "CORD_METRICS",
+    "align_structure_heatmap_matrices",
     "division_profile_table",
     "filter_cord_stats",
     "filter_cord_stats_multi",
     "load_cord_stats_csv",
     "load_segment_order",
+    "parse_plot_channel",
     "parse_plot_channels",
     "resolve_cord_region_stats_from_config",
     "segment_centers_mm",
@@ -414,7 +418,5 @@ __all__ = [
     "segment_totals_table",
     "structure_heatmap_matrix",
     "structure_names_ordered",
-    "align_structure_heatmap_matrices",
     "top_regions_table",
-    "parse_plot_channel",
 ]
