@@ -77,3 +77,49 @@ def test_load_cord_import_inspect_volumes_headless(tmp_path: Path) -> None:
     assert volumes.annotation.shape == (8, 8, 4)
     assert "cells" in volumes.point_layers
     assert volumes.point_layers["cells"].shape == (2, 3)
+
+
+def test_discover_cord_import_inspect_paths_sample(tmp_path: Path) -> None:
+    import json
+
+    from lightsuite.export.cord_sample_space import (
+        ANNOTATION_IN_SAMPLE,
+        MANIFEST_NAME,
+        TEMPLATE_IN_SAMPLE,
+    )
+    from lightsuite.io.tiff_write import save_registration_volume
+
+    config_path = _write_minimal_config(tmp_path)
+    cfg = load_spinal_config(config_path)
+    save = tmp_path / "registered"
+    out = save / "volume_registered" / "sample_space"
+    out.mkdir(parents=True)
+    shape = (8, 8, 4)
+    save_registration_volume(np.zeros(shape, dtype=np.uint16), out / "chan_01_sample_straight_20um.tif")
+    save_registration_volume(np.ones(shape, dtype=np.uint16), out / ANNOTATION_IN_SAMPLE)
+    save_registration_volume(np.full(shape, 2, dtype=np.uint16), out / TEMPLATE_IN_SAMPLE)
+    (out / MANIFEST_NAME).write_text(
+        json.dumps(
+            {
+                "channel_paths": {"1": str(out / "chan_01_sample_straight_20um.tif")},
+                "annotation_path": str(out / ANNOTATION_IN_SAMPLE),
+                "template_path": str(out / TEMPLATE_IN_SAMPLE),
+            }
+        ),
+        encoding="utf-8",
+    )
+    np.savez_compressed(
+        save / "volume_registered" / "cells_sample_coords.npz",
+        regptcoords=np.array([[1.0, 1.0, 1.0], [2.0, 2.0, 2.0]]),
+    )
+
+    paths = discover_cord_import_inspect_paths(cfg, space="sample")
+    assert paths.space == "sample"
+    assert paths.sample_space_dir is not None
+    assert "cells" in paths.point_npz_paths
+    assert 1 in paths.registered_channels
+
+    volumes = load_cord_import_inspect_volumes(cfg, paths=paths, space="sample")
+    assert volumes.annotation.shape == shape
+    assert volumes.registered_channels[1].shape == shape
+    assert volumes.point_layers["cells"].shape == (2, 3)

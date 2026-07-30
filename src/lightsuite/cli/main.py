@@ -1987,6 +1987,11 @@ def spinal_region_stats(
 @spinal_app.command("inspect-imports")
 def spinal_inspect_imports(
     config: str = typer.Option(..., "--config", "-c", help="Spinal cord pipeline YAML config."),
+    space: str = typer.Option(
+        "atlas",
+        "--space",
+        help="Inspect space: atlas (Fiederling export grid) or sample (straightened 20 µm grid).",
+    ),
     headless: bool = typer.Option(
         False,
         "--headless",
@@ -1995,20 +2000,26 @@ def spinal_inspect_imports(
     recompute_annotation: bool = typer.Option(
         False,
         "--recompute-annotation",
-        help="Rebuild annotation_registered.tiff from transform_params.json.",
+        help="Rebuild annotation_registered.tiff from transform_params.json (atlas space only).",
     ),
 ) -> None:
-    """Napari QC: registered channels, atlas, and imported points in atlas space."""
+    """Napari QC: registered channels, atlas, and imported points."""
+    from lightsuite.cli.spaces import parse_view_space_option
     from lightsuite.config.loader import load_spinal_config
     from lightsuite.gui.inspect_cord_imports import run_cord_inspect_imports
 
     cfg = load_spinal_config(config)
+    inspect_space = parse_view_space_option(space)
     paths = run_cord_inspect_imports(
         cfg,
+        space=inspect_space,  # type: ignore[arg-type]
         headless=headless,
         recompute_annotation=recompute_annotation,
     )
-    typer.echo(f"volume_registered: {paths.volume_registered_dir}")
+    if paths.sample_space_dir is not None:
+        typer.echo(f"sample_space: {paths.sample_space_dir}")
+    else:
+        typer.echo(f"volume_registered: {paths.volume_registered_dir}")
     if paths.registered_channels:
         typer.echo(f"  channels: {sorted(paths.registered_channels)}")
     if paths.point_npz_paths:

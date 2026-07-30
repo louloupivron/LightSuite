@@ -31,6 +31,7 @@ uv run lightsuite spinal export               -c my_spinal.yaml
 uv run lightsuite spinal import-annotations   -c my_spinal.yaml
 uv run lightsuite spinal region-stats         -c my_spinal.yaml
 uv run lightsuite spinal inspect-imports      -c my_spinal.yaml
+uv run lightsuite spinal inspect-imports      -c my_spinal.yaml --space sample
 uv run lightsuite spinal view                 -c my_spinal.yaml
 uv run lightsuite spinal view                 -c my_spinal.yaml --space sample
 ```
@@ -278,6 +279,13 @@ annotation, and imported point layers overlaid:
 
 ```bash
 uv run lightsuite spinal inspect-imports -c my_spinal.yaml
+```
+
+Sample space — straightened 20 µm grid with warped labels and `*_sample_coords.npz`
+spot layers (requires `export --space sample`):
+
+```bash
+uv run lightsuite spinal inspect-imports -c my_spinal.yaml --space sample
 ```
 
 Use `--headless` to validate inputs without opening the GUI.
