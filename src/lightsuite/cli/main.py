@@ -2018,6 +2018,11 @@ def spinal_inspect_imports(
 @spinal_app.command("view")
 def spinal_view(
     config: str = typer.Option(..., "--config", "-c", help="Spinal cord pipeline YAML config."),
+    space: str = typer.Option(
+        "atlas",
+        "--space",
+        help="View space: atlas (Fiederling export grid) or sample (straightened 20 µm grid).",
+    ),
     headless: bool = typer.Option(
         False,
         "--headless",
@@ -2026,22 +2031,34 @@ def spinal_view(
     recompute_annotation: bool = typer.Option(
         False,
         "--recompute-annotation",
-        help="Rebuild annotation_registered.tiff from transform_params.json.",
+        help="Rebuild annotation_registered.tiff from transform_params.json (atlas space only).",
     ),
 ) -> None:
     """Open Napari with registered sample channel(s) and warped atlas annotation."""
+    from lightsuite.cli.spaces import parse_view_space_option
     from lightsuite.config.loader import load_spinal_config
+    from lightsuite.export.cord_sample_space import CordSampleSpaceInspectPaths
     from lightsuite.gui.view_registered_cord import run_spinal_registered_view
 
     cfg = load_spinal_config(config)
+    view_space = parse_view_space_option(space)
     paths = run_spinal_registered_view(
         cfg,
+        space=view_space,  # type: ignore[arg-type]
         headless=headless,
         recompute_annotation=recompute_annotation,
     )
-    typer.echo(f"Registered data: {paths.volume_registered_dir}")
-    if paths.annotation_path.is_file():
+    if isinstance(paths, CordSampleSpaceInspectPaths):
+        typer.echo(f"Sample-space data: {paths.sample_space_dir}")
         typer.echo(f"Annotation: {paths.annotation_path.name}")
+        if paths.channel_paths:
+            typer.echo(f"Channels: {sorted(paths.channel_paths)}")
+        if paths.point_npz_paths:
+            typer.echo(f"Point layers: {list(paths.point_npz_paths)}")
+    else:
+        typer.echo(f"Registered data: {paths.volume_registered_dir}")
+        if paths.annotation_path.is_file():
+            typer.echo(f"Annotation: {paths.annotation_path.name}")
 
 
 @spinal_app.command("validate-parity")

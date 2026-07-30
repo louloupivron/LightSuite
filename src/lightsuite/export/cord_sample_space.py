@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import re
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -34,6 +36,7 @@ from lightsuite.registration.cord_paths import (
 from lightsuite.registration.cord_plots import save_cord_annotation_preview
 from lightsuite.registration.elastix.runner import run_transformix
 from lightsuite.registration.straightening import load_slicetforms, transform_cord_images_slices
+from lightsuite.registration.volume import load_registration_volume
 
 console = Console()
 
@@ -42,10 +45,144 @@ ANNOTATION_IN_SAMPLE = "annotation_in_sample_20um.tif"
 TEMPLATE_IN_SAMPLE = "template_in_sample_20um.tif"
 SEGMENTS_IN_SAMPLE = "segments_in_sample_20um.tif"
 MANIFEST_NAME = "sample_space_manifest.json"
+_SAMPLE_CHANNEL_PATTERN = re.compile(r"chan_(\d+)_sample_straight_20um\.tif$", re.IGNORECASE)
+
+
+@dataclass(frozen=True)
+class CordSampleSpaceInspectPaths:
+    sample_space_dir: Path
+    manifest_path: Path
+    annotation_path: Path
+    template_path: Path
+    channel_paths: dict[int, Path] = field(default_factory=dict)
+    point_npz_paths: dict[str, Path] = field(default_factory=dict)
+
+
+@dataclass
+class CordSampleSpaceInspectVolumes:
+    annotation: np.ndarray
+    template: np.ndarray
+    channels: dict[int, np.ndarray]
+    point_layers: dict[str, np.ndarray] = field(default_factory=dict)
 
 
 def sample_space_dir(save_path: Path) -> Path:
     return save_path / "volume_registered" / SAMPLE_SPACE_SUBDIR
+
+
+def _label_from_stem(stem: str, suffix: str) -> str:
+    if stem.endswith(suffix):
+        return stem[: -len(suffix)]
+    return stem
+
+
+def discover_cord_sample_space_paths(config: SpinalCordPipelineConfig) -> CordSampleSpaceInspectPaths:
+    """Discover straightened sample-space export TIFFs under volume_registered/sample_space/."""
+    save_path = config.sample.save_path.expanduser()
+    out_dir = sample_space_dir(save_path)
+    if not out_dir.is_dir():
+        msg = (
+            f"Missing {out_dir}. Run 'lightsuite spinal export --space sample' "
+            "(or --space both) first."
+        )
+        raise FileNotFoundError(msg)
+
+    manifest_path = out_dir / MANIFEST_NAME
+    channel_paths: dict[int, Path] = {}
+    annotation_path = out_dir / ANNOTATION_IN_SAMPLE
+    template_path = out_dir / TEMPLATE_IN_SAMPLE
+
+    if manifest_path.is_file():
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        for key, path_str in manifest.get("channel_paths", {}).items():
+            channel_paths[int(key)] = Path(path_str).resolve()
+        if manifest.get("annotation_path"):
+            annotation_path = Path(manifest["annotation_path"]).resolve()
+        if manifest.get("template_path"):
+            template_path = Path(manifest["template_path"]).resolve()
+    else:
+        for path in sorted(out_dir.glob("chan_*_sample_straight_20um.tif")):
+            match = _SAMPLE_CHANNEL_PATTERN.fullmatch(path.name)
+            if match is None:
+                continue
+            channel_paths[int(match.group(1))] = path.resolve()
+
+    if not channel_paths:
+        msg = (
+            f"No sample-space channel TIFFs found in {out_dir}. "
+            "Expected files like chan_01_sample_straight_20um.tif."
+        )
+        raise FileNotFoundError(msg)
+    if not annotation_path.is_file():
+        msg = f"Missing warped annotation volume: {annotation_path}"
+        raise FileNotFoundError(msg)
+    if not template_path.is_file():
+        msg = f"Missing warped template volume: {template_path}"
+        raise FileNotFoundError(msg)
+
+    point_npz_paths: dict[str, Path] = {}
+    volume_registered = save_path / "volume_registered"
+    for path in sorted(volume_registered.glob("*_sample_coords.npz")):
+        label = _label_from_stem(path.stem, "_sample_coords")
+        point_npz_paths[label] = path.resolve()
+
+    return CordSampleSpaceInspectPaths(
+        sample_space_dir=out_dir.resolve(),
+        manifest_path=manifest_path.resolve(),
+        annotation_path=annotation_path.resolve(),
+        template_path=template_path.resolve(),
+        channel_paths=channel_paths,
+        point_npz_paths=point_npz_paths,
+    )
+
+
+def load_cord_sample_space_volumes(
+    config: SpinalCordPipelineConfig,
+    *,
+    paths: CordSampleSpaceInspectPaths | None = None,
+) -> CordSampleSpaceInspectVolumes:
+    """Load straightened sample channels and warped atlas labels for Napari."""
+    from lightsuite.analysis.counts import SAMPLE_POINTS_KEY, load_atlas_points
+
+    paths = paths or discover_cord_sample_space_paths(config)
+
+    channels: dict[int, np.ndarray] = {}
+    expected_shape: tuple[int, ...] | None = None
+    for ichan, path in paths.channel_paths.items():
+        vol = load_registration_volume(path).astype(np.float32, copy=False)
+        if expected_shape is None:
+            expected_shape = vol.shape
+        elif vol.shape != expected_shape:
+            msg = f"{path.name} shape {vol.shape} != expected {expected_shape}"
+            raise ValueError(msg)
+        channels[ichan] = vol
+
+    annotation = load_registration_volume(paths.annotation_path).astype(np.int32, copy=False)
+    template = load_registration_volume(paths.template_path).astype(np.float32, copy=False)
+    if expected_shape is not None:
+        if annotation.shape != expected_shape:
+            msg = (
+                f"Annotation shape {annotation.shape} != channel shape {expected_shape}. "
+                "Re-run 'lightsuite spinal export --space sample'."
+            )
+            raise ValueError(msg)
+        if template.shape != expected_shape:
+            msg = (
+                f"Template shape {template.shape} != channel shape {expected_shape}. "
+                "Re-run 'lightsuite spinal export --space sample'."
+            )
+            raise ValueError(msg)
+
+    point_layers: dict[str, np.ndarray] = {}
+    for label, npz_path in paths.point_npz_paths.items():
+        point_layers[label] = load_atlas_points(npz_path, key=SAMPLE_POINTS_KEY)
+
+    return CordSampleSpaceInspectVolumes(
+        annotation=annotation,
+        template=template,
+        channels=channels,
+        point_layers=point_layers,
+    )
 
 
 def _build_native_segment_volume(

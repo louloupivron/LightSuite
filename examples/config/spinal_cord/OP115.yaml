@@ -1,0 +1,36 @@
+# Spinal cord config for OP115 (mesoSPIM 1.25x, single channel 488).
+# Stitched Terastitcher output under output/channel_488/.
+#
+#   uv run lightsuite doctor -c examples/config/spinal_cord/OP115.yaml
+#   uv run lightsuite spinal validate-config -c examples/config/spinal_cord/OP115.yaml
+
+sample:
+  name: OP115
+  source:
+    format: tiff_stack
+    tiff_type: planeperfile
+    channels:
+      - /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP115/output/channel_488/RES(3857x2082x972)
+  scratch: /media/gbm/NVME2/lightsuite_scratch
+  save_path: /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP115/registered
+  # mesoSPIM metadata: pixelsize 5.26 µm, z step 5.0 µm
+  voxel_um: [5.26, 5.26, 5.0]
+
+atlas:
+  atlas_dir: /home/gbm/ALICe-pipelines/LightSuite/atlas/SC_P56_Atlas_10x10x20_v5_2020
+
+registration:
+  resolution_um: 20
+  channel_primary: 1
+  control_point_weight: 0.2
+  straightening_lambda_pos: 5000
+  straightening_lambda_ang: 5000
+
+compute:
+  workers: 4
+
+analysis:
+  parcellate_intensities: true
+  intensity_channels: [1]
+  rollups: [division, structure, horn]
+  split_hemispheres: true

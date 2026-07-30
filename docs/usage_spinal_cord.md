@@ -32,6 +32,7 @@ uv run lightsuite spinal import-annotations   -c my_spinal.yaml
 uv run lightsuite spinal region-stats         -c my_spinal.yaml
 uv run lightsuite spinal inspect-imports      -c my_spinal.yaml
 uv run lightsuite spinal view                 -c my_spinal.yaml
+uv run lightsuite spinal view                 -c my_spinal.yaml --space sample
 ```
 
 Convert Imaris spot exports before import:
@@ -280,6 +281,25 @@ uv run lightsuite spinal inspect-imports -c my_spinal.yaml
 ```
 
 Use `--headless` to validate inputs without opening the GUI.
+
+### View registration (Napari)
+
+Atlas space (default) — sample warped onto the Fiederling export grid:
+
+```bash
+uv run lightsuite spinal view -c my_spinal.yaml
+```
+
+Sample space — straightened 20 µm registration grid with warped atlas labels
+(requires `lightsuite spinal export --space sample` first):
+
+```bash
+uv run lightsuite spinal export -c my_spinal.yaml --space sample
+uv run lightsuite spinal view -c my_spinal.yaml --space sample
+```
+
+Layers: straightened channel(s), warped atlas template, warped annotation labels.
+Imported spot layers (`*_sample_coords.npz`) are overlaid when present.
 
 ### Key differences from brain
 

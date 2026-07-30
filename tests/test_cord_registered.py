@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -65,3 +66,53 @@ def test_load_registered_stack_rejects_non_3d(tmp_path: Path) -> None:
     tifffile.imwrite(path, np.ones((5, 6), dtype=np.uint16))
     with pytest.raises(ValueError, match="Expected 3D"):
         load_registered_stack(path)
+
+
+def test_discover_cord_sample_space_paths(tmp_path: Path) -> None:
+    from lightsuite.config.models import CordAtlasConfig, CordRegistrationConfig, CordSampleConfig, SpinalCordPipelineConfig
+    from lightsuite.export.cord_sample_space import (
+        ANNOTATION_IN_SAMPLE,
+        MANIFEST_NAME,
+        TEMPLATE_IN_SAMPLE,
+        discover_cord_sample_space_paths,
+        load_cord_sample_space_volumes,
+    )
+    from lightsuite.io.tiff_write import save_registration_volume
+
+    save = tmp_path / "registered"
+    out = save / "volume_registered" / "sample_space"
+    out.mkdir(parents=True)
+    shape = (12, 16, 20)
+    save_registration_volume(np.zeros(shape, dtype=np.uint16), out / "chan_01_sample_straight_20um.tif")
+    save_registration_volume(np.ones(shape, dtype=np.uint16), out / ANNOTATION_IN_SAMPLE)
+    save_registration_volume(np.full(shape, 2, dtype=np.uint16), out / TEMPLATE_IN_SAMPLE)
+    (out / MANIFEST_NAME).write_text(
+        json.dumps(
+            {
+                "channel_paths": {"1": str(out / "chan_01_sample_straight_20um.tif")},
+                "annotation_path": str(out / ANNOTATION_IN_SAMPLE),
+                "template_path": str(out / TEMPLATE_IN_SAMPLE),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    cfg = SpinalCordPipelineConfig(
+        sample=CordSampleConfig(
+            name="t",
+            source={"format": "tiff_stack", "path": str(tmp_path)},
+            scratch=tmp_path / "scratch",
+            save_path=save,
+            voxel_um=[20.0, 20.0, 20.0],
+        ),
+        atlas=CordAtlasConfig(atlas_dir=tmp_path),
+        registration=CordRegistrationConfig(),
+    )
+    paths = discover_cord_sample_space_paths(cfg)
+    assert paths.channel_paths == {1: (out / "chan_01_sample_straight_20um.tif").resolve()}
+    assert paths.annotation_path.name == ANNOTATION_IN_SAMPLE
+
+    volumes = load_cord_sample_space_volumes(cfg, paths=paths)
+    assert volumes.channels[1].shape == shape
+    assert volumes.annotation.shape == shape
+    assert volumes.template.shape == shape
