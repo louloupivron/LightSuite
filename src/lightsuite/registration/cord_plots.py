@@ -70,47 +70,47 @@ def _display_crop(
     return cropped, rr, cc
 
 
+def _tissue_z_extent(
+    volume: np.ndarray,
+    bg_threshold: int,
+    *,
+    mass_lo: float = 0.05,
+    mass_hi: float = 0.95,
+) -> tuple[int, int]:
+    """Z range covering the central tissue mass (volume-only, excludes sparse tail slices)."""
+    n_length = volume.shape[2]
+    per_z = np.count_nonzero(volume > bg_threshold, axis=(0, 1)).astype(np.float64)
+    total = float(per_z.sum())
+    if total == 0:
+        return 0, n_length - 1
+    cdf = np.cumsum(per_z) / total
+    z_lo = int(np.searchsorted(cdf, mass_lo))
+    z_hi = int(np.searchsorted(cdf, mass_hi))
+    if z_hi <= z_lo:
+        z_lo, z_hi = 0, n_length - 1
+    return z_lo, min(z_hi, n_length - 1)
+
+
 def _select_axial_slices(
     volume: np.ndarray,
-    annotation: np.ndarray,
     *,
     n_show: int,
     bg_threshold: int,
 ) -> np.ndarray:
-    """Pick axial slices evenly spanning the full rostrocaudal extent."""
+    """Pick evenly spaced axial slices from the sample volume (plotCordAnnotation.m style).
+
+    Indices depend only on the sample volume so they are identical across QC plots at
+    different registration stages. Endpoints use the inner tissue mass range to avoid
+    sparse edge slices that often lack a warped annotation overlay.
+    """
     n_length = volume.shape[2]
     if n_show <= 0:
         return np.array([], dtype=int)
     if n_show == 1:
         return np.array([n_length // 2], dtype=int)
 
-    # Partition the full z range into bins and pick the best slice in each bin.
-    edges = np.linspace(0, n_length, n_show + 1).astype(int)
-    picked: list[int] = []
-    for i in range(n_show):
-        z0 = int(edges[i])
-        z1 = int(edges[i + 1])
-        if z1 <= z0:
-            z1 = min(z0 + 1, n_length)
-        candidates = np.arange(z0, min(z1, n_length))
-        if candidates.size == 0:
-            picked.append(min(z0, n_length - 1))
-            continue
-
-        best_z = int(candidates[len(candidates) // 2])
-        best_score = -1
-        for z in candidates:
-            tissue = volume[:, :, z] > bg_threshold
-            if not np.any(tissue):
-                continue
-            ann = annotation[:, :, z] > 0
-            overlap = int(np.count_nonzero(tissue & ann))
-            score = overlap if overlap > 0 else int(np.count_nonzero(tissue))
-            if score > best_score:
-                best_score = score
-                best_z = int(z)
-        picked.append(best_z)
-    return np.array(picked, dtype=int)
+    z_lo, z_hi = _tissue_z_extent(volume, bg_threshold)
+    return np.round(np.linspace(z_lo, z_hi, n_show)).astype(int)
 
 
 def _cord_center_row(volume: np.ndarray, bg_threshold: int) -> int:
@@ -179,7 +179,7 @@ def save_cord_annotation_preview(
     ax_slices = gs[1, :].subgridspec(3, 4, wspace=0.02, hspace=0.02)
 
     ann_color = (1.0, 0.8, 0.5)
-    show_slices = _select_axial_slices(volume, annotation, n_show=n_show, bg_threshold=bg_threshold)
+    show_slices = _select_axial_slices(volume, n_show=n_show, bg_threshold=bg_threshold)
 
     for ii, islice in enumerate(show_slices):
         row, col = divmod(ii, 4)
