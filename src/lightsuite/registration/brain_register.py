@@ -578,6 +578,11 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
 
     inverse_dir = save_path / "elastix_inverse_temp"
     inverted = invert_elastix_transform(elastix_temp, inverse_dir)
+    if (inverse_dir / "inversion_parameters_gentle.txt").is_file():
+        console.print(
+            "[yellow]B-spline inversion:[/yellow] used gentle single-resolution schedule "
+            "(full multistep inversion diverged at high resolution)."
+        )
     samp_to_atlas_path = save_path / "bspline_samp_to_atlas_20um.txt"
     write_inverted_transform_copy(inverted, samp_to_atlas_path)
 

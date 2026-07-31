@@ -312,7 +312,31 @@ def test_discover_transformix_result_nii_and_mhd(tmp_path: Path) -> None:
     assert _discover_transformix_result(tmp_path) == mhd
 
 
-def test_warp_volume_affine_identity() -> None:
+def test_build_gentle_inversion_parameter_file(tmp_path: Path) -> None:
+    from lightsuite.registration.elastix.invert import _build_gentle_inversion_parameter_file
+
+    forward = tmp_path / "forward.txt"
+    forward.write_text(
+        "\n".join(
+            [
+                "(NumberOfResolutions 4)",
+                "(ImagePyramidSchedule 8 8 8 4 4 4 2 2 2 1 1 1)",
+                "(MaximumNumberOfIterations 500 1000 1500 2000)",
+                "(SampleRegionSize 2.34 2.34 2.34 2.34 2.34 2.34 2.34 2.34 2.34 2 2 2)",
+                "(Metric \"AdvancedMattesMutualInformation\" \"AdvancedMattesMutualInformation\" "
+                "\"CorrespondingPointsEuclideanDistanceMetric\")",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    gentle = _build_gentle_inversion_parameter_file(forward, tmp_path / "gentle.txt")
+    text = gentle.read_text(encoding="utf-8")
+    assert "(NumberOfResolutions 1)" in text
+    assert "1 1 1 1 1 1 1 1 1" in text
+    assert "(MaximumNumberOfIterations 500)" in text
+    assert "2 2 2 2 2 2 2 2 2" in text
+
+
     vol = np.ones((4, 5, 6), dtype=np.float32)
     out = warp_volume_affine(vol, np.eye(4), vol.shape, order=0)
     assert out.shape == vol.shape
