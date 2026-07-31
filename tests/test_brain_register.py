@@ -115,3 +115,20 @@ def test_validate_registration_without_manual_session(tmp_path: Path) -> None:
     checkpoint, session = validate_registration_inputs(cfg)
     assert checkpoint.autocpatlas
     assert session.paired_points_xyz()[0].shape[0] == 0
+
+
+def test_manual_atlas_points_do_not_double_swap_xy() -> None:
+    """Regression: paired_points_xyz is already (Y,X,Z); cloud_xyz swaps X/Y."""
+    from lightsuite.registration.brain_register import (
+        _auto_atlas_cloud_to_affine_native,
+        _manual_atlas_points_to_affine_native,
+    )
+
+    downfac = 0.5
+    manual_yxz = np.array([[100.0, 200.0, 50.0], [110.0, 210.0, 60.0]])
+    native = _manual_atlas_points_to_affine_native(manual_yxz, downfac=downfac)
+    assert np.allclose(native, manual_yxz / downfac)
+
+    cloud = np.array([[200.0, 100.0, 50.0]])  # x, y, z
+    auto_native = _auto_atlas_cloud_to_affine_native(cloud, downfac=downfac)
+    assert np.allclose(auto_native, np.array([[100.0, 200.0, 50.0]]) / downfac)

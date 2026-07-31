@@ -74,21 +74,28 @@ console = Console()
 REGISTRATION_DIAGNOSTICS_FILENAME = "registration_diagnostics.json"
 
 
-def _atlas_control_points_native(
-    points_xyz: np.ndarray,
-    *,
-    downfac: float,
-    crop_start_native: list[int] | None,
-) -> np.ndarray:
-    """Map GUI / triage atlas points to full native atlas (Y, X, Z) indices."""
-    pts = np.asarray(points_xyz, dtype=float)
+def _auto_atlas_cloud_to_affine_native(cloud_xyz: np.ndarray, *, downfac: float) -> np.ndarray:
+    """Map init-registration atlas cloud (x,y,z) to affine-fit native atlas (Y,X,Z).
+
+    Mirrors ``multiobjRegistration.m``: ``autocpatlas / downfac_reg`` after ``(:, [2 1 3])``.
+    """
+    pts = np.asarray(cloud_xyz, dtype=float)
     if pts.size == 0:
         return pts.reshape(0, 3)
-    yxz = cloud_xyz_to_volume_indices(pts)
-    native = yxz / downfac
-    if crop_start_native and any(int(v) for v in crop_start_native):
-        native = native + np.asarray(crop_start_native, dtype=float)
-    return native
+    return cloud_xyz_to_volume_indices(pts) / downfac
+
+
+def _manual_atlas_points_to_affine_native(points_yxz_reg: np.ndarray, *, downfac: float) -> np.ndarray:
+    """Map match-points atlas pairs to affine-fit native atlas (Y,X,Z).
+
+    ``paired_points_xyz`` already returns registration-grid (Y,X,Z). MATLAB only applies
+    ``cptsatlas / downfac_reg`` — not ``cloud_xyz_to_volume_indices`` (that swaps X/Y).
+    Content-trim offsets are applied later via ``affine_with_source_offset`` on the warp.
+    """
+    pts = np.asarray(points_yxz_reg, dtype=float)
+    if pts.size == 0:
+        return pts.reshape(0, 3)
+    return pts / downfac
 
 
 @dataclass
@@ -279,19 +286,14 @@ def _prepare_control_points(
     autocpsample = cloud_xyz_to_volume_indices(
         np.asarray(checkpoint.autocpsample or [], dtype=float)
     )
-    autocpatlas = _atlas_control_points_native(
+    autocpatlas = _auto_atlas_cloud_to_affine_native(
         np.asarray(checkpoint.autocpatlas or [], dtype=float),
         downfac=downfac,
-        crop_start_native=checkpoint.atlas_crop_start_native,
     )
 
     cptsatlas, cptshistology = session.paired_points_xyz()
     cptshistology = transform_points_inverse(cptshistology, original_trans_vol)
-    cptsatlas = _atlas_control_points_native(
-        cptsatlas,
-        downfac=downfac,
-        crop_start_native=checkpoint.atlas_crop_start_native,
-    )
+    cptsatlas = _manual_atlas_points_to_affine_native(cptsatlas, downfac=downfac)
 
     if cptsatlas.shape[0] > 0 and autocpatlas.shape[0] > 0:
         distances = cdist(cptsatlas, autocpatlas)
