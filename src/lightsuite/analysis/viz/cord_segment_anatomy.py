@@ -208,7 +208,7 @@ def _draw_slice_panel(
         vmin=vmin,
         vmax=vmax,
     )
-    ax.imshow(rgba, origin="lower", aspect="equal")
+    ax.imshow(rgba, origin="upper", aspect="equal")
     if draw_outlines and np.any(annotation_slice > 0):
         boundaries = find_boundaries(annotation_slice > 0, mode="outer")
         ys, xs = np.where(boundaries)
@@ -458,7 +458,7 @@ def plot_cord_segment_anatomy_slice_hemisphere_composite(
             vmax=color_vmax,
             flip=hemisphere_flip,
         )
-        ax.imshow(rgba, origin="lower", aspect="equal")
+        ax.imshow(rgba, origin="upper", aspect="equal")
         if draw_outlines and np.any(ann_slice > 0):
             boundaries = find_boundaries(ann_slice > 0, mode="outer")
             ys, xs = np.where(boundaries)
@@ -654,7 +654,7 @@ def plot_cord_segment_anatomy_slice(
             vmin=color_vmin,
             vmax=color_vmax,
         )
-        ax.imshow(rgba, origin="lower", aspect="equal")
+        ax.imshow(rgba, origin="upper", aspect="equal")
         if draw_outlines and np.any(ann_slice > 0):
             boundaries = find_boundaries(ann_slice > 0, mode="outer")
             ys, xs = np.where(boundaries)
