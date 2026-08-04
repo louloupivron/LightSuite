@@ -73,6 +73,7 @@ registration:
   channel_primary: 1              # autofluorescence / structural channel
   channel_secondary: 2            # optional second channel for dual MI
   bspline_spatial_scale_mm: 0.64
+  bspline_bending_weight: 2.0     # deformation smoothness; raise if contours look wavy
   control_point_weight: 0.2
   augment_points: false
   orientation: [1, 2, 3]          # or omit; uses brain_orientation.txt if present
@@ -135,7 +136,8 @@ uv run lightsuite doctor -c my_mouse.yaml
 | `registration.resolution_um` | Downsample target for registration volumes | `20` |
 | `registration.channel_primary` | Primary channel for alignment | `1` |
 | `registration.channel_secondary` | Optional second channel for dual-channel mutual information | `null` |
-| `registration.bspline_spatial_scale_mm` | B-spline grid spacing in mm; smaller = finer warping | `0.64` |
+| `registration.bspline_spatial_scale_mm` | B-spline grid spacing in mm; smaller = finer warping, but also more free parameters to constrain | `0.64` |
+| `registration.bspline_bending_weight` | Weight of the Elastix `TransformBendingEnergyPenalty` smoothness term; `0` disables it (MATLAB parity) | `2.0` |
 | `registration.control_point_weight` | Landmark weight in Elastix (0–1) | `0.2` |
 | `registration.augment_points` | Add thinned auto-landmarks to user control points | `false` |
 | `registration.ap_pair_tolerance_vox` | AP residual tolerance for `refine-auto-points` (registration voxels) | `12.0` |
@@ -360,6 +362,33 @@ uv run lightsuite brain register -c my_mouse.yaml --single-step
 - `{name}_dim{1,2,3}_affine_registration.png` — eight sample slices per axis with warped atlas region outlines overlaid (same style as `dim*_initial_registration.png`)
 - `{name}_dim{1,2,3}_bspline_registration.png` — same layout after B-spline
 - `elastix_temp/` — Elastix working directory (keep until register finishes)
+
+#### Wavy or over-warped B-spline contours
+
+If the affine preview looks right but the B-spline preview shows tangled, wandering region
+outlines, the deformation has too many degrees of freedom for the amount of image evidence
+driving it — not a bad initialization.
+
+Elastix draws ~5000 Mattes MI samples per iteration from a single small `SampleRegionSize`
+cube. On a wide acquisition canvas (a 2048² mesoSPIM frame where the brain fills under a
+third of the field, say) the B-spline grid has tens of thousands of parameters, most control
+points sit over background, and each one receives only a handful of informative updates. The
+rest of its trajectory is a random walk. Two things keep that in check:
+
+- `registration.bspline_bending_weight` adds a smoothness prior. `2.0` is a good starting
+  point; raise it if contours still wander. `0` reproduces MATLAB, which has no penalty term.
+- `registration.bspline_spatial_scale_mm` controls how many parameters exist at all. Going
+  from `0.64` to `1.0` mm cuts the grid roughly threefold. Counter-intuitively this usually
+  *improves* landmark agreement on wide canvases, because the remaining control points are
+  each much better constrained.
+
+Check `elastix_temp/IterationInfo.0.R3.txt` to confirm the diagnosis. A `2:Metric0` column
+that is frequently exactly `0.000000` means those iterations sampled a region with no atlas
+overlap and contributed nothing; a `2:Metric1` (landmark) column that is flat across the
+finest resolution means the last pyramid level is adding noise rather than alignment.
+
+Cropping the registration volume to the brain with `registration.sample_content_crop: auto`
+reduces the wasted grid too, though it is a smaller effect than the two settings above.
 
 ### 8. Export
 
@@ -777,3 +806,19 @@ inflate the score. Treat as a quick QC flag, not a geometric error metric.
 | `check_lightsuite_installation.m` | `lightsuite doctor` |
 
 You can keep using the same TIFF layouts, atlas files, and Elastix version as the MATLAB pipeline.
+
+### Intentional differences in the B-spline step
+
+`build_bspline_params` otherwise mirrors `performMultObjBsplineRegistration.m` — same metrics,
+weights, transform, optimizer, pyramid schedule, iteration counts, spatial-sample count and
+`SampleRegionSize` formula. It deviates in three places:
+
+- **Bending energy.** `registration.bspline_bending_weight` appends a
+  `TransformBendingEnergyPenalty` metric that MATLAB does not have. Set it to `0` for parity.
+- **Histogram bins.** MATLAB inherits `NumberOfFixedHistogramBins`/`NumberOfMovingHistogramBins`
+  = 32 from `matlab_elastix`'s `elastix_default.yml`, and Mattes MI prefers those over
+  `NumberOfHistogramBins`. Python writes them explicitly at 32 rather than letting Elastix fall
+  back to its own default.
+- **ASGD step estimation.** Python sets `ASGDParameterEstimationMethod` to
+  `DisplacementDistribution`; MATLAB leaves it at Elastix's built-in `Original`, whose larger
+  steps can fold the grid.

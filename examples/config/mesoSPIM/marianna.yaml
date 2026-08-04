@@ -1,0 +1,79 @@
+# Marianna CMU — U87 mesoSPIM (0.8× 488_GFP overview, Perens LSFM via BrainGlobe)
+#
+# Requires BrainGlobe atlas extra: uv sync --extra atlas
+# First run downloads perens_lsfm_mouse_20um to ~/.brainglobe/
+#
+# Registration uses the 488_GFP overview stack only (single-channel MI).
+# Segmentation was done on the 2.5× ROI; warp FIJI points to this 0.8× native
+# grid (via multires ROI→overview) before enabling import below.
+#
+# Use a fresh save_path and re-run from preprocess when changing atlas source.
+#
+#   uv run lightsuite doctor -c examples/config/mesoSPIM/marianna.yaml
+#   uv run lightsuite brain validate-config -c examples/config/mesoSPIM/marianna.yaml
+#   uv run lightsuite brain preprocess -c examples/config/mesoSPIM/marianna.yaml
+#   uv run lightsuite brain register -c examples/config/mesoSPIM/marianna.yaml
+#   uv run lightsuite brain import-annotations -c examples/config/mesoSPIM/marianna.yaml
+#
+# Multires (2.5× ROI → 0.8× overview): see examples/config/multiresolution/marianna_multires.yaml
+
+sample:
+  name: Marianna
+  source:
+    format: tiff_stack
+    path: /media/gbm/NVME2/ALICe-pipelines-data/Marianna_CMU/U87_DJ_1week_488_GFP_0.8x.tif
+    tiff_type: channelperfile
+  scratch: /media/gbm/NVME2/lightsuite_scratch
+  save_path: /media/gbm/NVME2/ALICe-pipelines-data/Marianna_CMU/registered_perens
+  voxel_um: [8.23, 8.23, 5.0]
+
+atlas:
+  provider: perens
+  source: brainglobe
+  # brainglobe_name: perens_lsfm_mouse_20um  # inferred from provider + resolution_um
+  resolution_um: 20
+
+registration:
+  channel_primary: 1
+  channel_secondary: null
+  resolution_um: 20
+  cloud_threshold: 3
+  sample_cloud_subsample: 0.25
+  # Wide 2048^2 mesoSPIM frame: the brain fills ~28% of the canvas, so a 0.64 mm grid
+  # leaves most control points under-constrained and the warp turns wavy. Coarser grid
+  # plus the bending-energy penalty keeps it smooth.
+  bspline_spatial_scale_mm: 1.0
+  bspline_bending_weight: 2.0
+  augment_points: true
+  control_point_weight: 0.5
+  # Set after lightsuite brain check-orientation if needed:
+  # orientation: [1, 3, 2]
+  bcpd_path: /home/gbm/ALICe-pipelines/LightSuite/softwares/bcpd-master/
+
+  orientation: [1, -3, -2]
+detection:
+  enabled: false
+
+compute:
+  use_gpu: false
+  workers: 4
+
+# Enable after warping 2.5× FIJI points to 0.8× native indices (not the raw ROI CSV).
+# import:
+#   write_csv: true
+#   annotations:
+#     - format: points_csv
+#       path: /media/gbm/NVME2/ALICe-pipelines-data/Marianna_CMU/fiji_488_points_overview.csv
+#       label: fiji_488_cells
+
+export:
+  save_registered_volume: true
+  write_cells_csv: true
+  registered_volume_format: tiff
+  write_pyramid: true
+
+analysis:
+  write_tidy_csv: true
+  count_points: true
+  point_labels:
+    - fiji_488_cells
