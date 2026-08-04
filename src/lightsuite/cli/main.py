@@ -166,6 +166,42 @@ def brain_import_annotations(
         typer.echo(f"{item.label}: {item.kind} — {item.n_atlas} atlas features")
 
 
+@brain_app.command("convert-fiji-points")
+def brain_convert_fiji_points(
+    source: str = typer.Option(..., "--source", "-s", help="FIJI point-tool Results.csv export."),
+    output: str = typer.Option(..., "--output", "-o", help="Output points.csv path."),
+    voxel_um: str | None = typer.Option(
+        None,
+        "--voxel-um",
+        help=(
+            "ImageJ XY calibration as comma-separated x,y,z in the same units as the "
+            "Results table (typically µm). Omit when X/Y are already in pixels."
+        ),
+    ),
+) -> None:
+    """Convert FIJI point-tool Results.csv to LightSuite points.csv."""
+    from pathlib import Path
+
+    from lightsuite.import_.fiji import convert_fiji_points_to_csv
+
+    source_path = Path(source).expanduser()
+    if not source_path.is_file():
+        msg = f"Source CSV not found: {source_path}"
+        raise typer.BadParameter(msg)
+
+    voxel: list[float] | None = None
+    if voxel_um is not None:
+        parts = [float(v.strip()) for v in voxel_um.split(",")]
+        if len(parts) != 3:
+            msg = "--voxel-um must have exactly three values: x,y,z"
+            raise typer.BadParameter(msg)
+        voxel = parts
+
+    output_path = Path(output).expanduser()
+    n = convert_fiji_points_to_csv(source_path, output_path, voxel_um=voxel)
+    typer.echo(f"Wrote {n} points → {output_path}")
+
+
 @brain_app.command("inspect-imports")
 def brain_inspect_imports(
     config: str = typer.Option(..., "--config", "-c", help="Pipeline YAML config."),
