@@ -11,9 +11,9 @@ from scipy.spatial import cKDTree
 from lightsuite.registration.bcpd import atlas_to_sample_affinetform, find_bcpd_executable, register_bcpd
 from lightsuite.registration.pc_downsample import downsample_for_bcpd_similarity, downsample_for_triage
 from lightsuite.registration.warp import (
-    affinetform_rows_to_internal,
     matlab_voxel_affine_from_affinetform_rows,
     matlab_voxel_affine_from_icp,
+    matlab_voxel_affine_to_icp,
 )
 
 
@@ -172,8 +172,8 @@ def _estimate_similarity_bcpd(
     )
 
     sample_to_atlas_affine = atlas_to_sample_affinetform(atlas_to_sample)
-    transform_icp = affinetform_rows_to_internal(sample_to_atlas_affine)
     matlab_transform = matlab_voxel_affine_from_affinetform_rows(sample_to_atlas_affine)
+    transform_icp = matlab_voxel_affine_to_icp(matlab_transform)
     return transform_icp, matlab_transform
 
 
