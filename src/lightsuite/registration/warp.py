@@ -40,12 +40,13 @@ def matlab_voxel_affine_from_icp(matrix: np.ndarray) -> np.ndarray:
     return shift_minus @ np.asarray(matrix, dtype=float) @ shift_plus
 
 
-def matlab_voxel_affine_from_affinetform_rows(matrix_0based: np.ndarray) -> np.ndarray:
-    """Convert a 0-based affinetform3d row matrix to 1-based ``original_trans`` storage."""
-    matrix = np.asarray(matrix_0based, dtype=float).copy()
-    linear = matrix[:3, :3]
-    matrix[:3, 3] = matrix[:3, 3] - linear.sum(axis=0) + 1.0
-    return matrix
+def matlab_voxel_affine_from_zero_based(matrix: np.ndarray) -> np.ndarray:
+    """Rebase a premultiply affine from 0-based indices to MATLAB 1-based voxels."""
+    shift_minus = np.eye(4)
+    shift_minus[:3, 3] = -1.0
+    shift_plus = np.eye(4)
+    shift_plus[:3, 3] = 1.0
+    return shift_plus @ np.asarray(matrix, dtype=float) @ shift_minus
 
 
 def matlab_voxel_affine_to_icp(matrix: np.ndarray) -> np.ndarray:

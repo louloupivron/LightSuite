@@ -30,25 +30,14 @@ def pcdenoise(
     return points[np.asarray(inlier_idx, dtype=int)]
 
 
-def nonuniform_grid_sample(
-    points: np.ndarray,
-    max_num_points: int,
-    *,
-    seed: int = 1,
-) -> np.ndarray:
-    """Port of ``pcdownsample(..., 'nonuniformGridSample', maxNumPoints)``.
+def _kdtree_leaves(points: np.ndarray, max_num_points: int) -> list[np.ndarray]:
+    """Split a cloud into ``2^ceil(log2(N/maxNumPoints))`` median-split kd-tree leaves.
 
-  MATLAB subdivides a kd-tree until each leaf holds at most ``maxNumPoints``
-  points, then keeps one representative per leaf (``rng(1)`` with
-  ``PreserveStructure``).
+    MATLAB's nonuniform grid methods take ``maxNumPoints`` per grid box rather
+    than a grid step, so the leaf count is a power of two.
     """
-    points = np.asarray(points, dtype=np.float64)
     n = points.shape[0]
-    if n == 0 or max_num_points < 6 or n <= max_num_points:
-        return points
-
     levels = max(0, int(np.ceil(np.log2(n / max_num_points))))
-    rng = np.random.default_rng(seed)
     groups: list[np.ndarray] = [np.arange(n)]
     for _ in range(levels):
         next_groups: list[np.ndarray] = []
@@ -63,22 +52,37 @@ def nonuniform_grid_sample(
             next_groups.append(idx[order[:half]])
             next_groups.append(idx[order[half:]])
         groups = next_groups
-    return np.vstack(
-        [points[idx[int(rng.integers(idx.size))]] for idx in groups if idx.size > 0]
-    )
+    return [idx for idx in groups if idx.size > 0]
 
 
-def nonuniform_grid(points: np.ndarray, grid_step: float) -> np.ndarray:
-    """Port of ``pcdownsample(..., 'nonuniformGrid', gridStep)`` (bin centroids)."""
+def nonuniform_grid_sample(
+    points: np.ndarray,
+    max_num_points: int,
+    *,
+    seed: int = 1,
+) -> np.ndarray:
+    """Port of ``pcdownsample(..., 'nonuniformGridSample', maxNumPoints)``.
+
+    Keeps one original point per kd-tree leaf (``rng(1)`` with ``PreserveStructure``).
+    """
     points = np.asarray(points, dtype=np.float64)
-    if points.shape[0] == 0 or grid_step <= 0:
+    n = points.shape[0]
+    if n == 0 or max_num_points < 6 or n <= max_num_points:
         return points
-    keys = np.floor(points / grid_step).astype(np.int64)
-    _, inverse = np.unique(keys, axis=0, return_inverse=True)
-    centroids = np.zeros((inverse.max() + 1, 3), dtype=np.float64)
-    counts = np.bincount(inverse, minlength=centroids.shape[0])
-    np.add.at(centroids, inverse, points)
-    return centroids / counts[:, None]
+
+    rng = np.random.default_rng(seed)
+    leaves = _kdtree_leaves(points, max_num_points)
+    return np.vstack([points[idx[int(rng.integers(idx.size))]] for idx in leaves])
+
+
+def nonuniform_grid(points: np.ndarray, max_num_points: int) -> np.ndarray:
+    """Port of ``pcdownsample(..., 'nonuniformGrid', maxNumPoints)`` (leaf centroids)."""
+    points = np.asarray(points, dtype=np.float64)
+    n = points.shape[0]
+    if n == 0 or max_num_points < 6 or n <= max_num_points:
+        return points
+    leaves = _kdtree_leaves(points, max_num_points)
+    return np.vstack([points[idx].mean(axis=0) for idx in leaves])
 
 
 def matlab_bcpd_grid_step(point_count: int, count_divisor: int) -> int:
@@ -101,7 +105,7 @@ def downsample_for_bcpd_similarity(points: np.ndarray, count_divisor: int) -> np
 
 def downsample_for_triage(points: np.ndarray, count_divisor: int) -> np.ndarray:
     """Downsample clouds before triage BCPD (``nonuniformGrid``)."""
-    grid_step = matlab_triage_grid_step(points.shape[0], count_divisor)
-    if grid_step < 6:
+    max_num_points = matlab_triage_grid_step(points.shape[0], count_divisor)
+    if max_num_points < 6:
         return points
-    return nonuniform_grid(points, float(grid_step))
+    return nonuniform_grid(points, max_num_points)

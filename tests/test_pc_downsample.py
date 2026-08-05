@@ -32,18 +32,12 @@ def test_nonuniform_grid_sample_matches_matlab_leaf_count() -> None:
     assert out.shape[0] == 16_384
 
 
-def test_nonuniform_grid_returns_bin_centroids() -> None:
-    points = np.array(
-        [
-            [0.0, 0.0, 0.0],
-            [1.0, 0.0, 0.0],
-            [10.0, 10.0, 10.0],
-        ],
-        dtype=float,
-    )
-    out = nonuniform_grid(points, 2.0)
-    assert out.shape[0] == 2
-    assert np.allclose(out[0], [0.5, 0.0, 0.0])
+def test_nonuniform_grid_returns_leaf_centroids() -> None:
+    rng = np.random.default_rng(0)
+    points = rng.random((10_691_773 // 100, 3)) * 200.0
+    out = nonuniform_grid(points, 214 // 100 + 6)
+    assert out.shape[0] == 2 ** int(np.ceil(np.log2(points.shape[0] / 8)))
+    assert np.allclose(out.mean(axis=0), points.mean(axis=0), atol=1.0)
 
 
 def test_downsample_for_bcpd_similarity_reduces_large_cloud() -> None:
