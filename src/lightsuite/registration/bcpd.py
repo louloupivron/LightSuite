@@ -382,3 +382,17 @@ def register_bcpd(
             )
 
     return registered, moving_to_fixed
+
+
+def atlas_to_sample_affinetform(atlas_to_sample_hybrid: np.ndarray) -> np.ndarray:
+    """Convert a BCPD hybrid matrix to sample->atlas affinetform3d row convention.
+
+    ``register_bcpd`` stores the linear part in row-vector form (``p @ L + t``)
+    but parks the translation in the column slot. Build the premultiply matrix
+    before inverting, matching MATLAB ``bfit.invert`` / ``affinetform3d``.
+    """
+    matrix = np.asarray(atlas_to_sample_hybrid, dtype=float)
+    premul = np.eye(4, dtype=float)
+    premul[:3, :3] = matrix[:3, :3].T
+    premul[:3, 3] = matrix[:3, 3]
+    return np.linalg.inv(premul)

@@ -5,6 +5,8 @@ from __future__ import annotations
 import numpy as np
 from scipy import ndimage
 
+from lightsuite.registration.pc_downsample import pcdenoise
+
 
 def cloud_xyz_to_volume_indices(xyz: np.ndarray) -> np.ndarray:
     """Map point-cloud XYZ (x, y, z) to volume array indices (Y, X, Z)."""
@@ -92,6 +94,7 @@ def extract_sample_points(
         )
         pts = pts[keep]
         pts = _random_subsample(pts, subsample_fraction, seed=1)
+        pts = pcdenoise(pts)
     if pts.shape[0] == 0:
         flat_grad = grad.ravel()
         flat_vol = volume.ravel()

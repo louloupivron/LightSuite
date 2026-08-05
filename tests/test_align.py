@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import numpy as np
 
 from lightsuite.registration.align import (
     _icp_cloud_subset,
-    _matlab_cloud_subset,
     _transform_points,
     estimate_similarity_transform,
     similarity_scale,
     triage_and_match_clouds,
 )
+from lightsuite.registration.bcpd import atlas_to_sample_affinetform
+from lightsuite.registration.pc_downsample import downsample_for_bcpd_similarity
 from lightsuite.registration.warp import matlab_voxel_affine_from_icp
 
 
@@ -21,13 +24,31 @@ def test_icp_cloud_subset_uses_full_small_sample_cloud() -> None:
     assert subset.shape[0] == 40
 
 
-def test_matlab_cloud_subset_keeps_small_clouds() -> None:
-    points = np.arange(30, dtype=float).reshape(10, 3)
-    subset = _matlab_cloud_subset(points, 10_000)
+def test_downsample_for_bcpd_similarity_keeps_tiny_clouds() -> None:
+    points = np.arange(15, dtype=float).reshape(5, 3)
+    subset = downsample_for_bcpd_similarity(points, 10_000)
     assert subset.shape == points.shape
 
 
-def test_triage_uses_icp_transform_frame() -> None:
+def test_atlas_to_sample_affinetform_fixes_translation_vs_raw_inv() -> None:
+    """Regression for MATLAB premultiply inversion (not raw np.linalg.inv)."""
+    hybrid = np.array(
+        [
+            [0.9242, 0.1880, 0.0625, -50.0859],
+            [-0.1829, 0.9243, -0.0757, -40.2302],
+            [-0.0761, 0.0620, 0.9401, -132.4498],
+            [0.0, 0.0, 0.0, 1.0],
+        ]
+    )
+    sample_to_atlas = atlas_to_sample_affinetform(hybrid)
+    wrong_affine = np.linalg.inv(hybrid)
+
+    assert sample_to_atlas[1, 3] > 0.0
+    assert abs(sample_to_atlas[1, 3] - 4.5) < abs(wrong_affine[1, 3] - 4.5)
+
+
+@patch("lightsuite.registration.align.find_bcpd_executable", return_value=None)
+def test_triage_uses_icp_transform_frame(_mock_bcpd: object) -> None:
     rng = np.random.default_rng(0)
     sample = rng.random((200, 3)) * 40.0
     atlas = sample + np.array([12.0, 8.0, 5.0])
@@ -58,7 +79,8 @@ def test_triage_finds_pairs_with_huge_atlas_cloud() -> None:
     assert pairs[0].shape[0] > 100
 
 
-def test_estimate_similarity_transform_returns_both_frames() -> None:
+@patch("lightsuite.registration.align.find_bcpd_executable", return_value=None)
+def test_estimate_similarity_transform_returns_both_frames(_mock_bcpd: object) -> None:
     rng = np.random.default_rng(1)
     sample = rng.random((500, 3)) * 30.0
     atlas = sample * 1.05 + np.array([4.0, 2.0, 1.0])

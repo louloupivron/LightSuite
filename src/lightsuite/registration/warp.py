@@ -40,6 +40,14 @@ def matlab_voxel_affine_from_icp(matrix: np.ndarray) -> np.ndarray:
     return shift_minus @ np.asarray(matrix, dtype=float) @ shift_plus
 
 
+def matlab_voxel_affine_from_affinetform_rows(matrix_0based: np.ndarray) -> np.ndarray:
+    """Convert a 0-based affinetform3d row matrix to 1-based ``original_trans`` storage."""
+    matrix = np.asarray(matrix_0based, dtype=float).copy()
+    linear = matrix[:3, :3]
+    matrix[:3, 3] = matrix[:3, 3] - linear.sum(axis=0) + 1.0
+    return matrix
+
+
 def matlab_voxel_affine_to_icp(matrix: np.ndarray) -> np.ndarray:
     """Inverse of :func:`matlab_voxel_affine_from_icp` for 0-based point clouds."""
     shift_minus = np.eye(4)

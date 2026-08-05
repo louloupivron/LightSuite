@@ -1,11 +1,7 @@
-# Marianna CMU — U87 mesoSPIM (0.8× 488_GFP overview, Perens LSFM via BrainGlobe)
+# Marianna CMU — U87 mesoSPIM (0.8× 488_GFP + 561_RFP overview, Allen CCF v3)
 #
-# Requires BrainGlobe atlas extra: uv sync --extra atlas
-# First run downloads perens_lsfm_mouse_20um to ~/.brainglobe/
-#
-# Registration uses the 488_GFP overview stack only (single-channel MI).
-# Segmentation was done on the 2.5× ROI; warp FIJI points to this 0.8× native
-# grid (via multires ROI→overview) before enabling import below.
+# Dual-channel registration: 488 (signal) + 561 (autofluorescence).
+# Atlas: Allen CCF v3 at 10 µm (local files under atlas/allen_CCF3_10um/).
 #
 # Use a fresh save_path and re-run from preprocess when changing atlas source.
 #
@@ -21,24 +17,25 @@ sample:
   name: Marianna
   source:
     format: tiff_stack
-    path: /media/gbm/NVME2/ALICe-pipelines-data/Marianna_CMU/U87_DJ_1week_488_GFP_0.8x.tif
+    path: /media/gbm/NVME2/ALICe-pipelines-data/Marianna_CMU/0.8x
     tiff_type: channelperfile
   scratch: /media/gbm/NVME2/lightsuite_scratch
-  save_path: /media/gbm/NVME2/ALICe-pipelines-data/Marianna_CMU/registered_perens
+  save_path: /media/gbm/NVME2/ALICe-pipelines-data/Marianna_CMU/registered_allen_MATLAB_conterpart
   voxel_um: [8.23, 8.23, 5.0]
 
 atlas:
-  provider: perens
-  source: brainglobe
-  # brainglobe_name: perens_lsfm_mouse_20um  # inferred from provider + resolution_um
-  resolution_um: 20
+  provider: allen
+  resolution_um: 10
+  atlas_dir: /home/gbm/ALICe-pipelines/LightSuite/atlas/allen_CCF3_10um/
 
 registration:
   channel_primary: 1
-  channel_secondary: null
+  channel_secondary: 2
+  dual_channel_mi_weight_autofluor: 0.5
+  dual_channel_mi_weight_signal: 1.0
   resolution_um: 20
-  cloud_threshold: 3
-  sample_cloud_subsample: 0.25
+  cloud_threshold: 5
+  sample_cloud_subsample: 0.1
   # Wide 2048^2 mesoSPIM frame: the brain fills ~28% of the canvas, so a 0.64 mm grid
   # leaves most control points under-constrained and the warp turns wavy. Coarser grid
   # plus the bending-energy penalty keeps it smooth.
@@ -46,11 +43,9 @@ registration:
   bspline_bending_weight: 2.0
   augment_points: true
   control_point_weight: 0.5
-  # Set after lightsuite brain check-orientation if needed:
-  # orientation: [1, 3, 2]
+  orientation: [1, -3, 2]
   bcpd_path: /home/gbm/ALICe-pipelines/LightSuite/softwares/bcpd-master/
 
-  orientation: [1, -3, -2]
 detection:
   enabled: false
 
