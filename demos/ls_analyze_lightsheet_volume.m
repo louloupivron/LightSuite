@@ -1,6 +1,5 @@
-% Make sure which invertElastixTransformCP -all returns 
-% C:\Users\ALICE_lightsheet\Documents\LightSuite-feature-multi-channel-registration\src\helpers\invertElastixTransformCP.m
-% otherwise add to path 
+% Add LightSuite to the path before running, e.g. addpath(genpath('path/to/LightSuite')).
+% Optional: which invertElastixTransformCP -all should list .../LightSuite/src/helpers/invertElastixTransformCP.m
 opts = struct();
 %=========================================================================
 % options to change
