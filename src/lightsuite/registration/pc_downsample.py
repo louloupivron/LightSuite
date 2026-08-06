@@ -35,17 +35,12 @@ def pcdenoise(
     num_neighbors: int = 4,
     std_ratio: float = 1.0,
 ) -> np.ndarray:
-    """Remove outliers like MATLAB ``pcdenoise(ptcloud)`` / PCL statistical outlier removal.
+    """Remove outliers like MATLAB ``pcdenoise(ptcloud)``.
 
-  1. For each point, average distance to ``num_neighbors`` nearest neighbours
-     (excluding the query point itself).
-    2. Compute the global mean and sample standard deviation of those averages.
-    3. Keep points with average distance ``<= mean + std_ratio * stddev``.
-
-    This matches PCL's ``StatisticalOutlierRemoval`` and MATLAB's documented
-    ``NumNeighbors`` / ``Threshold`` defaults (4 neighbours, 1σ). Open3D's
-    implementation queries ``nb_neighbors`` points including the query itself,
-    which is tighter and removes more points than MATLAB on dense clouds.
+    MathWorks' implementation averages **squared** k-nearest-neighbour distances
+    (``mean(dist.^2)``), not the Euclidean distances used by PCL/Open3D. With
+    ``NumNeighbors=4`` and ``Threshold=1.0`` it keeps points whose mean squared
+    distance is ``<= mean + std_ratio * stddev``.
     """
     points = np.asarray(points, dtype=np.float64)
     n = points.shape[0]
@@ -54,16 +49,16 @@ def pcdenoise(
 
     tree = cKDTree(points)
     dists, _ = tree.query(points, k=num_neighbors + 1, workers=-1)
-    mean_distances = dists[:, 1:].mean(axis=1)
+    mean_sq_distances = np.square(dists[:, 1:]).mean(axis=1)
 
-    mu = float(mean_distances.mean())
+    mu = float(mean_sq_distances.mean())
     variance = float(
-        ((mean_distances * mean_distances).sum() - mean_distances.sum() ** 2 / n)
+        ((mean_sq_distances * mean_sq_distances).sum() - mean_sq_distances.sum() ** 2 / n)
         / max(n - 1, 1)
     )
     stddev = float(np.sqrt(max(variance, 0.0)))
     cutoff = mu + std_ratio * stddev
-    return points[mean_distances <= cutoff]
+    return points[mean_sq_distances <= cutoff]
 
 
 def _kdtree_leaves(points: np.ndarray, max_num_points: int) -> list[np.ndarray]:
