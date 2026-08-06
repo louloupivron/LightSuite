@@ -5,13 +5,36 @@ from __future__ import annotations
 import numpy as np
 
 
+def pcdownsample_random(
+    points: np.ndarray,
+    percentage: float,
+    *,
+    preserve_structure: bool = False,
+    seed: int = 1,
+) -> np.ndarray:
+    """Port of ``pcdownsample(ptCloud, 'random', percentage, PreserveStructure=...)``."""
+    points = np.asarray(points, dtype=np.float64)
+    n = points.shape[0]
+    if n == 0 or percentage >= 1.0:
+        return points
+    num_out = max(1, int(round(n * percentage)))
+    if num_out >= n:
+        return points
+    rng = np.random.default_rng(seed)
+    # MATLAB ``pcdownsample(..., 'random', p)`` draws ``round(Count*p)`` points.
+    # ``PreserveStructure`` only affects organised clouds; ``extractSamplePoints.m``
+    # builds an unorganised cloud, so the flag is a no-op there.
+    del preserve_structure
+    return points[rng.choice(n, size=num_out, replace=False)]
+
+
 def pcdenoise(
     points: np.ndarray,
     *,
-    num_neighbors: int = 20,
-    std_ratio: float = 0.05,
+    num_neighbors: int = 4,
+    std_ratio: float = 1.0,
 ) -> np.ndarray:
-    """Remove outliers like MATLAB ``pcdenoise(ptcloud)`` defaults."""
+    """Remove outliers like MATLAB ``pcdenoise(ptcloud)`` defaults (4 neighbours, 1σ)."""
     points = np.asarray(points, dtype=np.float64)
     if points.shape[0] <= num_neighbors:
         return points

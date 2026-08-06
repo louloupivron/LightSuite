@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from lightsuite.registration.points import extract_sample_points
+from lightsuite.registration.points import extract_sample_points, _volume_mode_all
 
 
 def test_extract_sample_points_keeps_more_without_voxel_downsample() -> None:
@@ -23,3 +23,8 @@ def test_extract_sample_points_zeros_grad_below_intensity_cutoff() -> None:
     volume[10:14, 10:14, 5:7] = 1.0
     points = extract_sample_points(volume, threshold=0.5, subsample_fraction=1.0)
     assert points.shape[0] > 0
+
+
+def test_volume_mode_all_uses_fortran_flattening() -> None:
+    volume = np.arange(24, dtype=np.float32).reshape(2, 3, 4, order="F")
+    assert _volume_mode_all(volume) == 0.0

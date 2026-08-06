@@ -56,6 +56,10 @@ class InitRegistrationDiagnostics:
     status: InitRegistrationStatus
     status_message: str
     warnings: list[str] = field(default_factory=list)
+    sample_mask_points: int | None = None
+    sample_trim_points: int | None = None
+    sample_downsample_points: int | None = None
+    sample_denoise_points: int | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -87,6 +91,18 @@ class InitRegistrationDiagnostics:
                 f"[bold]Similarity[/bold]  {self.alignment_backend.upper()}  ·  "
                 f"scale {self.similarity_scale:.3f}  ·  {self.alignment_elapsed_s:.1f}s"
             ),
+        ]
+        if self.sample_mask_points is not None:
+            lines.insert(
+                4,
+                (
+                    "[dim]Sample extract stages[/dim]  "
+                    f"mask {self.sample_mask_points:,}  ·  trim {self.sample_trim_points:,}  ·  "
+                    f"down {self.sample_downsample_points:,}  ·  denoise {self.sample_denoise_points:,}"
+                ),
+            )
+        lines.extend(
+            [
             "",
             "[bold]Coarse fit[/bold]  (median / p95 NN distance, voxels)",
             (
@@ -108,7 +124,8 @@ class InitRegistrationDiagnostics:
                 f"[bold]Preview edges[/bold]  {self.warped_boundary_voxels:,} voxels "
                 f"({self.preview_elapsed_s:.1f}s)"
             ),
-        ]
+            ]
+        )
         style = _STATUS_STYLE[self.status]
         label = _STATUS_LABEL[self.status]
         lines.append("")

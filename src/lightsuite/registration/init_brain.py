@@ -27,7 +27,11 @@ from lightsuite.registration.init_diagnostics import (
 )
 from lightsuite.registration.orientation import orientation_path, resolve_orientation, save_orientation
 from lightsuite.registration.plots import save_initial_registration_previews
-from lightsuite.registration.points import extract_atlas_points_gradient, extract_sample_points
+from lightsuite.registration.points import (
+    extract_atlas_points_gradient,
+    extract_sample_points,
+    extract_sample_points_stages,
+)
 from lightsuite.registration.volume import (
     load_registration_volume,
     normalize_registration_volume,
@@ -83,7 +87,7 @@ def initialize_brain_registration(config: BrainPipelineConfig) -> RegOptsCheckpo
     newvol = normalize_registration_volume(backvol)
     t0 = time.perf_counter()
     volumereg = permute_brain_volume(newvol, permvec)
-    ls_cloud = extract_sample_points(
+    ls_cloud, sample_stages = extract_sample_points_stages(
         volumereg,
         config.registration.cloud_threshold,
         subsample_fraction=config.registration.sample_cloud_subsample,
@@ -158,6 +162,10 @@ def initialize_brain_registration(config: BrainPipelineConfig) -> RegOptsCheckpo
         cloud_threshold=float(config.registration.cloud_threshold),
         sample_cloud_subsample=float(config.registration.sample_cloud_subsample),
         sample_cloud_points=int(ls_cloud.shape[0]),
+        sample_mask_points=sample_stages.mask_points,
+        sample_trim_points=sample_stages.trim_points,
+        sample_downsample_points=sample_stages.downsample_points,
+        sample_denoise_points=sample_stages.denoise_points,
         atlas_cloud_points=int(tv_cloud.shape[0]),
         alignment_backend=backend,
         similarity_scale=scale,

@@ -94,12 +94,20 @@ def unpermute_brain_volume(volume: np.ndarray, permvec: list[int]) -> np.ndarray
 
 
 def normalize_registration_volume(volume: np.ndarray) -> np.ndarray:
-    """Scale sample volume to ~[0, 1] using central ROI (initializeRegistration.m)."""
-    cent = np.array(volume.shape) // 2
-    naround = max(1, int(round(min(cent) / 3)))
-    sl = tuple(slice(max(0, c - naround), min(s, c + naround + 1)) for c, s in zip(cent, volume.shape, strict=True))
-    center = volume[sl]
-    top_val = float(np.quantile(center, 0.999)) * 2.0
+    """Scale sample volume to ~[0, 1] using central ROI (initializeRegistration.m).
+
+    MATLAB indexes a diagonal through the center (``centind(:,1)``, ``centind(:,2)``,
+    ``centind(:,3)``), not a full cubic ROI.
+    """
+    vol = volume.astype(np.float32, copy=False)
+    cent_px = np.round(np.array(vol.shape, dtype=float) / 2.0).astype(int)
+    naround = max(1, int(round(float(np.min(cent_px)) / 3.0)))
+    offsets = np.arange(-naround, naround + 1, dtype=int)
+    idx0 = cent_px[0] + offsets
+    idx1 = cent_px[1] + offsets
+    idx2 = cent_px[2] + offsets
+    center_samples = vol[idx0, idx1, idx2]
+    top_val = float(np.quantile(center_samples, 0.999)) * 2.0
     if top_val <= 0:
-        top_val = float(volume.max()) or 1.0
-    return ((volume.astype(np.float32) - 0.0) / top_val).astype(np.float32)
+        top_val = float(vol.max()) or 1.0
+    return (vol / top_val).astype(np.float32)

@@ -11,6 +11,7 @@ from lightsuite.registration.pc_downsample import (
     matlab_triage_grid_step,
     nonuniform_grid,
     nonuniform_grid_sample,
+    pcdownsample_random,
 )
 
 
@@ -52,3 +53,10 @@ def test_downsample_for_triage_keeps_small_cloud() -> None:
     points = np.arange(30, dtype=float).reshape(10, 3)
     out = downsample_for_triage(points, 10_000)
     assert out.shape[0] > 0
+
+
+def test_pcdownsample_random_targets_rounded_fraction() -> None:
+    rng = np.random.default_rng(1)
+    points = rng.random((50_000, 3)) * 200.0
+    out = pcdownsample_random(points, 0.1, preserve_structure=True, seed=1)
+    assert out.shape[0] == 5_000

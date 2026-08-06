@@ -8,7 +8,7 @@ import numpy as np
 import tifffile
 
 from lightsuite.preprocess.slice_ops import write_z_downsampled_volume
-from lightsuite.registration.volume import load_registration_volume
+from lightsuite.registration.volume import load_registration_volume, normalize_registration_volume
 
 
 def test_load_registration_volume_stacks_multipage_tiff(tmp_path: Path) -> None:
@@ -34,3 +34,10 @@ def test_load_registration_volume_single_page_is_2d(tmp_path: Path) -> None:
     loaded = load_registration_volume(path)
     assert loaded.shape == (5, 6)
     assert loaded.ndim == 2
+
+
+def test_normalize_registration_volume_uses_center_diagonal() -> None:
+    volume = np.zeros((11, 11, 11), dtype=np.float32)
+    volume[5, 5, 5] = 100.0
+    normalized = normalize_registration_volume(volume)
+    assert np.isclose(normalized[5, 5, 5], 0.5, rtol=0.05)
