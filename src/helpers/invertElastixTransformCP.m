@@ -4,8 +4,9 @@ function stats = invertElastixTransformCP(transformDir, outputDir)
 %   Same role as matlab_elastix invertElastixTransformCP / invertElastixTransform, with
 %   parsing fixes for Elastix 5.1 logs: -f0 … -m0 with or without quotes (Windows logs),
 %   a single -p flag (quoted or not), deduplication of repeated -p lines, and no false
-%   matches on -fp / -mp. If the log omits the CLI, falls back to *_dual_f0.mhd in the
-%   same folder (LightSuite dual-channel temp layout). Parameter file path can also be
+%   matches on -fp / -mp. If the log omits the CLI, falls back to CMD/CMD_dual, then
+%   *_dual_f0.mhd (dual-channel) or *_target.mhd (single-channel matlab_elastix layout).
+%   Parameter file path can also be
 %   taken from elastix lines "end of ParameterFile: <path>".
 %
 %   Forwards fixedscale/movingscale to elastix from ElementSpacing in the fixed MHD (same
@@ -36,7 +37,8 @@ fixedFile = localParseFixedImagePath(txt, transformDir);
 if isempty(fixedFile)
     error('LightSuite:invertElastixTransformCP:NoFixed', ...
         ['Could not find -f0/-f fixed image path in %s. ', ...
-        'If the log omits the CLI, ensure *_dual_f0.mhd exists in that folder.'], logFile);
+        'If the log omits the CLI, ensure CMD/CMD_dual or *_target.mhd (single-channel) ', ...
+        'or *_dual_f0.mhd (dual-channel) exists in that folder.'], logFile);
 end
 if exist(fixedFile, 'file') ~= 2
     error('LightSuite:invertElastixTransformCP:FixedMissing', ...
@@ -147,6 +149,20 @@ end
 %--------------------------------------------------------------------------
 function fixedFile = localParseFixedImagePath(txt, transformDir)
 % Prefer log delimiters (-f0 … -m0) so quoted and unquoted Windows paths work.
+fixedFile = localParseFixedImagePathFromText(txt);
+if isempty(fixedFile) || exist(fixedFile, 'file') ~= 2
+    fixedFile = localParseFixedFromCmdFiles(transformDir);
+end
+if isempty(fixedFile) || exist(fixedFile, 'file') ~= 2
+    fixedFile = localGuessDualFixedMhd(transformDir);
+end
+if isempty(fixedFile) || exist(fixedFile, 'file') ~= 2
+    fixedFile = localGuessTargetMhd(transformDir);
+end
+end
+
+%--------------------------------------------------------------------------
+function fixedFile = localParseFixedImagePathFromText(txt)
 fixedFile = '';
 toks = regexp(txt, '-f0\s+(.+?)\s+-m0\b', 'tokens');
 if isempty(toks)
@@ -155,15 +171,40 @@ end
 if ~isempty(toks)
     fixedFile = localStripOuterQuotes(strtrim(toks{end}{1}));
 end
-if isempty(fixedFile) || exist(fixedFile, 'file') ~= 2
-    fixedFile = localGuessDualFixedMhd(transformDir);
+end
+
+%--------------------------------------------------------------------------
+function fixedFile = localParseFixedFromCmdFiles(transformDir)
+fixedFile = '';
+cmdNames = {'CMD_dual', 'CMD'};
+for ci = 1:numel(cmdNames)
+    cmdPath = fullfile(transformDir, cmdNames{ci});
+    if exist(cmdPath, 'file') ~= 2
+        continue
+    end
+    fixedFile = localParseFixedImagePathFromText(fileread(cmdPath));
+    if ~isempty(fixedFile) && exist(fixedFile, 'file') == 2
+        return
+    end
+    fixedFile = '';
 end
 end
 
 %--------------------------------------------------------------------------
 function fixedFile = localGuessDualFixedMhd(transformDir)
+fixedFile = localGuessMhdByPattern(transformDir, '*_dual_f0.mhd');
+end
+
+%--------------------------------------------------------------------------
+function fixedFile = localGuessTargetMhd(transformDir)
+% matlab_elastix elastix.m writes the fixed image as <outDirName>_target.mhd
+fixedFile = localGuessMhdByPattern(transformDir, '*_target.mhd');
+end
+
+%--------------------------------------------------------------------------
+function fixedFile = localGuessMhdByPattern(transformDir, pattern)
 fixedFile = '';
-d = [dir(fullfile(transformDir, '*_dual_f0.mhd')); dir(fullfile(transformDir, '*_dual_f0.MHD'))];
+d = [dir(fullfile(transformDir, pattern)); dir(fullfile(transformDir, upper(pattern)))];
 d = d(~[d.isdir]);
 if isempty(d)
     return
