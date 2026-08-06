@@ -11,6 +11,7 @@ from lightsuite.registration.pc_downsample import (
     matlab_triage_grid_step,
     nonuniform_grid,
     nonuniform_grid_sample,
+    pcdenoise,
     pcdownsample_random,
 )
 
@@ -60,3 +61,13 @@ def test_pcdownsample_random_targets_rounded_fraction() -> None:
     points = rng.random((50_000, 3)) * 200.0
     out = pcdownsample_random(points, 0.1, preserve_structure=True, seed=1)
     assert out.shape[0] == 5_000
+
+
+def test_pcdenoise_keeps_dense_cluster() -> None:
+    rng = np.random.default_rng(0)
+    core = rng.normal(size=(5_000, 3)) * 0.05
+    noise = rng.uniform(-5, 5, size=(200, 3))
+    points = np.vstack([core, noise])
+    out = pcdenoise(points, num_neighbors=4, std_ratio=1.0)
+    assert out.shape[0] > 4_500
+    assert out.shape[0] < points.shape[0]

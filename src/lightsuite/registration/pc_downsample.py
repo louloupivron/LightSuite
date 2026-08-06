@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+from scipy.spatial import cKDTree
 
 
 def pcdownsample_random(
@@ -34,23 +35,35 @@ def pcdenoise(
     num_neighbors: int = 4,
     std_ratio: float = 1.0,
 ) -> np.ndarray:
-    """Remove outliers like MATLAB ``pcdenoise(ptcloud)`` defaults (4 neighbours, 1σ)."""
+    """Remove outliers like MATLAB ``pcdenoise(ptcloud)`` / PCL statistical outlier removal.
+
+  1. For each point, average distance to ``num_neighbors`` nearest neighbours
+     (excluding the query point itself).
+    2. Compute the global mean and sample standard deviation of those averages.
+    3. Keep points with average distance ``<= mean + std_ratio * stddev``.
+
+    This matches PCL's ``StatisticalOutlierRemoval`` and MATLAB's documented
+    ``NumNeighbors`` / ``Threshold`` defaults (4 neighbours, 1σ). Open3D's
+    implementation queries ``nb_neighbors`` points including the query itself,
+    which is tighter and removes more points than MATLAB on dense clouds.
+    """
     points = np.asarray(points, dtype=np.float64)
-    if points.shape[0] <= num_neighbors:
-        return points
-    try:
-        import open3d as o3d
-    except ImportError:
+    n = points.shape[0]
+    if n <= num_neighbors:
         return points
 
-    pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(points))
-    _, inlier_idx = pcd.remove_statistical_outlier(
-        nb_neighbors=num_neighbors,
-        std_ratio=std_ratio,
+    tree = cKDTree(points)
+    dists, _ = tree.query(points, k=num_neighbors + 1, workers=-1)
+    mean_distances = dists[:, 1:].mean(axis=1)
+
+    mu = float(mean_distances.mean())
+    variance = float(
+        ((mean_distances * mean_distances).sum() - mean_distances.sum() ** 2 / n)
+        / max(n - 1, 1)
     )
-    if len(inlier_idx) == 0:
-        return points
-    return points[np.asarray(inlier_idx, dtype=int)]
+    stddev = float(np.sqrt(max(variance, 0.0)))
+    cutoff = mu + std_ratio * stddev
+    return points[mean_distances <= cutoff]
 
 
 def _kdtree_leaves(points: np.ndarray, max_num_points: int) -> list[np.ndarray]:
