@@ -58,7 +58,6 @@ def run_bspline_registration(
     use_multistep: bool,
     dual_weight_autofluor: float,
     dual_weight_signal: float,
-    bending_energy_weight: float = 0.0,
 ) -> BsplineRegistrationResult:
     """Run single- or dual-channel elastix B-spline registration."""
     if shutil.which("elastix") is None:
@@ -85,7 +84,6 @@ def run_bspline_registration(
         use_multistep=use_multistep,
         dual_weight_autofluor=dual_weight_autofluor,
         dual_weight_signal=dual_weight_signal,
-        bending_energy_weight=bending_energy_weight,
     )
     param_path = output_dir / "bspline_parameters.txt"
     write_parameter_file(param_path, params)
@@ -98,25 +96,33 @@ def run_bspline_registration(
 
     sp = [spacing_mm, spacing_mm, spacing_mm]
     if dual:
-        # One image pair per metric: AF+atlas, signal+atlas, then AF+atlas duplicates for
-        # the landmark and (optional) bending-energy slots, which need valid inputs but
-        # do not read the intensities.
         stem = output_dir.name
-        n_metrics = len(params["Metric"])
-        fixed_for_metric = [fixed_u16, fixed_secondary_u16] + [fixed_u16] * (n_metrics - 2)
-        cmd = ["elastix"]
-        for index in range(n_metrics):
-            base_f = output_dir / f"{stem}_dual_f{index}"
-            base_m = output_dir / f"{stem}_dual_m{index}"
-            write_mhd(fixed_for_metric[index], base_f, sp)
-            write_mhd(moving_u16, base_m, sp)
-            cmd += [
-                f"-f{index}",
-                str(base_f.with_suffix(".mhd")),
-                f"-m{index}",
-                str(base_m.with_suffix(".mhd")),
-            ]
-        cmd += [
+        base_f0 = output_dir / f"{stem}_dual_f0"
+        base_m0 = output_dir / f"{stem}_dual_m0"
+        base_f1 = output_dir / f"{stem}_dual_f1"
+        base_m1 = output_dir / f"{stem}_dual_m1"
+        base_f2 = output_dir / f"{stem}_dual_f2"
+        base_m2 = output_dir / f"{stem}_dual_m2"
+        write_mhd(fixed_u16, base_f0, sp)
+        write_mhd(moving_u16, base_m0, sp)
+        write_mhd(fixed_secondary_u16, base_f1, sp)
+        write_mhd(moving_u16, base_m1, sp)
+        write_mhd(fixed_u16, base_f2, sp)
+        write_mhd(moving_u16, base_m2, sp)
+        cmd = [
+            "elastix",
+            "-f0",
+            str(base_f0.with_suffix(".mhd")),
+            "-m0",
+            str(base_m0.with_suffix(".mhd")),
+            "-f1",
+            str(base_f1.with_suffix(".mhd")),
+            "-m1",
+            str(base_m1.with_suffix(".mhd")),
+            "-f2",
+            str(base_f2.with_suffix(".mhd")),
+            "-m2",
+            str(base_m2.with_suffix(".mhd")),
             "-out",
             str(output_dir),
             "-fp",

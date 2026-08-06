@@ -140,7 +140,6 @@ class TransformParamsCheckpoint:
     control_point_weight: float
     use_multistep: bool
     use_dual_channel_mi: bool
-    bspline_bending_weight: float = 0.0
     dual_channel_mi_weight_autofluor: float | None = None
     dual_channel_mi_weight_signal: float | None = None
     channel_secondary: int | None = None
@@ -225,7 +224,7 @@ def _build_affine_fit_diagnostics(
     n_manual: int,
     n_auto: int,
     autocpsample_kept: np.ndarray,
-    original_trans_vol: np.ndarray,
+    original_trans: np.ndarray,
     cpaffine: np.ndarray,
     cptshistology: np.ndarray,
     cpwt: float,
@@ -250,12 +249,10 @@ def _build_affine_fit_diagnostics(
         auto_err = errors[n_manual:]
         diag.median_error_auto_vox = float(np.median(auto_err))
         if autocpsample_kept.shape[0] == n_auto:
-            # original_trans maps native sample -> atlas space, so the coarse position of
-            # an auto sample point is the forward transform. (Manual points take the
-            # inverse because match-points clicks them on the already-warped sample.)
-            # This also arrives pre-swapped into volume (Y, X, Z) axes; swap_xy_transform
-            # is an involution, so re-applying it here used to undo the caller's swap.
-            coarse_atlas = transform_points(autocpsample_kept, original_trans_vol)
+            coarse_atlas = transform_points_inverse(
+                autocpsample_kept,
+                swap_xy_transform(original_trans),
+            )
             diag.median_coarse_auto_vox = float(
                 np.median(np.linalg.norm(coarse_atlas - af_atlas[n_manual:], axis=1))
             )
@@ -343,7 +340,7 @@ def _prepare_control_points(
         n_manual=n_manual,
         n_auto=n_auto,
         autocpsample_kept=autocpsample_kept,
-        original_trans_vol=original_trans_vol,
+        original_trans=original_trans_vol,
         cpaffine=cpaffine,
         cptshistology=cptshistology,
         cpwt=cpwt,
@@ -544,12 +541,11 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
         save_path=save_path,
         spacing_mm=spacing_mm,
         control_point_weight=cpwt,
-        n_histogram_bins=32,
+        n_histogram_bins=48,
         bspline_spatial_scale_mm=config.registration.bspline_spatial_scale_mm,
         use_multistep=use_multistep,
         dual_weight_autofluor=config.registration.dual_channel_mi_weight_autofluor,
         dual_weight_signal=config.registration.dual_channel_mi_weight_signal,
-        bending_energy_weight=config.registration.bspline_bending_weight,
     )
     bspline_elapsed = time.perf_counter() - t0
 
@@ -618,7 +614,6 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
         use_multistep=use_multistep,
         use_dual_channel_mi=use_dual,
         bspline_spatial_scale_mm=float(reg.bspline_spatial_scale_mm),
-        bspline_bending_weight=float(reg.bspline_bending_weight),
         dual_channel_mi_weight_autofluor=reg.dual_channel_mi_weight_autofluor if use_dual else None,
         dual_channel_mi_weight_signal=reg.dual_channel_mi_weight_signal if use_dual else None,
         affine_median_error_vox=affine_diag.median_error_vox,
@@ -656,7 +651,6 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
         control_point_weight=cpwt,
         use_multistep=use_multistep,
         use_dual_channel_mi=use_dual,
-        bspline_bending_weight=float(reg.bspline_bending_weight),
         dual_channel_mi_weight_autofluor=reg.dual_channel_mi_weight_autofluor
         if use_dual
         else None,

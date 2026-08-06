@@ -165,14 +165,6 @@ class RegistrationConfig(BaseModel):
     channel_primary: int = Field(default=1, ge=1)
     channel_secondary: int | None = Field(default=None, ge=1)
     bspline_spatial_scale_mm: float = Field(default=0.64, gt=0)
-    bspline_bending_weight: float = Field(
-        default=2.0,
-        ge=0,
-        description=(
-            "Weight of the elastix TransformBendingEnergyPenalty smoothness term "
-            "(0 disables it for MATLAB parity). Raise it if annotation contours look wavy."
-        ),
-    )
     control_point_weight: float = Field(default=0.2, ge=0, le=1)
     augment_points: bool = False
     dual_channel_mi_weight_autofluor: float = Field(default=0.4, ge=0, le=1)
