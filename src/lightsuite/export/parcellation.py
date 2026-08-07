@@ -56,6 +56,7 @@ def _accumulate_side(
         bg = values[background].astype(np.float64)
         medians[0] = np.median(bg)
         stds[0] = _std_per_group(bg)
+        volumes[0] = float(background.sum()) * voxel_mm3
 
     lookup = np.zeros(len(area_ids), dtype=np.float32)
     lookup_std = np.zeros(len(area_ids), dtype=np.float32)

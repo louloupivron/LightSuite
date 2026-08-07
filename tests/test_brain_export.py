@@ -23,6 +23,7 @@ def test_accumulate_side_median() -> None:
     assert med[1] == 30
     assert med[2] == 5
     assert std[1] == pytest.approx(10.0)
+    assert vol[0] == pytest.approx(0.001)
     assert vol[2] == pytest.approx(0.003)
 
 
