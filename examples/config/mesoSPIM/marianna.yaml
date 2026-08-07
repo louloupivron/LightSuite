@@ -34,8 +34,6 @@ registration:
   dual_channel_mi_weight_autofluor: 0.5
   dual_channel_mi_weight_signal: 1.0
   resolution_um: 20
-  cloud_threshold: 5
-  sample_cloud_subsample: 0.1
   bspline_spatial_scale_mm: 0.64
   control_point_weight: 0.2
   augment_points: false

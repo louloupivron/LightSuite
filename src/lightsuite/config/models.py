@@ -181,12 +181,24 @@ class RegistrationConfig(BaseModel):
         default=None,
         description="Axis permutation e.g. [1, 2, 3]. Loaded from brain_orientation.txt if unset.",
     )
-    cloud_threshold: float = Field(default=5.0, gt=0)
+    cloud_threshold: float = Field(
+        default=5.0,
+        gt=0,
+        description=(
+            "Gradient/intensity ratio gate for init-registration sample cloud extraction "
+            "(MATLAB initializeRegistration cloudthres=5). Lower values add more points; "
+            "only change when init_registration_diagnostics reports a sparse cloud."
+        ),
+    )
     sample_cloud_subsample: float = Field(
         default=0.1,
         gt=0,
         le=1.0,
-        description="Random fraction of gradient sample points kept (MATLAB pcdownsample=0.1).",
+        description=(
+            "Random fraction of gradient sample points kept after masking "
+            "(MATLAB extractSamplePoints hardcodes pcdownsample=0.1). "
+            "Not exposed in example configs; change only for low-level parity experiments."
+        ),
     )
     outlier_ratio: float = Field(default=0.01, ge=0, le=1)
     bcpd_path: str | None = Field(

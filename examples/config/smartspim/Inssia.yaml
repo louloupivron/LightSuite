@@ -22,8 +22,6 @@ registration:
   channel_primary: 1
   resolution_um: 20
   channel_secondary: null
-  cloud_threshold: 3
-  sample_cloud_subsample: 0.25
   bspline_spatial_scale_mm: 0.64
   augment_points: false
   control_point_weight: 0.2

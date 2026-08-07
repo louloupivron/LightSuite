@@ -22,8 +22,6 @@ registration:
   channel_primary: 1
   channel_secondary: null  # set to 2 when channel_561 is listed above
   resolution_um: 20
-  cloud_threshold: 3
-  sample_cloud_subsample: 0.25
   bspline_spatial_scale_mm: 0.64
   augment_points: true
   control_point_weight: 0.2

@@ -147,8 +147,6 @@ uv run lightsuite doctor -c my_mouse.yaml
 | `registration.correspondence_landmark_max_count` | Cap on total B-spline landmark pairs after merging correspondence anchors | `96` |
 | `registration.ap_pair_min_kept` | Minimum auto pairs kept after AP filtering | `24` |
 | `registration.orientation` | Axis permutation, e.g. `[1, 2, 3]`; flips use negative indices | auto |
-| `registration.cloud_threshold` | Edge threshold for coarse point extraction | `5.0` |
-| `registration.sample_cloud_subsample` | Fraction of gradient points kept (MATLAB `0.1`) | `0.1` |
 
 #### Export
 
@@ -216,13 +214,10 @@ Coarse similarity alignment of sample to atlas using BCPD (or Open3D ICP fallbac
 uv run lightsuite brain init-registration -c my_mouse.yaml
 ```
 
-For sparse lightsheet samples, increase point density in the YAML:
-
-```yaml
-registration:
-  cloud_threshold: 3.0          # lower = more edge points (default 5.0)
-  sample_cloud_subsample: 0.25  # higher = keep more points (MATLAB default 0.1)
-```
+Defaults match MATLAB (`cloudthres=5`, `pcdownsample=0.1` inside `extractSamplePoints.m`).
+You normally do not set these in YAML. If `init_registration_diagnostics.json` reports a
+**sparse sample cloud** and coarse alignment looks poor, see
+[Advanced init-registration tuning](#advanced-init-registration-tuning) below.
 
 **Outputs:**
 
@@ -231,6 +226,21 @@ registration:
 - `dim{1,2,3}_initial_registration.png` — eight sample slices per axis with warped atlas annotation edges overlaid (MATLAB `plotAnnotationComparison` style)
 
 If orientation is wrong, set `registration.orientation` in YAML or edit `brain_orientation.txt`, then re-run init-registration.
+
+#### Advanced init-registration tuning
+
+These parameters affect only the **coarse BCPD step** (`extractSamplePoints.m` port). They are
+omitted from example configs because MATLAB defaults work for most brains.
+
+| Field | Default | When to change |
+|-------|---------|----------------|
+| `registration.cloud_threshold` | `5.0` (MATLAB `cloudthres`) | Lower (e.g. `3.0`) if diagnostics warn of a sparse sample cloud and `dim*_initial_registration.png` looks under-constrained |
+| `registration.sample_cloud_subsample` | `0.1` (hardcoded in MATLAB) | Rarely change; fixed at MATLAB parity. Not listed in example YAMLs |
+
+```yaml
+registration:
+  cloud_threshold: 3.0   # advanced only — more gradient points for sparse samples
+```
 
 ### 4. Align slices (optional, recommended)
 
