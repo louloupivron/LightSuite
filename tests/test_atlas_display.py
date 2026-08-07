@@ -7,6 +7,8 @@ import pytest
 
 from lightsuite.atlas.display import (
     PLOT_VIEW_NAMES,
+    SliceDisplayTransform,
+    apply_slice_display_transform,
     canonical_view_slice,
     canonical_view_transform,
     cut_axis_for_plot_dim,
@@ -140,3 +142,19 @@ def test_display_coordinate_roundtrip(provider: str, cut_axis: int) -> None:
     back_row2, back_col2 = slice_pixels_from_layer_xy(layer_xy, slice_shape, cut_axis, provider)
     assert np.allclose(back_row2, row)
     assert np.allclose(back_col2, col)
+
+
+@pytest.mark.parametrize("k", [0, 1, 2, 3])
+@pytest.mark.parametrize("flip_ud", [False, True])
+@pytest.mark.parametrize("flip_lr", [False, True])
+def test_display_point_coords_track_rotated_image(k: int, flip_ud: bool, flip_lr: bool) -> None:
+    """Point remap must land on the same pixel as ``apply_slice_display_transform``."""
+    slice_shape = (61, 37)
+    transform = SliceDisplayTransform(rot90_k=k, flip_ud=flip_ud, flip_lr=flip_lr)
+    row, col = 34.0, 19.0
+    impulse = np.zeros(slice_shape, dtype=np.float32)
+    impulse[int(row), int(col)] = 1.0
+    displayed = apply_slice_display_transform(impulse, transform)
+    disp_row, disp_col = map_slice_pixels_to_display(row, col, slice_shape, transform)
+    assert displayed[int(round(float(disp_row))), int(round(float(disp_col)))] == 1.0
+    assert displayed.max() == 1.0

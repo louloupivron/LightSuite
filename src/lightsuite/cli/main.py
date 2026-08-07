@@ -202,6 +202,177 @@ def brain_convert_fiji_points(
     typer.echo(f"Wrote {n} points → {output_path}")
 
 
+@brain_app.command("import-matlab-control-points")
+def brain_import_matlab_control_points(
+    mat: str = typer.Option(
+        ...,
+        "--mat",
+        "-m",
+        help="MATLAB atlas2histology_tform.mat (or other *tform.mat with control points).",
+    ),
+    output: str | None = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Output JSON path (default: same folder as --mat, atlas2histology_tform.json).",
+    ),
+    save_path: str | None = typer.Option(
+        None,
+        "--save-path",
+        help="Sample save_path from config; writes atlas2histology_tform.json there.",
+    ),
+) -> None:
+    """Import MATLAB match-points session for Python register (parity with multiobjRegistration.m)."""
+    from lightsuite.gui.control_points import ControlPointSession
+    from lightsuite.import_.matlab_control_points import import_matlab_control_points
+
+    mat_path = Path(mat).expanduser()
+    if not mat_path.is_file():
+        msg = f"MATLAB file not found: {mat_path}"
+        raise typer.BadParameter(msg)
+
+    if save_path is not None:
+        out_path = Path(save_path).expanduser() / "atlas2histology_tform.json"
+    elif output is not None:
+        out_path = Path(output).expanduser()
+    else:
+        out_path = mat_path.with_name("atlas2histology_tform.json")
+
+    written = import_matlab_control_points(mat_path, output_json=out_path)
+    matched, total_sample, total_atlas = ControlPointSession.load(written).point_counts()
+    typer.echo(
+        f"Wrote {written} — {matched} matched pairs "
+        f"({total_sample} sample / {total_atlas} atlas points across slices)."
+    )
+
+
+@brain_app.command("migrate-control-point-session")
+def brain_migrate_control_point_session(
+    json_path: str | None = typer.Option(
+        None,
+        "--json",
+        "-j",
+        help="atlas2histology_tform.json to migrate.",
+    ),
+    save_path: str | None = typer.Option(
+        None,
+        "--save-path",
+        help="Sample save_path; migrates atlas2histology_tform.json there.",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Report how many points would be updated without writing.",
+    ),
+) -> None:
+    """Fix in-plane axis swap in Napari-authored control-point sessions (pre-v2 schema).
+
+    Do not run on sessions imported from MATLAB (``point_coord_source: matlab``).
+    Re-import those from ``.mat`` if needed.
+    """
+    from lightsuite.gui.control_points import (
+        COORD_SCHEMA_VERSION,
+        POINT_COORD_SOURCE_MATLAB,
+        ControlPointSession,
+        default_session_path,
+        migrate_napari_transposed_control_points,
+        session_needs_napari_transpose_migration,
+    )
+
+    if save_path is not None:
+        session_path = default_session_path(Path(save_path).expanduser())
+    elif json_path is not None:
+        session_path = Path(json_path).expanduser()
+    else:
+        msg = "Provide --json or --save-path."
+        raise typer.BadParameter(msg)
+
+    if not session_path.is_file():
+        msg = f"Session not found: {session_path}"
+        raise typer.BadParameter(msg)
+
+    session = ControlPointSession.load(session_path)
+    if session.point_coord_source == POINT_COORD_SOURCE_MATLAB:
+        typer.echo(
+            f"Skipping {session_path}: imported from MATLAB "
+            f"(point_coord_source={POINT_COORD_SOURCE_MATLAB!r})."
+        )
+        raise typer.Exit(0)
+
+    if not session_needs_napari_transpose_migration(session):
+        typer.echo(
+            f"No migration needed for {session_path} "
+            f"(coord_schema_version={session.coord_schema_version})."
+        )
+        raise typer.Exit(0)
+
+    if session.chooselist is not None:
+        chooselist = session.chooselist
+    else:
+        typer.echo(
+            "Warning: session has no chooselist; cannot migrate in-plane axes. "
+            "Open match-points once to populate chooselist, then re-run."
+        )
+        raise typer.Exit(1)
+
+    if dry_run:
+        n_hist = sum(len(s) for s in session.histology_control_points)
+        n_atlas = sum(len(s) for s in session.atlas_control_points)
+        typer.echo(
+            f"Would migrate {n_hist + n_atlas} point rows in {session_path} "
+            f"(schema v{session.coord_schema_version} -> v{COORD_SCHEMA_VERSION})."
+        )
+        raise typer.Exit(0)
+
+    updated = migrate_napari_transposed_control_points(session, chooselist)
+    session.save(session_path)
+    typer.echo(
+        f"Migrated {updated} point rows in {session_path} "
+        f"(coord_schema_version={COORD_SCHEMA_VERSION})."
+    )
+
+
+@brain_app.command("export-matlab-control-points")
+def brain_export_matlab_control_points(
+    json_path: str | None = typer.Option(
+        None,
+        "--json",
+        "-j",
+        help="atlas2histology_tform.json from Napari match-points.",
+    ),
+    save_path: str | None = typer.Option(
+        None,
+        "--save-path",
+        help="Sample save_path; reads atlas2histology_tform.json there.",
+    ),
+    output: str | None = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Output .mat path (default: atlas2histology_tform.mat beside the JSON).",
+    ),
+) -> None:
+    """Export Napari control points for MATLAB register (multiobjRegistration.m)."""
+    from lightsuite.gui.control_points import ControlPointSession, default_session_path
+    from lightsuite.import_.matlab_control_points import export_matlab_control_points
+
+    if save_path is not None:
+        session_path = default_session_path(Path(save_path).expanduser())
+    elif json_path is not None:
+        session_path = Path(json_path).expanduser()
+    else:
+        msg = "Provide --json or --save-path."
+        raise typer.BadParameter(msg)
+
+    out_path = Path(output).expanduser() if output is not None else None
+    written = export_matlab_control_points(session_path, output_mat=out_path)
+    matched, total_sample, total_atlas = ControlPointSession.load(session_path).point_counts()
+    typer.echo(
+        f"Wrote {written} — {matched} matched pairs "
+        f"({total_sample} sample / {total_atlas} atlas points across slices)."
+    )
+
+
 @brain_app.command("inspect-imports")
 def brain_inspect_imports(
     config: str = typer.Option(..., "--config", "-c", help="Pipeline YAML config."),

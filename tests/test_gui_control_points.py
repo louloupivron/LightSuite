@@ -6,6 +6,7 @@ from pathlib import Path
 
 import nibabel as nib
 import numpy as np
+import pytest
 import tifffile
 import yaml
 
@@ -20,12 +21,21 @@ from lightsuite.gui.match_points_brain import (
 )
 from lightsuite.registration.warp import warp_volume_affine
 from lightsuite.gui.chooselist import generate_control_point_list
-from lightsuite.gui.control_points import ControlPointSession, load_registration_control_point_session
+from lightsuite.gui.control_points import (
+    ControlPointSession,
+    COORD_SCHEMA_VERSION,
+    POINT_COORD_SOURCE_MATLAB,
+    POINT_COORD_SOURCE_NAPARI,
+    load_registration_control_point_session,
+    migrate_napari_transposed_control_points,
+    swap_in_plane_volume_coords,
+)
 from lightsuite.atlas.display import canonical_view_transform
 from lightsuite.gui.slices import (
     layer_xy_from_slice_pixels,
     map_display_pixels_to_slice,
     map_slice_pixels_to_display,
+    prepare_display_slice,
     slice_pixels_from_layer_xy,
     volume_index_to_image,
 )
@@ -114,6 +124,50 @@ def test_display_transform_pixel_roundtrip_with_flip() -> None:
     back_row, back_col = map_display_pixels_to_slice(disp_row, disp_col, slice_shape, transform)
     assert np.allclose(back_row, row)
     assert np.allclose(back_col, col)
+
+
+@pytest.mark.parametrize("provider", ["allen", "perens"])
+@pytest.mark.parametrize("cut_axis", [1, 2, 3])
+def test_napari_layer_coords_track_displayed_slice(provider: str, cut_axis: int) -> None:
+    """Napari Points data is (row, col); must index the displayed image the same way."""
+    slice_shape = (61, 37)
+    row, col = 34.0, 19.0
+    impulse = np.zeros(slice_shape, dtype=np.float32)
+    impulse[int(row), int(col)] = 1.0
+    displayed = prepare_display_slice(impulse, cut_axis, provider)
+    layer_rc = layer_xy_from_slice_pixels(row, col, slice_shape, cut_axis, provider)
+    disp_row, disp_col = float(layer_rc[0, 0]), float(layer_rc[0, 1])
+    assert displayed[int(round(disp_row)), int(round(disp_col))] == 1.0
+    assert displayed.max() == 1.0
+
+
+def test_migrate_napari_transposed_control_points() -> None:
+    chooserow = np.array([12, 2, 1, 1], dtype=int)
+    correct = [10.0, 12.0, 20.0, 0.0]
+    corrupted = swap_in_plane_volume_coords(correct, int(chooserow[1]))
+    session = ControlPointSession.empty(np.eye(4), n_slices=1)
+    session.coord_schema_version = 1
+    session.point_coord_source = POINT_COORD_SOURCE_NAPARI
+    session.histology_control_points[0] = [corrupted]
+    session.atlas_control_points[0] = [corrupted.copy()]
+
+    updated = migrate_napari_transposed_control_points(session, [chooserow.tolist()])
+    assert updated == 2
+    assert session.coord_schema_version == COORD_SCHEMA_VERSION
+    assert session.histology_control_points[0][0][:3] == correct[:3]
+    assert session.atlas_control_points[0][0][:3] == correct[:3]
+
+
+def test_migrate_skips_matlab_imported_sessions() -> None:
+    session = ControlPointSession.empty(np.eye(4), n_slices=1)
+    session.coord_schema_version = 1
+    session.point_coord_source = POINT_COORD_SOURCE_MATLAB
+    session.histology_control_points[0] = [[1.0, 2.0, 3.0, 0.0]]
+    before = session.histology_control_points[0][0].copy()
+    updated = migrate_napari_transposed_control_points(session, [[10, 1, 1, 1]])
+    assert updated == 0
+    assert session.histology_control_points[0][0] == before
+    assert session.coord_schema_version == COORD_SCHEMA_VERSION
 
 
 def test_chooselist_slice_label() -> None:
@@ -219,3 +273,24 @@ def test_prepare_match_points_session(tmp_path: Path) -> None:
     session = ControlPointSession.load(session_path)
     assert session.chooselist is not None
     assert len(session.chooselist) > 0
+
+
+def test_chooselist_matches_matlab_row_layout() -> None:
+    """generate_cp_list_alt.m's column-major reshape/permute fixes each row's cut axis.
+
+    Verified against a MATLAB-authored atlas2histology_tform.mat: every annotated
+    cell's cut axis equalled (row % 3) + 1. Getting this wrong makes cell *i* of a
+    MATLAB file refer to a different anatomical slice in Python.
+    """
+    chooselist = generate_control_point_list((461, 621, 323))
+    assert chooselist.shape == (240, 4)
+    assert np.array_equal(chooselist[:, 1], (np.arange(240) % 3) + 1)
+
+    indmat = np.array([[1, 1], [1, 2], [2, 1], [2, 2]])
+    assert np.array_equal(chooselist[:, 2:], indmat[(np.arange(240) // 3) % 4])
+
+
+def test_chooselist_slice_indices_stay_in_volume() -> None:
+    shape = (461, 621, 323)
+    for index, axis in generate_control_point_list(shape)[:, :2]:
+        assert 1 <= index <= shape[axis - 1]

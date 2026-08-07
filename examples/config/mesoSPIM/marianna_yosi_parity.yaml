@@ -1,0 +1,51 @@
+# Marianna CMU — Yosi MATLAB/Python register parity (Perens 20 µm, single channel)
+#
+# MATLAB reference:
+#   .../MATLAB_python_comparison/register_Yosi_test
+#
+# Fresh Python run:
+#   uv run python scratch_yosi_matlab_parity.py setup
+#   uv run python scratch_yosi_matlab_parity.py register
+#   uv run python scratch_yosi_matlab_parity.py compare
+#
+# Optional (on MATLAB machine, once per save_path):
+#   export_regopts_for_python('F:\...\register_Yosi_test');
+
+sample:
+  name: Marianna
+  source:
+    format: tiff_stack
+    path: /run/user/1002/gvfs/smb-share:server=h1data1.wysscenter.ch,share=computingdata/Alice/0003_CBT_WYSS_LIGHTSHEET/DATA/MESOSPIM/Marianna CMU
+    tiff_type: channelperfile
+  scratch: /media/gbm/NVME2/lightsuite_scratch
+  save_path: /media/gbm/NVME2/ALICe-pipelines-data/Marianna_CMU/MATLAB_python_comparison/register_Yosi_test_python
+  voxel_um: [8.23, 8.23, 5.0]
+
+atlas:
+  provider: perens
+  resolution_um: 20
+  atlas_dir: /home/gbm/ALICe-pipelines/LightSuite/atlas/perens_20um/
+
+registration:
+  channel_primary: 1
+  channel_secondary: null
+  resolution_um: 20
+  bspline_spatial_scale_mm: 0.64
+  control_point_weight: 0.6
+  augment_points: false
+  orientation: [2, 1, 3]
+  bcpd_path: /home/gbm/ALICe-pipelines/LightSuite/softwares/bcpd-master/
+  bspline_bending_weight: 0
+  use_slice_correspondence_affine: false
+  use_slice_correspondence_landmarks: false
+
+detection:
+  enabled: false
+
+compute:
+  use_gpu: false
+  workers: 4
+
+export:
+  save_registered_volume: false
+  write_cells_csv: false

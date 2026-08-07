@@ -38,40 +38,78 @@ def generate_ap_alignment_list(
     ).astype(int)
 
 
+_CP_N_PER_SIDE = 20
+_CP_INDMAT = np.array([[1, 1], [1, 2], [2, 1], [2, 2]], dtype=int)
+
+# MATLAB ``rng(1); randperm(20)`` from generate_cp_list_alt.m, 1-based.
+#
+# MATLAB seeds the Mersenne Twister; numpy's default_rng uses PCG64, so the two
+# streams differ and the row order cannot be reproduced numerically. Set this to
+# the MATLAB values to make Python chooselist rows line up with MATLAB-authored
+# ``atlas2histology_tform.mat`` cells. While ``None``, Python falls back to its
+# own deterministic permutation, which is self-consistent but not MATLAB-compatible.
+MATLAB_IPERM_20: tuple[int, ...] = (
+    3, 15, 6, 19, 5, 7, 20, 13, 4, 8, 9, 1, 17, 11, 10, 18, 16, 12, 2, 14
+)
+
+
+def _cp_iperm() -> np.ndarray:
+    """Zero-based permutation of the 20 per-side entries (MATLAB ``iperm``)."""
+    if MATLAB_IPERM_20 is not None:
+        perm = np.asarray(MATLAB_IPERM_20, dtype=int) - 1
+        if sorted(perm.tolist()) != list(range(_CP_N_PER_SIDE)):
+            msg = f"MATLAB_IPERM_20 must be a permutation of 1..{_CP_N_PER_SIDE}"
+            raise ValueError(msg)
+        return perm
+    return np.random.default_rng(1).permutation(_CP_N_PER_SIDE)
+
+
+def matlab_chooselist_is_available() -> bool:
+    """True when ``generate_control_point_list`` reproduces MATLAB row order."""
+    return MATLAB_IPERM_20 is not None
+
+
 def generate_control_point_list(volume_shape: tuple[int, int, int]) -> np.ndarray:
-    """Return chooselist array with columns [slice_index, axis, flag_a, flag_b]."""
-    ny, nx, nz = volume_shape
-    nmin = min(ny, nx, nz)
+    """Return chooselist array with columns [slice_index, axis, flag_a, flag_b].
+
+    Faithful port of ``generate_cp_list_alt.m``. MATLAB reshapes column-major
+    throughout, so the block partition and row order both differ from a naive
+    row-major translation; getting this wrong makes cell *i* of a MATLAB
+    ``atlas2histology_tform.mat`` refer to a different anatomical slice.
+    """
+    n_per_side = _CP_N_PER_SIDE
+    n_types = int(_CP_INDMAT.shape[0])
+    nmin = min(volume_shape)
     minstart = int(np.ceil(nmin / 20))
-    n_per_side = 20
-    indmat = np.array([[1, 1], [1, 2], [2, 1], [2, 2]], dtype=int)
-    n_types = indmat.shape[0]
 
-    data_all: list[np.ndarray] = []
-    for idim in range(3):
-        axis_size = volume_shape[idim]
-        sids = np.round(np.linspace(minstart, axis_size - minstart, n_per_side * n_types)).astype(int)
-        sids = sids.reshape(n_types, n_per_side)
-        for ii in range(n_types):
-            block = np.column_stack(
-                [
-                    sids[ii, :],
-                    np.full(n_per_side, idim + 1, dtype=int),
-                    np.full(n_per_side, indmat[ii, 0], dtype=int),
-                    np.full(n_per_side, indmat[ii, 1], dtype=int),
-                ]
+    # MATLAB ``cat(1, dataall{:})`` linearises the 3 x Ntypes cell column-major,
+    # so ``idim`` varies fastest inside each ``ii`` group.
+    blocks: list[np.ndarray] = []
+    for ii in range(n_types):
+        for idim in range(3):
+            flat = np.round(
+                np.linspace(minstart, volume_shape[idim] - minstart, n_per_side * n_types)
+            ).astype(int)
+            sids = flat.reshape(n_types, n_per_side, order="F")
+            blocks.append(
+                np.column_stack(
+                    [
+                        sids[ii],
+                        np.full(n_per_side, idim + 1, dtype=int),
+                        np.full(n_per_side, _CP_INDMAT[ii, 0], dtype=int),
+                        np.full(n_per_side, _CP_INDMAT[ii, 1], dtype=int),
+                    ]
+                )
             )
-            data_all.append(block)
+    stacked = np.vstack(blocks)
 
-    minidx = min(arr.shape[0] for arr in data_all)
-    data_all = [arr[:minidx, :] for arr in data_all]
-    cplist = np.vstack(data_all)
-
-    rng = np.random.default_rng(1)
-    iperm = rng.permutation(n_per_side)
-    reshaped = cplist.reshape(n_per_side, 3, n_types, n_types)
-    cplist = reshaped[iperm, :, :, :].transpose(3, 1, 2, 0).reshape(n_types, -1).T
-    return cplist.astype(int)
+    # reshape([Nperside 3 Ntypes Ntypes]) -> permute([4 2 3 1]) -> reshape(Ntypes, [])'
+    # resolves to: row j reads stacked row iperm[j // 12] + 20 * (j % 3) + 60 * ((j // 3) % 4).
+    iperm = _cp_iperm()
+    n_rows = n_per_side * 3 * n_types
+    rows = np.arange(n_rows)
+    source = iperm[rows // 12] + n_per_side * (rows % 3) + 60 * ((rows // 3) % n_types)
+    return stacked[source].astype(int)
 
 
 def generate_cord_longitudinal_list(

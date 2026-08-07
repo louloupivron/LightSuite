@@ -63,10 +63,10 @@ def rotate_slice_pixel_coords(
     if k == 0:
         return row_a, col_a
     if k == 1:
-        return col_a, height - 1 - row_a
+        return width - 1 - col_a, row_a
     if k == 2:
         return height - 1 - row_a, width - 1 - col_a
-    return width - 1 - col_a, row_a
+    return col_a, height - 1 - row_a
 
 
 def map_slice_pixels_to_display(
@@ -105,14 +105,14 @@ def map_display_pixels_to_slice(
     if k == 0:
         return row_a, col_a
     if k == 1:
-        orig_col = row_a
-        orig_row = height - 1 - col_a
+        orig_row = col_a
+        orig_col = width - 1 - row_a
     elif k == 2:
         orig_row = height - 1 - row_a
         orig_col = width - 1 - col_a
     else:
-        orig_row = col_a
-        orig_col = width - 1 - row_a
+        orig_row = height - 1 - col_a
+        orig_col = row_a
     return orig_row, orig_col
 
 

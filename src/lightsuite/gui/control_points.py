@@ -9,6 +9,74 @@ from typing import Any
 
 import numpy as np
 
+COORD_SCHEMA_VERSION = 2
+POINT_COORD_SOURCE_MATLAB = "matlab"
+POINT_COORD_SOURCE_NAPARI = "napari"
+
+
+def in_plane_volume_axes(cut_axis_1based: int) -> tuple[int, int]:
+    """0-based volume axes in the slice plane for a 1-based cut axis."""
+    cut = int(cut_axis_1based) - 1
+    axes = [d for d in range(3) if d != cut]
+    return axes[0], axes[1]
+
+
+def swap_in_plane_volume_coords(point: list[float], cut_axis_1based: int) -> list[float]:
+    """Swap the two in-plane components (undo legacy napari transpose storage)."""
+    out = list(point)
+    axis_a, axis_b = in_plane_volume_axes(cut_axis_1based)
+    out[axis_a], out[axis_b] = out[axis_b], out[axis_a]
+    return out
+
+
+def migrate_napari_transposed_control_points(
+    session: "ControlPointSession",
+    chooselist: np.ndarray | list[list[int]],
+) -> int:
+    """Fix in-plane axis swap from pre-v2 napari match-points sessions.
+
+    Returns the number of point rows updated. Skips sessions imported from MATLAB
+    (``point_coord_source == "matlab"``) or already at ``coord_schema_version >= 2``.
+    """
+    if session.coord_schema_version >= COORD_SCHEMA_VERSION:
+        return 0
+    if session.point_coord_source == POINT_COORD_SOURCE_MATLAB:
+        session.coord_schema_version = COORD_SCHEMA_VERSION
+        return 0
+
+    rows = np.asarray(chooselist, dtype=int).reshape(-1, 4)
+    updated = 0
+    for slice_idx, chooserow in enumerate(rows):
+        cut_axis = int(chooserow[1])
+        if cut_axis not in (1, 2, 3):
+            continue
+        for store in (session.histology_control_points, session.atlas_control_points):
+            pts = store[slice_idx]
+            if not pts:
+                continue
+            for pt_idx, point in enumerate(pts):
+                store[slice_idx][pt_idx] = swap_in_plane_volume_coords(point, cut_axis)
+                updated += 1
+    session.coord_schema_version = COORD_SCHEMA_VERSION
+    if session.point_coord_source is None:
+        session.point_coord_source = POINT_COORD_SOURCE_NAPARI
+    return updated
+
+
+def session_needs_napari_transpose_migration(session: ControlPointSession) -> bool:
+    """True when a legacy Napari session likely has transposed in-plane storage."""
+    return (
+        session.coord_schema_version < COORD_SCHEMA_VERSION
+        and session.point_coord_source != POINT_COORD_SOURCE_MATLAB
+    )
+
+
+def mark_session_saved_from_napari(session: ControlPointSession) -> None:
+    """Record that coordinates were written with the v2 napari (row, col) schema."""
+    session.coord_schema_version = COORD_SCHEMA_VERSION
+    if session.point_coord_source != POINT_COORD_SOURCE_MATLAB:
+        session.point_coord_source = POINT_COORD_SOURCE_NAPARI
+
 
 @dataclass
 class ControlPointSession:
@@ -21,6 +89,8 @@ class ControlPointSession:
     chooselist: list[list[int]] | None = None
     # Per chooselist entry: atlas plane index along the cut axis (1-based). None = auto on load.
     atlas_slice_indices: list[int] | None = None
+    coord_schema_version: int = COORD_SCHEMA_VERSION
+    point_coord_source: str | None = None
 
     @classmethod
     def empty(cls, ori_trans: np.ndarray, n_slices: int) -> ControlPointSession:
@@ -29,6 +99,8 @@ class ControlPointSession:
             histology_control_points=[[] for _ in range(n_slices)],
             atlas_control_points=[[] for _ in range(n_slices)],
             ori_trans=ori_trans.tolist(),
+            coord_schema_version=COORD_SCHEMA_VERSION,
+            point_coord_source=POINT_COORD_SOURCE_NAPARI,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -39,6 +111,8 @@ class ControlPointSession:
             "ori_trans": self.ori_trans,
             "chooselist": self.chooselist,
             "atlas_slice_indices": self.atlas_slice_indices,
+            "coord_schema_version": self.coord_schema_version,
+            "point_coord_source": self.point_coord_source,
         }
 
     def save(self, path: Path) -> None:
@@ -52,6 +126,8 @@ class ControlPointSession:
         raw.setdefault("atlas_slice_indices", None)
         raw.setdefault("chooselist", None)
         raw.setdefault("ori_trans", np.eye(4).tolist())
+        raw.setdefault("coord_schema_version", 1)
+        raw.setdefault("point_coord_source", None)
         if "atlas2histology_tform" not in raw:
             raw["atlas2histology_tform"] = np.eye(4).tolist()
         return cls(**raw)
@@ -138,10 +214,23 @@ def load_registration_control_point_session(
     save_path: Path,
     *,
     original_trans: list[list[float]] | np.ndarray,
+    prefer_matlab: bool = False,
 ) -> ControlPointSession:
     """Load manual control points if present; otherwise an empty session (MATLAB optional *tform.mat)."""
-    path = default_session_path(save_path)
-    if path.is_file():
-        return ControlPointSession.load(path)
+    from lightsuite.import_.matlab_control_points import (
+        find_matlab_control_point_session,
+        load_control_point_session_from_mat,
+    )
+
+    save_path = save_path.expanduser()
+    json_path = default_session_path(save_path)
+    mat_path = find_matlab_control_point_session(save_path)
     matrix = np.asarray(original_trans, dtype=float)
+
+    if prefer_matlab and mat_path is not None:
+        return load_control_point_session_from_mat(mat_path, original_trans=matrix)
+    if json_path.is_file():
+        return ControlPointSession.load(json_path)
+    if mat_path is not None:
+        return load_control_point_session_from_mat(mat_path, original_trans=matrix)
     return ControlPointSession.empty(matrix, n_slices=1)

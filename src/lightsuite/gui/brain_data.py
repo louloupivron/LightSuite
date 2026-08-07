@@ -24,7 +24,12 @@ from lightsuite.gui.slice_correspondence import (
     SliceCorrespondence,
     default_correspondence_path,
 )
-from lightsuite.gui.slices import prepare_display_slice, volume_index_to_image
+from lightsuite.gui.slices import (
+    match_points_atlas_slice,
+    match_points_sample_slice,
+    prepare_display_slice,
+    volume_index_to_image,
+)
 from lightsuite.preprocess.checkpoint import RegOptsCheckpoint
 from lightsuite.registration.volume import (
     load_registration_volume,
@@ -281,6 +286,15 @@ def load_brain_match_points_data(config: BrainPipelineConfig) -> BrainMatchPoint
         session = ControlPointSession.empty(original_trans, chooselist.shape[0])
         session.chooselist = chooselist.tolist()
 
+    # A session authored elsewhere (notably imported from MATLAB) carries the slice
+    # geometry its points were placed on; regenerating would put them on other slices.
+    # Rows the importer could not recover carry axis 0 and fall back to the generated row.
+    if session.chooselist is not None and len(session.chooselist) == int(chooselist.shape[0]):
+        stored = np.asarray(session.chooselist, dtype=int).reshape(-1, 4)
+        usable = np.isin(stored[:, 1], (1, 2, 3))
+        chooselist = np.where(usable[:, None], stored, chooselist)
+    session.chooselist = chooselist.tolist()
+
     if slice_correspondence is not None and slice_correspondence.has_confirmed_anchors():
         has_manual_planes = (
             session.atlas_slice_indices is not None
@@ -420,22 +434,12 @@ def slice_pair(
     atlas_plane: int | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     row = np.asarray(data.chooselist[slice_idx - 1], dtype=int)
-    cut_axis = int(row[1])
     sample = _normalize_display(
-        prepare_display_slice(
-            volume_index_to_image(data.sample_volume, row),
-            cut_axis,
-            data.atlas_provider,
-        )
+        match_points_sample_slice(data.sample_volume, row, data.atlas_provider)
     )
     plane = atlas_plane if atlas_plane is not None else resolve_atlas_plane_index(data, slice_idx)
-    atlas_row = chooserow_with_atlas_plane(row, plane)
     atlas = _normalize_display(
-        prepare_display_slice(
-            volume_index_to_image(data.atlas_template, atlas_row),
-            cut_axis,
-            data.atlas_provider,
-        )
+        match_points_atlas_slice(data.atlas_template, row, plane, data.atlas_provider)
     )
     return sample, atlas
 

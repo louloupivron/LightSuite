@@ -18,7 +18,7 @@ from lightsuite.gui.cord_data import (
     set_atlas_plane_index,
     slice_pair,
 )
-from lightsuite.gui.control_points import ControlPointSession
+from lightsuite.gui.control_points import ControlPointSession, mark_session_saved_from_napari
 from lightsuite.gui.slices import (
     layer_xy_from_slice_pixels,
     slice_pixels_from_layer_xy,
@@ -508,6 +508,7 @@ def run_spinal_match_points(
 
     @magicgui(call_button="Save && Close")
     def save_controls() -> None:
+        mark_session_saved_from_napari(data.session)
         data.session.save(data.session_path)
         show_info(f"Saved {data.session_path}")
         QTimer.singleShot(0, viewer.close)
@@ -601,5 +602,6 @@ def run_spinal_match_points(
     )
     napari.run()
     if not data.session_path.is_file():
+        mark_session_saved_from_napari(data.session)
         data.session.save(data.session_path)
     return data.session_path

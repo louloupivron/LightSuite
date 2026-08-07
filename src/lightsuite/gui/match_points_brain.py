@@ -14,14 +14,16 @@ from lightsuite.registration.warp import warp_volume_affine
 from lightsuite.gui.brain_data import (
     BrainMatchPointsData,
     atlas_cut_axis_size,
+    chooserow_with_atlas_plane,
     load_brain_match_points_data,
     prepare_brain_match_points_session,
     resolve_atlas_plane_index,
     set_atlas_plane_index,
     slice_pair,
 )
-from lightsuite.gui.control_points import ControlPointSession
+from lightsuite.gui.control_points import ControlPointSession, mark_session_saved_from_napari
 from lightsuite.gui.slices import (
+    blank_image_alt,
     layer_xy_from_slice_pixels,
     prepare_display_slice,
     slice_pixels_from_layer_xy,
@@ -180,6 +182,8 @@ def _boundary_overlay(
     kernel = np.ones((3, 3)) / 9.0
     blurred = convolve(edges, kernel, mode="constant")
     overlay = (np.round(blurred) != edges).astype(float)
+    # Mask before the display remap so the overlay tracks the sample panel exactly.
+    overlay = blank_image_alt(overlay, np.asarray(chooserow, dtype=int).ravel()[2:4])
     return prepare_display_slice(overlay, int(chooserow[1]), atlas_provider)
 
 
@@ -351,14 +355,16 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
         # change handlers (_sample_changed / _atlas_changed), which call _try_align
         # and would otherwise recurse until vispy transform updates overflow.
         chooserow = np.asarray(data.chooselist[idx - 1], dtype=int)
-        slice_shape = _raw_slice_shape(data.sample_volume, chooserow)
+        sample_shape = _raw_slice_shape(data.sample_volume, chooserow)
+        atlas_row = chooserow_with_atlas_plane(chooserow, state["_atlas_plane"])
+        atlas_shape = _raw_slice_shape(data.atlas_template, atlas_row)
         with sample_pts.events.data.blocker(), atlas_pts.events.data.blocker():
             _apply_layer_points(
                 sample_pts,
                 _volume_points_to_layer_xy(
                     data.session.histology_control_points[idx - 1],
                     chooserow,
-                    slice_shape=slice_shape,
+                    slice_shape=sample_shape,
                     atlas_provider=data.atlas_provider,
                 ),
             )
@@ -367,7 +373,7 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
                 _volume_points_to_layer_xy(
                     data.session.atlas_control_points[idx - 1],
                     chooserow,
-                    slice_shape=slice_shape,
+                    slice_shape=atlas_shape,
                     atlas_provider=data.atlas_provider,
                 ),
             )
@@ -405,12 +411,17 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
         layer = sample_pts if panel == "sample" else atlas_pts
         plane = _resolved_atlas_plane() if panel == "atlas" else None
         chooserow = np.asarray(data.chooselist[idx - 1], dtype=int)
+        if panel == "atlas":
+            atlas_row = chooserow_with_atlas_plane(chooserow, plane or chooserow[0])
+            slice_shape = _raw_slice_shape(data.atlas_template, atlas_row)
+        else:
+            slice_shape = _raw_slice_shape(data.sample_volume, chooserow)
         _sync_store_from_layer(
             data.session,
             idx,
             panel,
             np.asarray(layer.data, dtype=float),
-            slice_shape=_raw_slice_shape(data.sample_volume, chooserow),
+            slice_shape=slice_shape,
             atlas_provider=data.atlas_provider,
             atlas_plane=plane,
         )
@@ -530,6 +541,7 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
 
     @magicgui(call_button="Save && Close")
     def save_controls() -> None:
+        mark_session_saved_from_napari(data.session)
         data.session.save(data.session_path)
         show_info(f"Saved {data.session_path}")
         QTimer.singleShot(0, viewer.close)
