@@ -117,10 +117,58 @@ def test_build_bspline_params_single_channel() -> None:
     assert len(params["Metric"]) == 2
     assert params["Metric1Weight"] == 0.2
     assert params["SP_a"] == 500
-    # Must mirror matlab_elastix elastix_default.yml: the robust ASGD step estimator,
-    # otherwise elastix falls back to "Original" and folds the B-spline grid.
+    # Robust ASGD step estimator; elastix's built-in "Original" folds the B-spline grid.
     assert params["ASGDParameterEstimationMethod"] == "DisplacementDistribution"
     assert params["HowToCombineTransforms"] == "Compose"
+    # AdvancedMattesMutualInformation prefers these over NumberOfHistogramBins, and
+    # matlab_elastix elastix_default.yml always writes them.
+    assert params["NumberOfFixedHistogramBins"] == 48
+    assert params["NumberOfMovingHistogramBins"] == 48
+    # No penalty term by default: single-channel keeps the scalar MATLAB-shaped entries.
+    assert params["ImageSampler"] == "RandomCoordinate"
+
+
+def test_build_bspline_params_adds_bending_energy_penalty() -> None:
+    params = build_bspline_params(
+        dual_channel=False,
+        control_point_weight=0.2,
+        n_histogram_bins=32,
+        bspline_spatial_scale_mm=1.0,
+        fixed_shape=(20, 20, 20),
+        spacing_mm=0.02,
+        bending_energy_weight=2.0,
+    )
+    assert params["Metric"] == [
+        "AdvancedMattesMutualInformation",
+        "CorrespondingPointsEuclideanDistanceMetric",
+        "TransformBendingEnergyPenalty",
+    ]
+    assert params["Metric0Weight"] == 1.0
+    assert params["Metric1Weight"] == 0.2
+    assert params["Metric2Weight"] == 2.0
+    # Elastix 5.1 wants 1 or NumberOfMetrics entries for these.
+    assert params["ImageSampler"] == ["RandomCoordinate"] * 3
+    assert params["FixedImagePyramid"] == ["FixedRecursiveImagePyramid"] * 3
+
+
+def test_build_bspline_params_dual_channel_with_bending_energy() -> None:
+    params = build_bspline_params(
+        dual_channel=True,
+        control_point_weight=0.3,
+        n_histogram_bins=32,
+        bspline_spatial_scale_mm=1.0,
+        fixed_shape=(20, 20, 20),
+        spacing_mm=0.02,
+        dual_weight_autofluor=0.4,
+        dual_weight_signal=0.5,
+        bending_energy_weight=2.0,
+    )
+    assert params["Metric"][-1] == "TransformBendingEnergyPenalty"
+    assert params["Metric0Weight"] == 0.4
+    assert params["Metric1Weight"] == 0.5
+    assert params["Metric2Weight"] == 0.3
+    assert params["Metric3Weight"] == 2.0
+    assert len(params["MovingImagePyramid"]) == 4
 
 
 def test_build_bspline_params_auto_only_matches_manual_schedule() -> None:

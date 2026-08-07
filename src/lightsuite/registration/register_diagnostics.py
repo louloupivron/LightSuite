@@ -42,6 +42,7 @@ class RegistrationDiagnostics:
     use_multistep: bool
     use_dual_channel_mi: bool
     bspline_spatial_scale_mm: float
+    bspline_bending_weight: float = 0.0
     dual_channel_mi_weight_autofluor: float | None = None
     dual_channel_mi_weight_signal: float | None = None
     affine_median_error_vox: float = 0.0
@@ -96,7 +97,8 @@ class RegistrationDiagnostics:
             ),
             (
                 f"[bold]B-spline[/bold]  {schedule}  ·  {mi_mode}  ·  "
-                f"grid {self.bspline_spatial_scale_mm:g} mm"
+                f"grid {self.bspline_spatial_scale_mm:g} mm  ·  "
+                f"bending {self.bspline_bending_weight:g}"
             ),
             "",
             "[bold]Affine fit[/bold]  (median / p95 / max landmark residual, voxels)",
