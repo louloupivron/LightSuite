@@ -71,6 +71,16 @@ def session_needs_napari_transpose_migration(session: ControlPointSession) -> bo
     )
 
 
+def through_axis_column_for_cut(cut_axis_1based: int) -> int:
+    """Column in ``paired_points_xyz`` ``[X, Y, Z]`` for the slice-normal volume axis."""
+    mapping = {1: 1, 2: 0, 3: 2}
+    cut = int(cut_axis_1based)
+    if cut not in mapping:
+        msg = f"cut_axis must be 1, 2, or 3, got {cut_axis_1based}"
+        raise ValueError(msg)
+    return mapping[cut]
+
+
 def mark_session_saved_from_napari(session: ControlPointSession) -> None:
     """Record that coordinates were written with the v2 napari (row, col) schema."""
     session.coord_schema_version = COORD_SCHEMA_VERSION
@@ -188,11 +198,18 @@ class ControlPointSession:
         min_pairs: int = 16,
         *,
         fallback_tform: np.ndarray | list[list[float]] | None = None,
+        constrain_cut_axis: int | None = None,
     ) -> float | None:
         """Recompute manual alignment from paired slices; return MSE if fit.
 
         Below ``min_pairs`` (MATLAB ``Nmin``), keeps or restores ``fallback_tform``
         instead of fitting an under-constrained affine.
+
+        When ``constrain_cut_axis`` is set (spinal cord match-points), the through-plane
+        coordinate is copied from sample to atlas before fitting so a global affine only
+        refines in-plane alignment. Longitudinal correspondence and elastix already
+        place atlas and sample in the same straightened grid; atlas-plane scrolling only
+        picks the visible slice and should not drive a 3D Z shear in the overlay.
         """
         from lightsuite.gui.affine import fit_affine_transform
 
@@ -201,6 +218,10 @@ class ControlPointSession:
             if fallback_tform is not None:
                 self.atlas2histology_tform = np.asarray(fallback_tform, dtype=float).tolist()
             return None
+        if constrain_cut_axis is not None:
+            atlas_pts = atlas_pts.copy()
+            col = through_axis_column_for_cut(constrain_cut_axis)
+            atlas_pts[:, col] = sample_pts[:, col]
         matrix, mse = fit_affine_transform(atlas_pts, sample_pts)
         self.atlas2histology_tform = matrix.tolist()
         return mse

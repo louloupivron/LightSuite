@@ -11,7 +11,7 @@ import yaml
 
 from lightsuite.config.loader import load_spinal_config
 from lightsuite.gui.chooselist import generate_cord_control_point_list
-from lightsuite.gui.control_points import ControlPointSession
+from lightsuite.gui.control_points import ControlPointSession, through_axis_column_for_cut
 from lightsuite.gui.cord_data import (
     default_cord_session_path,
     load_cord_match_points_data,
@@ -153,6 +153,28 @@ def test_prepare_cord_match_points_session_headless(tmp_path: Path) -> None:
     assert path == default_cord_session_path(cfg.sample.save_path)
     session = ControlPointSession.load(path)
     assert len(session.histology_control_points) == 100
+
+
+def test_through_axis_column_for_cut() -> None:
+    assert through_axis_column_for_cut(3) == 2
+    assert through_axis_column_for_cut(1) == 1
+    assert through_axis_column_for_cut(2) == 0
+
+
+def test_cord_manual_alignment_constrains_through_axis() -> None:
+    """Z offsets from atlas-plane scrolling must not shear the overlay affine."""
+    session = ControlPointSession.empty(np.eye(4), n_slices=16)
+    sample_z = [861.0, 65.0, 54.0, 585.0, 362.0, 712.0, 596.0]
+    atlas_z = [911.0, 226.0, 219.0, 634.0, 451.0, 762.0, 645.0]
+    for i in range(16):
+        z_sample = sample_z[i % len(sample_z)]
+        z_atlas = atlas_z[i % len(atlas_z)]
+        session.histology_control_points[i] = [[60.0 + i, 80.0 + i, z_sample, 1.0]]
+        session.atlas_control_points[i] = [[61.0 + i, 81.0 + i, z_atlas, 1.0]]
+
+    session.update_manual_alignment(min_pairs=16, constrain_cut_axis=3)
+    constrained = np.asarray(session.atlas2histology_tform, dtype=float)
+    assert abs(constrained[2, 3]) < 1.0
 
 
 def test_paired_points_xyz_dim_order() -> None:

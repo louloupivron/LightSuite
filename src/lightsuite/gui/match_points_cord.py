@@ -31,6 +31,8 @@ console = Console()
 CORRESPONDING_POINTS_JSON = "corresponding_points.json"
 PANEL_GAP_X = 24
 MIN_AFFINE_PAIRS = 16
+# Cord chooselist always cuts transverse slices along the straightened rostrocaudal axis.
+CORD_CUT_AXIS = 3
 TEXT_LABEL_COLOR = "white"
 TEXT_LABEL_OFFSET = (0.0, 8.0)
 
@@ -369,7 +371,7 @@ def run_spinal_match_points(
     def _try_align() -> None:
         mse = data.session.update_manual_alignment(
             min_pairs=MIN_AFFINE_PAIRS,
-            fallback_tform=np.eye(4),
+            constrain_cut_axis=CORD_CUT_AXIS,
         )
         if mse is not None:
             show_info(f"Updated alignment fit (MSE={mse:.2f})")
@@ -474,7 +476,8 @@ def run_spinal_match_points(
             "label": "Atlas plane along cut axis",
         },
         show_overlay={"label": "Atlas boundary overlay on sample (shortcut: O)"},
-        call_button="Show slice",
+        call_button=False,
+        auto_call=False,
     )
     def navigation(slice_index: int = 1, atlas_plane: int = 1, show_overlay: bool = True) -> None:
         _navigate_to(slice_index, show_overlay=show_overlay)
@@ -590,6 +593,12 @@ def run_spinal_match_points(
     viewer.window.add_dock_widget(next_slice, area="right", name="Next slice")
     viewer.window.add_dock_widget(save_controls, area="right", name="Save")
     viewer.window.add_dock_widget(clear_slice, area="right", name="Edit")
+    if data.session.point_counts()[0] >= MIN_AFFINE_PAIRS:
+        data.session.update_manual_alignment(
+            min_pairs=MIN_AFFINE_PAIRS,
+            constrain_cut_axis=CORD_CUT_AXIS,
+        )
+
     _refresh()
     _sync_navigation_widget()
 
