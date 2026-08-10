@@ -3,11 +3,10 @@
 #   uv sync --extra registration --extra gui
 #   uv run lightsuite multires validate-config    -c examples/config/multiresolution/marianna_multires.yaml
 #   uv run lightsuite multires inspect-geometry   -c examples/config/multiresolution/marianna_multires.yaml
-#     (toggle Flip X/Y in Napari, then "Apply to YAML"; or --headless --write-config)
-#   uv run lightsuite multires match-points        -c examples/config/multiresolution/marianna_multires.yaml
 #   uv run lightsuite multires check-geometry    -c examples/config/multiresolution/marianna_multires.yaml
 #   uv run lightsuite multires register          -c examples/config/multiresolution/marianna_multires.yaml
 #
+# See docs/usage_multiresolution.md — mesoSPIM lateral_flip (Marianna needs [-1, -1]).
 # Atlas registration: examples/config/mesoSPIM/marianna_yosi_parity.yaml (Perens, register_Yosi_test_python).
 
 sample:
@@ -27,19 +26,15 @@ multires:
       overview: /media/gbm/NVME2/ALICe-pipelines-data/Marianna_CMU/0.8X/U87_DJ_1week_561_RFP_0.8x.tif
       roi: /media/gbm/NVME2/ALICe-pipelines-data/Marianna_CMU/2.5X/U87_DJ_1week_561_RFP_2.5x.tif
 
-  geometry_mode: hybrid
-  landmarks:
-    session_path: null   # default: save_path/multires_landmarks_u87_488_561.json
-    fit_mode: similarity # similarity | rigid | affine (try affine if scale still drifts)
-    min_pairs: 4
+  geometry_mode: metadata
 
-  # JulieBuron uses [1, -1] on both stacks. Marianna needs [-1, 1] on both
-  # (same signs on overview and ROI — required for sitk resampling).
+  # JulieBuron: [1, -1]. Marianna CMU: [-1, -1] on both stacks (validated NCC ~0.92).
+  # Overview and ROI must use the same signs (required for SimpleITK resampling).
   mesospim_geometry:
     overview:
-      lateral_flip: [-1, 1]
+      lateral_flip: [-1, -1]
     roi:
-      lateral_flip: [-1, 1]
+      lateral_flip: [-1, -1]
 
   registration:
     overlap_margin_um: 0.0

@@ -36,10 +36,11 @@ Supported input layouts today:
 |:----:|-------------|------|---------|
 | 0 | *(conversion)* | Automated | Build a **pair manifest** JSON from vendor exports |
 | 1 | `lightsuite multires validate-config` | Check | Load YAML + manifest; confirm paths |
-| 2 | `lightsuite multires match-points` | **Manual (GUI)** | Place landmark pairs *(hybrid mode only)* |
-| 3 | `lightsuite multires check-geometry` | Automated / QC | FOV overlap plots and geometry report |
-| 4 | `lightsuite multires export-preview` | Optional | Small TIFF crops for visual alignment checks |
-| 5 | `lightsuite multires register` | Automated | Elastix translation / rigid on overlap crops |
+| 2 | `lightsuite multires inspect-geometry` | **Manual (GUI)** | Trial `lateral_flip` on mesoSPIM pairs *(when metadata alignment looks mirrored)* |
+| 3 | `lightsuite multires match-points` | **Manual (GUI)** | Place landmark pairs *(hybrid mode only)* |
+| 4 | `lightsuite multires check-geometry` | Automated / QC | FOV overlap plots and geometry report |
+| 5 | `lightsuite multires export-preview` | Optional | Small TIFF crops for visual alignment checks |
+| 6 | `lightsuite multires register` | Automated | Elastix translation / rigid on overlap crops |
 
 The pipeline streams planes from disk. Full overview and ROI stacks are **not** loaded into RAM at once.
 
@@ -221,6 +222,8 @@ multires:
 | `multires.overview_meta_path` | — | Anchor tile `*_meta.txt` for stitched overview folders |
 | `multires.pair_label` | from experiment/sample | Short identifier used in output folders and default landmark filenames |
 | `multires.geometry_mode` | `metadata` | `metadata` — overlap from stage geometry only; `hybrid` — metadata crop + landmark fit |
+| `multires.mesospim_geometry.overview.lateral_flip` | `[1, -1]` | Per-volume axis sign when building manifests from `multires.channels` (mesoSPIM only). **Must match on overview and ROI** |
+| `multires.mesospim_geometry.roi.lateral_flip` | `[1, -1]` | Same as overview; see [mesoSPIM lateral_flip](#mesospim-lateral_flip-axis-convention) below |
 | `multires.landmarks.session_path` | auto | Path to landmark JSON; when `null`, uses `multires_landmarks_<pair_label>.json` under `save_path` |
 | `multires.landmarks.fit_mode` | `similarity` | Transform fitted from landmark pairs: `similarity`, `rigid`, or `affine` |
 | `multires.landmarks.min_pairs` | `3` | Minimum matched pairs required before geometry / registration |
@@ -238,6 +241,7 @@ Example configs in the repository:
 | Config | Microscope | Geometry mode |
 |--------|------------|---------------|
 | [`JulieBuron_multires_manifest.yaml`](../examples/config/multiresolution/JulieBuron_multires_manifest.yaml) | mesoSPIM | `metadata` |
+| [`marianna_multires.yaml`](../examples/config/multiresolution/marianna_multires.yaml) | mesoSPIM (0.8× ↔ 2.5×, dual channel) | `metadata`, `lateral_flip: [-1, -1]` |
 | [`OP39M2_multires_manifest.yaml`](../examples/config/multiresolution/OP39M2_multires_manifest.yaml) | mesoSPIM (stitched + dual channel) | `metadata` |
 | [`Multi_RES_SCANs_cortex_9x_manifest.yaml`](../examples/config/multiresolution/Multi_RES_SCANs_cortex_9x_manifest.yaml) | SmartSPIM | `hybrid` |
 | [`Multi_RES_SCANs_single_fov_manifest.yaml`](../examples/config/multiresolution/Multi_RES_SCANs_single_fov_manifest.yaml) | SmartSPIM | `hybrid` |
@@ -252,6 +256,45 @@ uv run lightsuite multires validate-config -c my_multires.yaml
 ```
 
 This loads the YAML, resolves the pair manifest, and confirms both volume paths exist. Fix any `FileNotFoundError` before continuing.
+
+---
+
+## Step 3b — Inspect mesoSPIM geometry (`lateral_flip`)
+
+Skip when metadata overlap already looks correct in `check-geometry` / `export-preview`.
+
+For mesoSPIM pairs declared via `multires.channels`, stage `*_meta.txt` files record motor positions but **not** how TIFF voxel rows/columns map onto those motors. LightSuite bridges that gap with `multires.mesospim_geometry.lateral_flip` (default `[1, -1]`, matching the JulieBuron reference dataset).
+
+```bash
+uv sync --extra registration --extra gui
+uv run lightsuite multires inspect-geometry -c my_multires.yaml
+```
+
+The Napari viewer shows the overview overlap crop beside the ROI **physically resampled** onto the same grid (not a naive array resize). Toggle **Flip X** / **Flip Y** on **both** volumes together, watch the physical NCC readout, then click **Apply to YAML** to patch `multires.mesospim_geometry` in place.
+
+Headless scoring (no GUI):
+
+```bash
+uv run lightsuite multires inspect-geometry -c my_multires.yaml --headless
+uv run lightsuite multires inspect-geometry -c my_multires.yaml --headless --write-config
+```
+
+### mesoSPIM `lateral_flip` axis convention
+
+Each `lateral_flip: [fx, fy]` entry sets the sign of the ITK direction cosines for the X and Y image axes derived from mesoSPIM stage metadata (`x_pos`, `y_pos`, pixel size, `stage_xy_is_center`). In short: it answers “does increasing column index move in the +motor direction?” for each lateral axis.
+
+| Dataset | Typical `lateral_flip` | Notes |
+|---------|---------------------|-------|
+| JulieBuron (reference) | `[1, -1]` | Default in `MesospimGeometryConfig` |
+| Marianna CMU (0.8× ↔ 2.5×) | `[-1, -1]` | Both axes inverted vs default; metadata-only registration NCC ~0.92 |
+
+**Why Marianna needs a Y flip as well as X:** the meta sidecar only stores absolute stage coordinates. It does not record sample handedness, which motor is wired as ITK dimension 0, or whether the camera readout order matches the historical mesoSPIM “increasing row = decreasing motor Y” convention. With the default `[1, -1]`, the predicted FOV overlap is close enough that `check-geometry` slice NCC looks plausible (~0.7), but the ROI appears **mirrored along Y** relative to the overview. Flipping X alone (`[-1, 1]`) fixes left–right but leaves cranio–caudal reversed; only `[-1, -1]` aligns both lateral axes so SimpleITK can resample the 2.5× stack into 0.8× space before Elastix.
+
+**Rules of thumb:**
+
+- **Overview and ROI must use identical `lateral_flip`.** Mismatched direction cosines break `stream_resample_to_reference` and yield near-zero registration NCC even when FOV boxes intersect.
+- Prefer **`inspect-geometry` physical NCC** over `check-geometry --level slice-qc` alone when diagnosing mirrors: slice QC resizes arrays without mapping through physical space and can score two different flip settings similarly.
+- After changing `lateral_flip`, delete stale `elastix_roi_to_overview/<experiment_name>/` outputs (or use a new `experiment_name`) before re-running `register`, so checkpoints and TIFFs are not mixed across conventions.
 
 ---
 
@@ -371,6 +414,19 @@ uv run lightsuite multires check-geometry      -c examples/config/multiresolutio
 uv run lightsuite multires register            -c examples/config/multiresolution/JulieBuron_multires_manifest.yaml
 ```
 
+### mesoSPIM — Marianna CMU (0.8× overview ↔ 2.5× ROI, dual channel)
+
+```bash
+uv sync --extra registration --extra gui
+
+uv run lightsuite multires validate-config    -c examples/config/multiresolution/marianna_multires.yaml
+uv run lightsuite multires inspect-geometry   -c examples/config/multiresolution/marianna_multires.yaml   # lateral_flip [-1, -1]
+uv run lightsuite multires check-geometry      -c examples/config/multiresolution/marianna_multires.yaml
+uv run lightsuite multires register            -c examples/config/multiresolution/marianna_multires.yaml
+```
+
+Atlas registration for the 0.8× overview: [`marianna_yosi_parity.yaml`](../examples/config/mesoSPIM/marianna_yosi_parity.yaml).
+
 ### SmartSPIM — hybrid (overview ↔ 9× cortex mosaic)
 
 ```bash
@@ -405,9 +461,16 @@ Install registration extras: `uv sync --extra registration`.
 ### Poor overlap / high landmark RMS
 
 - Verify the correct overview and ROI acquisitions are paired in the manifest.
+- For mesoSPIM, run `inspect-geometry` and try alternate `lateral_flip` settings before adding landmarks (see [mesoSPIM lateral_flip](#mesospim-lateral_flip-axis-convention)).
 - For SmartSPIM mosaics, confirm tile origins in `metadata.txt` / `metadata.json` match the stitched stack.
 - Add more landmark pairs and try `fit_mode: affine` if similarity is too rigid.
 - Use `export-preview` or `check-geometry --level slice-qc` to inspect alignment before registering.
+
+### Overview and ROI look mirrored / registration NCC stays low
+
+- Set `multires.mesospim_geometry.overview.lateral_flip` and `.roi.lateral_flip` to the **same** `[fx, fy]` (each entry must be `+1` or `-1`).
+- Use `multires inspect-geometry` and confirm physical NCC improves when toggling flips.
+- Remove old `save_path/elastix_roi_to_overview/<experiment_name>/` folders after changing geometry so `multires_regopts.json` refers to the latest run.
 
 ### Registration is slow or runs out of memory
 
