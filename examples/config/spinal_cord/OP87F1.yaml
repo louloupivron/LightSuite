@@ -1,0 +1,80 @@
+# Example spinal cord lightsheet config (Fiederling et al. 2021 atlas).
+# Copy and edit paths before running:
+#   uv run lightsuite doctor -c examples/spinal_cord.yaml
+#   uv run lightsuite spinal validate-config -c examples/spinal_cord.yaml
+#
+# Download atlas from https://data.mendeley.com/datasets/4rrggzv5d5/1
+# and set atlas.atlas_dir to the folder containing Segments.csv.
+
+sample:
+  name: OP87F1
+  source:
+    format: tiff_stack
+    # Single-channel (omit channels and set path):
+    # path: /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP93M1/Ex_561_Em_561F_Ch2_stitched
+    # Multi-channel Terastitcher (one folder per channel) — same as brain:
+    tiff_type: planeperfile
+    channels:
+      - /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP87F1/Ex_488_Em_488F_Ch1_stitched
+      - /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP87F1/Ex_561_Em_561F_Ch2_stitched
+    # auto: detect plane-per-file (Terastitcher) vs channel-per-file (default for single path)
+    # planeperfile: one 2D TIFF per Z slice (large datasets)
+    # channelperfile: one multi-page TIFF per channel
+    # multichannel_single: single stack with interleaved channels (Bioformats layout)
+    # skip_corrupt_slices: true  # optional: drop unreadable plane TIFFs
+  scratch: /media/gbm/NVME2/lightsuite_scratch
+  save_path: /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP87F1/registered
+  # Native microscope voxel size in µm (NOT the registration grid).
+  voxel_um: [1.8, 1.8, 1.8]
+
+atlas:
+  atlas_dir: /home/gbm/ALICe-pipelines/LightSuite/atlas/SC_P56_Atlas_10x10x20_v5_2020
+
+registration:
+  resolution_um: 20
+  channel_primary: 1
+  # Optional: skip GUI and set orientation in YAML instead of cord_orientation.txt
+  # longitudinal_direction: caudorostral  # or rostrocaudal
+  control_point_weight: 0.5
+  straightening_lambda_pos: 5000
+  straightening_lambda_ang: 5000
+
+compute:
+  workers: 4
+
+# Imaris spots: Position columns are labeled µm but this .ims is calibrated at
+# 1 µm/voxel (values match native voxel indices). Convert with:
+#   uv run lightsuite spinal convert-imaris-spots \
+#     -s /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP87F1/Spot_OnePageMultiComponent_Detailed.csv \
+#     -o /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP87F1/annotations \
+#     --voxel-um 1,1,1 \
+#     --shape-yxz 11681,2003,2145
+import:
+  write_csv: true
+  annotations:
+    - format: points_csv
+      path: /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP87F1/annotations/imaris_Blue___Magenta___TA_tracer_points.csv
+      label: imaris_TA_tracer
+    - format: points_csv
+      path: /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP87F1/annotations/imaris_Green___Cyan___Viral_transduction_TA_points.csv
+      label: imaris_viral_TA
+    - format: points_csv
+      path: /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP87F1/annotations/imaris_Red___Yellow___MG_Tracer_points.csv
+      label: imaris_MG_tracer
+    - format: points_csv
+      path: /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP87F1/annotations/imaris_Colloc_between_Magenta_and_Cyan___Virus_and_TA_tracer_points.csv
+      label: imaris_coloc_viral_TA
+
+analysis:
+  parcellate_intensities: true
+  intensity_channels: [1]
+  rollups: [division, structure, horn]
+  split_hemispheres: true
+  count_points: true
+  point_labels:
+    - imaris_TA_tracer
+    - imaris_viral_TA
+    - imaris_MG_tracer
+    - imaris_coloc_viral_TA
+  # plots_dir: /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP87F1/registered/plots
+
