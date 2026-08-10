@@ -10,13 +10,13 @@ import pandas as pd
 import tifffile
 
 from lightsuite.analysis.division_map import ensure_division_map
-from lightsuite.atlas.registry import resolve_brain_atlas_from_config, resolve_brain_atlas_with_config
+from lightsuite.atlas.display import atlas_volume_yxz_to_napari_zyx
+from lightsuite.atlas.registry import atlas_display_provider_from_config, resolve_brain_atlas_with_config
 from lightsuite.config.models import BrainPipelineConfig
 from lightsuite.export.brain_export import _load_transform_params
 from lightsuite.gui.inspect_brain_imports import (
     _contrast_limits,
     discover_brain_import_inspect_paths,
-    volume_yxz_to_napari_zyx,
 )
 from lightsuite.registration.volume import load_registration_volume
 
@@ -100,6 +100,8 @@ def _build_division_panel(
     division_labels: np.ndarray,
     legend_table: pd.DataFrame,
     contrast_limits: dict[str, tuple[float, float]],
+    *,
+    atlas_provider: str,
 ):
     """Build the Qt division checkbox dock widget."""
     from qtpy.QtCore import Qt
@@ -122,6 +124,7 @@ def _build_division_panel(
             self._channels = {k: np.asarray(v, dtype=np.float32) for k, v in channel_volumes.items()}
             self._labels = np.asarray(division_labels, dtype=np.int32)
             self._contrast = contrast_limits
+            self._atlas_provider = atlas_provider
             self._layers: dict[str, object] = {}
             self._ids: list[int] = []
             self._boxes: list[QCheckBox] = []
@@ -181,7 +184,7 @@ def _build_division_panel(
                 lims = self._contrast[layer_name]
                 masked = self._masked_volume(vol)
                 self._layers[layer_name] = viewer.add_image(
-                    volume_yxz_to_napari_zyx(masked),
+                    atlas_volume_yxz_to_napari_zyx(masked, atlas_provider=self._atlas_provider),
                     name=layer_name,
                     colormap="gray",
                     contrast_limits=lims,
@@ -205,7 +208,10 @@ def _build_division_panel(
 
         def _apply_mask(self) -> None:
             for name, layer in self._layers.items():
-                layer.data = volume_yxz_to_napari_zyx(self._masked_volume(self._channels[name]))
+                layer.data = atlas_volume_yxz_to_napari_zyx(
+                    self._masked_volume(self._channels[name]),
+                    atlas_provider=self._atlas_provider,
+                )
             n = len(self._selected_ids())
             ref_shape = next(iter(self._channels.values())).shape
             self._status.setText(
@@ -262,11 +268,21 @@ def run_brain_division_viewer(
         raise RuntimeError(msg) from exc
 
     legend = pd.read_csv(paths.division_legend)
+    atlas_provider = atlas_display_provider_from_config(config.atlas)
     viewer = napari.Viewer(title=f"LightSuite divisions — {config.sample.name}")
-    panel = _build_division_panel(viewer, channels, labels, legend, contrast)
+    panel = _build_division_panel(
+        viewer,
+        channels,
+        labels,
+        legend,
+        contrast,
+        atlas_provider=atlas_provider,
+    )
     viewer.window.add_dock_widget(panel, name="Divisions", area="right")
     viewer.add_labels(
-        volume_yxz_to_napari_zyx(labels),
+        atlas_volume_yxz_to_napari_zyx(labels, atlas_provider=atlas_provider).astype(
+            np.int64, copy=False
+        ),
         name="division labels",
         opacity=0.2,
         visible=False,

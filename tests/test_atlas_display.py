@@ -9,15 +9,26 @@ from lightsuite.atlas.display import (
     PLOT_VIEW_NAMES,
     SliceDisplayTransform,
     apply_slice_display_transform,
+    atlas_points_xyz_to_napari_zyx,
+    atlas_volume_yxz_to_napari_zyx,
     canonical_view_slice,
     canonical_view_transform,
+    coronal_napari_permutation,
+    coronal_napari_permutation_for_registration,
+    cut_axis_for_permuted_volume_axis,
     cut_axis_for_plot_dim,
     display_provider_for_atlas,
     get_display_profile,
     map_display_pixels_to_slice,
     map_slice_pixels_to_display,
+    registration_points_xyz_to_napari_zyx,
+    registration_volume_yxz_to_napari_zyx,
 )
-from lightsuite.gui.slices import layer_xy_from_slice_pixels, slice_pixels_from_layer_xy, volume_index_to_image
+from lightsuite.gui.slices import (
+    layer_xy_from_slice_pixels,
+    slice_pixels_from_layer_xy,
+    volume_index_to_image,
+)
 
 
 @pytest.mark.parametrize("provider", ["allen", "perens", "perens_brainglobe", "princeton_brainglobe"])
@@ -118,6 +129,85 @@ def test_perens_sagittal_cut_uses_rotation() -> None:
     transform = canonical_view_transform("perens", 1)
     assert transform.rot90_k == 1
     assert transform.flip_lr
+
+
+def test_coronal_napari_permutation_moves_coronal_axis_last() -> None:
+    coronal_cut, perm = coronal_napari_permutation("perens")
+    assert coronal_cut == 2
+    assert perm[-1] == coronal_cut - 1
+
+
+def test_coronal_napari_permutation_for_registration_perens_213() -> None:
+    coronal_cut, perm = coronal_napari_permutation_for_registration("perens", [2, 1, 3])
+    assert coronal_cut == 2
+    assert perm[-1] == 0
+    assert cut_axis_for_permuted_volume_axis(0, [2, 1, 3]) == 2
+
+
+def test_registration_volume_napari_matches_canonical_coronal_slice() -> None:
+    volume = np.arange(24, dtype=np.uint8).reshape(4, 3, 2)
+    permute = [2, 1, 3]
+    coronal_cut, perm = coronal_napari_permutation_for_registration("perens", permute)
+    coronal_array_axis = perm[-1]
+    mid = volume.shape[coronal_array_axis] // 2
+    chooserow = np.array([mid + 1, coronal_array_axis + 1, 1, 1], dtype=int)
+    expected = canonical_view_slice(
+        volume_index_to_image(volume, chooserow),
+        atlas_provider="perens",
+        cut_axis=coronal_cut,
+    )
+    napari_vol = registration_volume_yxz_to_napari_zyx(
+        volume,
+        atlas_provider="perens",
+        permute_sample_to_atlas=permute,
+    )
+    assert np.array_equal(napari_vol[mid], expected)
+
+
+def test_registration_points_napari_track_volume_reorientation() -> None:
+    volume = np.zeros((4, 3, 2), dtype=np.uint8)
+    volume[1, 2, 1] = 1
+    permute = [2, 1, 3]
+    napari_pts = registration_points_xyz_to_napari_zyx(
+        np.array([[3.0, 2.0, 2.0]]),
+        atlas_provider="perens",
+        volume_shape_yxz=volume.shape,
+        permute_sample_to_atlas=permute,
+    )
+    napari_vol = registration_volume_yxz_to_napari_zyx(
+        volume,
+        atlas_provider="perens",
+        permute_sample_to_atlas=permute,
+    )
+    z, y, x = (int(round(v)) for v in napari_pts[0])
+    assert napari_vol[z, y, x] == 1
+
+
+def test_atlas_volume_napari_matches_canonical_coronal_slice() -> None:
+  volume = np.arange(24, dtype=np.uint8).reshape(4, 3, 2)
+  coronal_cut, perm = coronal_napari_permutation("perens")
+  mid = volume.shape[coronal_cut - 1] // 2
+  chooserow = np.array([mid + 1, coronal_cut, 1, 1], dtype=int)
+  expected = canonical_view_slice(
+      volume_index_to_image(volume, chooserow),
+      atlas_provider="perens",
+      cut_axis=coronal_cut,
+  )
+  napari_vol = atlas_volume_yxz_to_napari_zyx(volume, atlas_provider="perens")
+  assert np.array_equal(napari_vol[mid], expected)
+
+
+def test_atlas_points_napari_track_volume_reorientation() -> None:
+    volume = np.zeros((4, 3, 2), dtype=np.uint8)
+    volume[1, 2, 1] = 1
+    napari_pts = atlas_points_xyz_to_napari_zyx(
+        np.array([[3.0, 2.0, 2.0]]),
+        atlas_provider="perens",
+        volume_shape_yxz=volume.shape,
+    )
+    napari_vol = atlas_volume_yxz_to_napari_zyx(volume, atlas_provider="perens")
+    z, y, x = (int(round(v)) for v in napari_pts[0])
+    assert napari_vol[z, y, x] == 1
 
 
 def test_canonical_view_independent_of_permvec() -> None:

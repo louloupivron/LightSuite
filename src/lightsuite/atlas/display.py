@@ -277,3 +277,194 @@ def canonical_view_slice(
 def canonical_view_name(plot_dim: int) -> str:
     """Human-readable anatomical view label for a plot panel."""
     return PLOT_VIEW_NAMES.get(plot_dim, f"dim{plot_dim}")
+
+
+def cut_axis_for_permuted_volume_axis(
+    permuted_axis_0based: int,
+    permute_sample_to_atlas: list[int],
+) -> int:
+    """Map a 0-based axis on the permuted registration grid to a native atlas cut axis."""
+    if permuted_axis_0based not in {0, 1, 2}:
+        msg = f"permuted_axis_0based must be 0, 1, or 2, got {permuted_axis_0based}"
+        raise ValueError(msg)
+    if len(permute_sample_to_atlas) != 3:
+        msg = f"permute_sample_to_atlas must have length 3, got {permute_sample_to_atlas}"
+        raise ValueError(msg)
+    native_axis = abs(int(permute_sample_to_atlas[permuted_axis_0based])) - 1
+    if native_axis not in {0, 1, 2}:
+        msg = f"Invalid permute entry {permute_sample_to_atlas!r}"
+        raise ValueError(msg)
+    return native_axis + 1
+
+
+def coronal_napari_permutation(atlas_provider: str) -> tuple[int, tuple[int, int, int]]:
+    """Return 1-based coronal cut axis and a YXZ permutation that moves it last (Napari Z)."""
+    coronal_cut = cut_axis_for_plot_dim(atlas_provider, 1)
+    coronal_axis = coronal_cut - 1
+    in_plane = tuple(axis for axis in range(3) if axis != coronal_axis)
+    return coronal_cut, in_plane + (coronal_axis,)
+
+
+def coronal_napari_permutation_for_registration(
+    atlas_provider: str,
+    permute_sample_to_atlas: list[int],
+) -> tuple[int, tuple[int, int, int]]:
+    """Return coronal cut axis and YXZ permutation for a permuted registration grid."""
+    coronal_cut = cut_axis_for_plot_dim(atlas_provider, 1)
+    coronal_axis: int | None = None
+    for axis in range(3):
+        if cut_axis_for_permuted_volume_axis(axis, permute_sample_to_atlas) == coronal_cut:
+            coronal_axis = axis
+            break
+    if coronal_axis is None:
+        msg = (
+            f"Could not map coronal cut axis {coronal_cut} through "
+            f"permute_sample_to_atlas={permute_sample_to_atlas!r}"
+        )
+        raise ValueError(msg)
+    in_plane = tuple(axis for axis in range(3) if axis != coronal_axis)
+    return coronal_cut, in_plane + (coronal_axis,)
+
+
+def _volume_yxz_to_napari_coronal_zyx(
+    volume_yxz: np.ndarray,
+    *,
+    atlas_provider: str,
+    coronal_cut: int,
+    coronal_perm: tuple[int, int, int],
+) -> np.ndarray:
+    """Shared Napari reorientation: move coronal to Z and apply canonical in-plane QC."""
+    vol = np.asarray(volume_yxz)
+    if vol.ndim != 3:
+        msg = f"Expected 3D YXZ volume, got shape {vol.shape}"
+        raise ValueError(msg)
+
+    oriented = np.transpose(vol, coronal_perm)
+    napari_vol = np.transpose(oriented, (2, 0, 1))
+
+    transform = canonical_view_transform(atlas_provider, coronal_cut)
+    if (
+        transform.rot90_k == 0
+        and not transform.flip_ud
+        and not transform.flip_lr
+    ):
+        return napari_vol
+
+    sample_slice = apply_slice_display_transform(napari_vol[0], transform)
+    out = np.empty(
+        (napari_vol.shape[0],) + sample_slice.shape,
+        dtype=napari_vol.dtype,
+    )
+    out[0] = sample_slice
+    for z in range(1, napari_vol.shape[0]):
+        out[z] = apply_slice_display_transform(napari_vol[z], transform)
+    return out
+
+
+def atlas_volume_yxz_to_napari_zyx(
+    volume_yxz: np.ndarray,
+    *,
+    atlas_provider: str,
+) -> np.ndarray:
+    """Reorient a native atlas-order YXZ volume for Napari (coronal = scroll axis Z).
+
+    Applies the same per-slice canonical QC transforms used in registration plots so
+    Perens / Gubra volumes are not upside-down relative to Allen when inspected.
+    """
+    coronal_cut, perm = coronal_napari_permutation(atlas_provider)
+    return _volume_yxz_to_napari_coronal_zyx(
+        volume_yxz,
+        atlas_provider=atlas_provider,
+        coronal_cut=coronal_cut,
+        coronal_perm=perm,
+    )
+
+
+def registration_volume_yxz_to_napari_zyx(
+    volume_yxz: np.ndarray,
+    *,
+    atlas_provider: str,
+    permute_sample_to_atlas: list[int],
+) -> np.ndarray:
+    """Reorient a permuted registration-grid volume for Napari coronal scrolling."""
+    coronal_cut, perm = coronal_napari_permutation_for_registration(
+        atlas_provider,
+        permute_sample_to_atlas,
+    )
+    return _volume_yxz_to_napari_coronal_zyx(
+        volume_yxz,
+        atlas_provider=atlas_provider,
+        coronal_cut=coronal_cut,
+        coronal_perm=perm,
+    )
+
+
+def _points_xyz_to_napari_coronal_zyx(
+    coords_xyz_1based: np.ndarray,
+    *,
+    atlas_provider: str,
+    volume_shape_yxz: tuple[int, int, int],
+    coronal_cut: int,
+    coronal_perm: tuple[int, int, int],
+) -> np.ndarray:
+    """Map 1-based ``(x, y, z)`` points to Napari ``(z, y, x)`` with coronal QC layout."""
+    pts = np.asarray(coords_xyz_1based, dtype=float)
+    if pts.size == 0:
+        return np.zeros((0, 3), dtype=np.float64)
+    if pts.ndim != 2 or pts.shape[1] < 3:
+        msg = f"Expected Nx3+ points, got shape {pts.shape}"
+        raise ValueError(msg)
+
+    native_yxz = np.column_stack(
+        [pts[:, 1] - 1.0, pts[:, 0] - 1.0, pts[:, 2] - 1.0]
+    )
+    permuted = native_yxz[:, coronal_perm]
+    permuted_shape = tuple(int(volume_shape_yxz[axis]) for axis in coronal_perm)
+    slice_shape = (permuted_shape[0], permuted_shape[1])
+
+    transform = canonical_view_transform(atlas_provider, coronal_cut)
+    disp_row, disp_col = map_slice_pixels_to_display(
+        permuted[:, 0],
+        permuted[:, 1],
+        slice_shape,
+        transform,
+    )
+    return np.column_stack([permuted[:, 2], disp_row, disp_col])
+
+
+def atlas_points_xyz_to_napari_zyx(
+    coords_xyz_1based: np.ndarray,
+    *,
+    atlas_provider: str,
+    volume_shape_yxz: tuple[int, int, int],
+) -> np.ndarray:
+    """Map 1-based atlas ``(x, y, z)`` points to Napari ``(z, y, x)`` with coronal QC layout."""
+    coronal_cut, perm = coronal_napari_permutation(atlas_provider)
+    return _points_xyz_to_napari_coronal_zyx(
+        coords_xyz_1based,
+        atlas_provider=atlas_provider,
+        volume_shape_yxz=volume_shape_yxz,
+        coronal_cut=coronal_cut,
+        coronal_perm=perm,
+    )
+
+
+def registration_points_xyz_to_napari_zyx(
+    coords_xyz_1based: np.ndarray,
+    *,
+    atlas_provider: str,
+    volume_shape_yxz: tuple[int, int, int],
+    permute_sample_to_atlas: list[int],
+) -> np.ndarray:
+    """Map 1-based registration-grid points to Napari ZYX with coronal QC layout."""
+    coronal_cut, perm = coronal_napari_permutation_for_registration(
+        atlas_provider,
+        permute_sample_to_atlas,
+    )
+    return _points_xyz_to_napari_coronal_zyx(
+        coords_xyz_1based,
+        atlas_provider=atlas_provider,
+        volume_shape_yxz=volume_shape_yxz,
+        coronal_cut=coronal_cut,
+        coronal_perm=perm,
+    )

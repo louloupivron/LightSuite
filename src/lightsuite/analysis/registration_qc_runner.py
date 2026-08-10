@@ -22,7 +22,7 @@ from lightsuite.atlas.registry import resolve_brain_atlas_with_config
 from lightsuite.config.models import BrainPipelineConfig
 from lightsuite.export.brain_export import _load_transform_params
 from lightsuite.gui.view_divisions_brain import discover_division_viewer_paths
-from lightsuite.registration.volume import load_registration_volume
+from lightsuite.registration.volume import load_permuted_registration_volume, load_registration_volume
 
 console = Console()
 
@@ -68,7 +68,11 @@ def load_registration_qc_volumes(
         if not labels_path.is_file():
             msg = f"Missing {labels_path}"
             raise FileNotFoundError(msg)
-        volume = load_registration_volume(vol_path).astype(np.float32, copy=False)
+        transform_params = _load_transform_params(save_path)
+        volume = load_permuted_registration_volume(
+            vol_path,
+            transform_params.permute_sample_to_atlas,
+        )
         labels = np.asarray(tifffile.imread(labels_path), dtype=np.int32)
         if volume.shape != labels.shape:
             msg = f"Channel volume {volume.shape} != sample labels {labels.shape}"

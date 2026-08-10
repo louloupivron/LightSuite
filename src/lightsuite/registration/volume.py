@@ -93,6 +93,17 @@ def unpermute_brain_volume(volume: np.ndarray, permvec: list[int]) -> np.ndarray
     return np.ascontiguousarray(np.transpose(out, inverse_order))
 
 
+def load_permuted_registration_volume(
+    path: Path | str,
+    permvec: list[int],
+) -> np.ndarray:
+    """Load a preprocess registration TIFF and apply ``permute_sample_to_atlas``."""
+    return permute_brain_volume(
+        load_registration_volume(path).astype(np.float32, copy=False),
+        permvec,
+    )
+
+
 def normalize_registration_volume(volume: np.ndarray) -> np.ndarray:
     """Scale sample volume to ~[0, 1] using central ROI (initializeRegistration.m).
 

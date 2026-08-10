@@ -32,7 +32,7 @@ You will need:
 | 7 | `lightsuite brain register` | Automated | `multiobjRegistration.m` |
 | 8 | `lightsuite brain export` | Automated | `generateRegisteredBrainVolumes.m` |
 | 9 | `lightsuite brain import-annotations` | Automated | `transformPointsToAtlas.m` |
-| 10 | `lightsuite brain inspect-imports` | **Manual (GUI)** | *(Napari — atlas-space import QC)* |
+| 10 | `lightsuite brain inspect-imports` | **Manual (GUI)** | *(Napari — atlas- or sample-space import QC)* |
 | 11 | `lightsuite analysis region-stats` | Automated | *(new — tidy region table + cell counts)* |
 | 12 | `lightsuite analysis group-stats` | Automated | *(new — cross-subject group summaries)* |
 | 13 | `lightsuite analysis view-divisions` | **Manual (GUI)** | *(Napari — division-masked channel QC)* |
@@ -444,7 +444,12 @@ uv run lightsuite brain register -c $CONFIG
 uv run lightsuite brain export -c $CONFIG --save-volume --write-csv
 uv run lightsuite brain import-annotations -c $CONFIG
 uv run lightsuite brain inspect-imports -c $CONFIG
+uv run lightsuite brain inspect-imports -c $CONFIG --space sample
 ```
+
+`inspect-imports` defaults to **atlas** space (Perens/Allen export grid). Use `--space sample` to overlay imported points/masks on the **20 µm registration grid** (`chan_*_sample_register_*um.tif` from preprocess) — useful when atlas volumes were not exported but `import-annotations` has already run.
+
+Atlas-space Napari QC applies the same canonical coronal orientation used in registration plots (Perens coronal is no longer upside-down vs Allen). Annotation volumes render as **label** layers rather than float images so CCF structure ids are fully visible.
 
 ---
 

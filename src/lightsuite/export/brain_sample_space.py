@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -36,7 +37,10 @@ from lightsuite.registration.plots import (
     boundary_volume_from_annotation,
     save_registration_stage_previews,
 )
-from lightsuite.registration.volume import load_registration_volume
+from lightsuite.registration.volume import (
+    load_permuted_registration_volume,
+    load_registration_volume,
+)
 
 console = Console()
 
@@ -160,7 +164,10 @@ def export_brain_sample_space(
     if write_csv and atlas.supports_parcellation:
         ann_int = np.rint(annotation_sample).astype(np.int32)
         for ichan, volpath in sorted(channel_paths.items()):
-            vol = load_registration_volume(volpath)
+            vol = load_permuted_registration_volume(
+                volpath,
+                transform_params.permute_sample_to_atlas,
+            )
             if uses_ccf_id_parcellation(atlas):
                 result = compute_perens_parcellation(
                     vol,
@@ -197,7 +204,10 @@ def export_brain_sample_space(
 
     if save_volume and channel_paths:
         primary = min(channel_paths)
-        vol = load_registration_volume(channel_paths[primary])
+        vol = load_permuted_registration_volume(
+            channel_paths[primary],
+            transform_params.permute_sample_to_atlas,
+        )
         hi = float(np.quantile(vol, 0.999))
         vol_u8 = np.clip(vol / max(hi, 1e-6) * 255.0, 0, 255).astype(np.uint8)
         save_registration_stage_previews(
@@ -213,3 +223,158 @@ def export_brain_sample_space(
         f"Sample-space export done in {time.perf_counter() - t0:.1f}s under {out_dir}"
     )
     return manifest_path, region_stats_paths
+
+
+@dataclass(frozen=True)
+class BrainSampleSpaceInspectPaths:
+    """Resolved sample-space inputs for Napari import QC."""
+
+    volume_registered_dir: Path
+    sample_space_dir: Path | None
+    template_path: Path | None
+    annotation_path: Path | None
+    registered_channels: dict[int, Path] = field(default_factory=dict)
+    point_npz_paths: dict[str, Path] = field(default_factory=dict)
+    mask_paths: dict[str, Path] = field(default_factory=dict)
+
+
+def _label_from_stem(stem: str, suffix: str) -> str:
+    if stem.endswith(suffix):
+        return stem[: -len(suffix)]
+    return stem
+
+
+def discover_brain_sample_space_inspect_paths(
+    config: BrainPipelineConfig,
+) -> BrainSampleSpaceInspectPaths:
+    """Discover registration-grid channels and imported sample-space annotations."""
+    from lightsuite.preprocess.checkpoint import RegOptsCheckpoint
+
+    save_path = config.sample.save_path.expanduser()
+    vr = save_path / "volume_registered"
+    out_dir = sample_space_dir(save_path)
+
+    regopts_path = save_path / "regopts.json"
+    if not regopts_path.is_file():
+        msg = f"Missing {regopts_path}. Run 'lightsuite brain preprocess' first."
+        raise FileNotFoundError(msg)
+
+    checkpoint = RegOptsCheckpoint.load(regopts_path)
+    registered_channels: dict[int, Path] = {}
+    for key, path_str in (checkpoint.regvolpaths or {}).items():
+        path = Path(path_str).expanduser()
+        if path.is_file():
+            registered_channels[int(key)] = path.resolve()
+
+    point_npz_paths: dict[str, Path] = {}
+    mask_paths: dict[str, Path] = {}
+    if vr.is_dir():
+        for path in sorted(vr.glob("*_sample_coords.npz")):
+            label = _label_from_stem(path.stem, "_sample_coords")
+            point_npz_paths[label] = path.resolve()
+        for path in sorted(vr.glob("*_in_sample_20um.tif")):
+            label = _label_from_stem(path.stem, "_in_sample_20um")
+            mask_paths[label] = path.resolve()
+
+    template_path: Path | None = None
+    annotation_path: Path | None = None
+    sample_space_dir_resolved: Path | None = out_dir.resolve() if out_dir.is_dir() else None
+    if sample_space_dir_resolved is not None:
+        manifest_path = sample_space_dir_resolved / MANIFEST_NAME
+        if manifest_path.is_file():
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            if manifest.get("template_path"):
+                template_path = Path(manifest["template_path"]).expanduser().resolve()
+            if manifest.get("annotation_path"):
+                annotation_path = Path(manifest["annotation_path"]).expanduser().resolve()
+        if template_path is None:
+            candidate = sample_space_dir_resolved / TEMPLATE_IN_SAMPLE
+            if candidate.is_file():
+                template_path = candidate.resolve()
+        if annotation_path is None:
+            candidate = sample_space_dir_resolved / ANNOTATION_IN_SAMPLE
+            if candidate.is_file():
+                annotation_path = candidate.resolve()
+
+    if not registered_channels and not point_npz_paths and not mask_paths:
+        msg = (
+            "No inspectable sample-space layers found. Run "
+            "'lightsuite brain import-annotations' and/or ensure regopts.json "
+            "regvolpaths point at chan_*_sample_register_*um.tif volumes."
+        )
+        raise FileNotFoundError(msg)
+
+    return BrainSampleSpaceInspectPaths(
+        volume_registered_dir=vr.resolve() if vr.is_dir() else save_path / "volume_registered",
+        sample_space_dir=sample_space_dir_resolved,
+        template_path=template_path,
+        annotation_path=annotation_path,
+        registered_channels=registered_channels,
+        point_npz_paths=point_npz_paths,
+        mask_paths=mask_paths,
+    )
+
+
+def load_brain_sample_space_inspect_volumes(
+    config: BrainPipelineConfig,
+    *,
+    paths: BrainSampleSpaceInspectPaths | None = None,
+) -> "BrainImportInspectVolumes":
+    """Load registration-grid channels, warped atlas overlays, and sample imports."""
+    from lightsuite.analysis.counts import SAMPLE_POINTS_KEY, load_atlas_points
+    from lightsuite.export.brain_export import _load_transform_params
+    from lightsuite.gui.inspect_brain_imports import BrainImportInspectVolumes
+
+    paths = paths or discover_brain_sample_space_inspect_paths(config)
+    save_path = config.sample.save_path.expanduser()
+    transform_params = _load_transform_params(save_path)
+    expected_shape = tuple(int(v) for v in transform_params.regvolsize)
+    permute = transform_params.permute_sample_to_atlas or [1, 2, 3]
+
+    registered_channels: dict[int, np.ndarray] = {}
+    for ichan, path in paths.registered_channels.items():
+        vol = load_permuted_registration_volume(path, permute)
+        if tuple(vol.shape) != expected_shape:
+            msg = f"{path.name} shape {vol.shape} != expected registration shape {expected_shape}"
+            raise ValueError(msg)
+        registered_channels[ichan] = vol
+
+    template: np.ndarray | None = None
+    if paths.template_path is not None and paths.template_path.is_file():
+        template = load_registration_volume(paths.template_path).astype(np.float32, copy=False)
+        if tuple(template.shape) != expected_shape:
+            msg = (
+                f"Template shape {template.shape} != registration shape {expected_shape}. "
+                "Re-run 'lightsuite brain export --space sample'."
+            )
+            raise ValueError(msg)
+
+    annotation: np.ndarray | None = None
+    if paths.annotation_path is not None and paths.annotation_path.is_file():
+        annotation = load_registration_volume(paths.annotation_path).astype(np.float32, copy=False)
+        if tuple(annotation.shape) != expected_shape:
+            msg = (
+                f"Annotation shape {annotation.shape} != registration shape {expected_shape}. "
+                "Re-run 'lightsuite brain export --space sample'."
+            )
+            raise ValueError(msg)
+
+    mask_layers: dict[str, np.ndarray] = {}
+    for label, path in paths.mask_paths.items():
+        vol = load_registration_volume(path)
+        if tuple(vol.shape) != expected_shape:
+            msg = f"{path.name} shape {vol.shape} != expected registration shape {expected_shape}"
+            raise ValueError(msg)
+        mask_layers[label] = vol.astype(np.float32, copy=False)
+
+    point_layers: dict[str, np.ndarray] = {}
+    for label, npz_path in paths.point_npz_paths.items():
+        point_layers[label] = load_atlas_points(npz_path, key=SAMPLE_POINTS_KEY)
+
+    return BrainImportInspectVolumes(
+        template=template,
+        annotation=annotation,
+        registered_channels=registered_channels,
+        point_layers=point_layers,
+        mask_layers=mask_layers,
+    )

@@ -18,6 +18,8 @@ Both directions use the **same** elastix transform chain; only the resampling di
 
 Sample-space outputs do **not** upsample to the full native stitched volume. Segmentation should still run on the native grid (`sample_reference.json`); import writes both atlas- and sample-space coordinates.
 
+Preprocess writes `chan_*_sample_register_*um.tif` on the **unpermuted** downsampled grid. Registration, import (`regptcoords`, `*_in_sample_20um.tif`), and sample-space atlas exports use the **permuted** grid from `registration.orientation` / `permute_sample_to_atlas`. Tools that overlay channels with imported annotations apply that permutation when loading registration TIFFs.
+
 ## Configuration
 
 ```yaml

@@ -376,18 +376,31 @@ def brain_export_matlab_control_points(
 @brain_app.command("inspect-imports")
 def brain_inspect_imports(
     config: str = typer.Option(..., "--config", "-c", help="Pipeline YAML config."),
+    space: str = typer.Option(
+        "atlas",
+        "--space",
+        help="Inspect space: atlas (Perens/Allen export grid) or sample (20 µm registration grid).",
+    ),
     headless: bool = typer.Option(
         False,
         "--headless",
         help="Validate inspect inputs without opening Napari.",
     ),
 ) -> None:
-    """Napari QC: registered channels, atlas, and imported points/masks in atlas space."""
+    """Napari QC: registered channels, atlas, and imported points/masks."""
+    from lightsuite.cli.spaces import parse_view_space_option
     from lightsuite.config.loader import load_config
     from lightsuite.gui.inspect_brain_imports import run_brain_inspect_imports
 
     cfg = load_config(config)
-    paths = run_brain_inspect_imports(cfg, headless=headless)
+    inspect_space = parse_view_space_option(space)
+    paths = run_brain_inspect_imports(
+        cfg,
+        space=inspect_space,  # type: ignore[arg-type]
+        headless=headless,
+    )
+    if paths.sample_space_dir is not None:
+        typer.echo(f"sample_space: {paths.sample_space_dir}")
     typer.echo(f"volume_registered: {paths.volume_registered_dir}")
     if paths.registered_channels:
         typer.echo(f"  channels: {sorted(paths.registered_channels)}")

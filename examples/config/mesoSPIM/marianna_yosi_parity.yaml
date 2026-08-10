@@ -50,19 +50,18 @@ export:
   save_registered_volume: false
   write_cells_csv: false
 
-# Enable after Arivis conversion (2.5×) + multires register + manual warp to 0.8× native.
-# See examples/notebooks/convert_arivis_to_lightsuite.ipynb (SAMPLE=marianna_2p5x).
-# import:
-#   write_csv: true
-#   annotations:
-#     - format: points_csv
-#       path: /media/gbm/NVME2/ALICe-pipelines-data/Marianna_CMU/segmentation/converted/arivis_2p5x_points_0p8x.csv
-#       label: arivis_cells
-#     - format: mask_tiff
-#       path: /media/gbm/NVME2/ALICe-pipelines-data/Marianna_CMU/segmentation/converted/arivis_2p5x_mask_0p8x.tif
-#       label: arivis_mask
+# Arivis segmentation warped to 0.8× native (see scratch_warp_arivis_to_0p8x.py).
+import:
+  write_csv: true
+  annotations:
+    - format: points_csv
+      path: /media/gbm/NVME2/ALICe-pipelines-data/Marianna_CMU/segmentation/converted/arivis_2p5x_points_0p8x.csv
+      label: arivis_cells
+    - format: mask_tiff
+      path: /media/gbm/NVME2/ALICe-pipelines-data/Marianna_CMU/segmentation/converted/arivis_2p5x_mask_0p8x.tif
+      label: arivis_mask
 
-# analysis:
-#   write_tidy_csv: true
-#   count_points: true
-#   point_labels: [arivis_cells]
+analysis:
+  write_tidy_csv: true
+  count_points: true
+  point_labels: [arivis_cells]

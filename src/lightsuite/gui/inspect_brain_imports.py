@@ -7,31 +7,45 @@ import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 
-from lightsuite.atlas.registry import resolve_brain_atlas_from_config
+from lightsuite.atlas.registry import (
+    atlas_display_provider_from_config,
+    resolve_brain_atlas_from_config,
+)
+from lightsuite.atlas.display import (
+    atlas_points_xyz_to_napari_zyx,
+    atlas_volume_yxz_to_napari_zyx,
+    registration_points_xyz_to_napari_zyx,
+    registration_volume_yxz_to_napari_zyx,
+)
 from lightsuite.config.models import BrainPipelineConfig
 from lightsuite.export.brain_export import _load_transform_params
 from lightsuite.registration.volume import load_registration_volume
 
+ViewSpace = Literal["atlas", "sample"]
+
 
 @dataclass(frozen=True)
 class BrainImportInspectPaths:
-    """Resolved inputs under ``<save_path>/volume_registered/``."""
+    """Resolved inputs for brain import Napari QC."""
 
     volume_registered_dir: Path
-    template_path: Path
-    annotation_path: Path
+    template_path: Path | None
+    annotation_path: Path | None
     registered_channels: dict[int, Path] = field(default_factory=dict)
     point_npz_paths: dict[str, Path] = field(default_factory=dict)
     mask_paths: dict[str, Path] = field(default_factory=dict)
+    space: ViewSpace = "atlas"
+    sample_space_dir: Path | None = None
 
 
 @dataclass
 class BrainImportInspectVolumes:
-    template: np.ndarray
-    annotation: np.ndarray
+    template: np.ndarray | None
+    annotation: np.ndarray | None
     registered_channels: dict[int, np.ndarray]
     point_layers: dict[str, np.ndarray]
     mask_layers: dict[str, np.ndarray]
@@ -47,8 +61,20 @@ def _label_from_stem(stem: str, suffix: str) -> str:
     return stem
 
 
-def discover_brain_import_inspect_paths(config: BrainPipelineConfig) -> BrainImportInspectPaths:
-    """Discover atlas TIFFs, registered channels, and import annotation outputs."""
+def discover_brain_import_inspect_paths(
+    config: BrainPipelineConfig,
+    *,
+    space: ViewSpace = "atlas",
+) -> BrainImportInspectPaths:
+    """Discover registered volumes and imported annotation outputs for Napari QC."""
+    if space == "sample":
+        return _discover_brain_import_inspect_paths_sample(config)
+    return _discover_brain_import_inspect_paths_atlas(config)
+
+
+def _discover_brain_import_inspect_paths_atlas(
+    config: BrainPipelineConfig,
+) -> BrainImportInspectPaths:
     save_path = config.sample.save_path.expanduser()
     vr = _volume_registered_dir(config)
     if not vr.is_dir():
@@ -99,6 +125,25 @@ def discover_brain_import_inspect_paths(config: BrainPipelineConfig) -> BrainImp
         registered_channels=registered_channels,
         point_npz_paths=point_npz_paths,
         mask_paths=mask_paths,
+        space="atlas",
+    )
+
+
+def _discover_brain_import_inspect_paths_sample(
+    config: BrainPipelineConfig,
+) -> BrainImportInspectPaths:
+    from lightsuite.export.brain_sample_space import discover_brain_sample_space_inspect_paths
+
+    sample_paths = discover_brain_sample_space_inspect_paths(config)
+    return BrainImportInspectPaths(
+        volume_registered_dir=sample_paths.volume_registered_dir,
+        template_path=sample_paths.template_path,
+        annotation_path=sample_paths.annotation_path,
+        registered_channels=sample_paths.registered_channels,
+        point_npz_paths=sample_paths.point_npz_paths,
+        mask_paths=sample_paths.mask_paths,
+        space="sample",
+        sample_space_dir=sample_paths.sample_space_dir,
     )
 
 
@@ -140,7 +185,7 @@ def _load_points_csv(path: Path) -> np.ndarray:
 
 
 def atlas_points_to_napari_zyx(coords_xyz: np.ndarray) -> np.ndarray:
-    """Map 1-based atlas voxel indices (x, y, z) to Napari point coordinates (z, y, x)."""
+    """Map 1-based voxel indices (x, y, z) to Napari point coordinates (z, y, x)."""
     pts = np.asarray(coords_xyz, dtype=np.float64)
     if pts.size == 0:
         return np.zeros((0, 3), dtype=np.float64)
@@ -150,6 +195,56 @@ def atlas_points_to_napari_zyx(coords_xyz: np.ndarray) -> np.ndarray:
 def volume_yxz_to_napari_zyx(volume: np.ndarray) -> np.ndarray:
     """LightSuite volumes are (Y, X, Z); Napari 3D images use (Z, Y, X)."""
     return np.transpose(volume, (2, 0, 1))
+
+
+def brain_volume_to_napari_zyx(
+    volume: np.ndarray,
+    *,
+    space: ViewSpace,
+    atlas_provider: str | None = None,
+    permute_sample_to_atlas: list[int] | None = None,
+) -> np.ndarray:
+    """Map a brain volume to Napari ZYX using atlas QC layout when in atlas space."""
+    if space == "atlas":
+        if atlas_provider is None:
+            msg = "atlas_provider is required for atlas-space Napari display"
+            raise ValueError(msg)
+        return atlas_volume_yxz_to_napari_zyx(volume, atlas_provider=atlas_provider)
+    if atlas_provider is None or permute_sample_to_atlas is None:
+        return volume_yxz_to_napari_zyx(volume)
+    return registration_volume_yxz_to_napari_zyx(
+        volume,
+        atlas_provider=atlas_provider,
+        permute_sample_to_atlas=permute_sample_to_atlas,
+    )
+
+
+def brain_points_to_napari_zyx(
+    coords_xyz: np.ndarray,
+    *,
+    space: ViewSpace,
+    volume_shape_yxz: tuple[int, int, int],
+    atlas_provider: str | None = None,
+    permute_sample_to_atlas: list[int] | None = None,
+) -> np.ndarray:
+    """Map 1-based point coordinates to Napari ZYX."""
+    if space == "atlas":
+        if atlas_provider is None:
+            msg = "atlas_provider is required for atlas-space Napari display"
+            raise ValueError(msg)
+        return atlas_points_xyz_to_napari_zyx(
+            coords_xyz,
+            atlas_provider=atlas_provider,
+            volume_shape_yxz=volume_shape_yxz,
+        )
+    if atlas_provider is None or permute_sample_to_atlas is None:
+        return atlas_points_to_napari_zyx(coords_xyz)
+    return registration_points_xyz_to_napari_zyx(
+        coords_xyz,
+        atlas_provider=atlas_provider,
+        volume_shape_yxz=volume_shape_yxz,
+        permute_sample_to_atlas=permute_sample_to_atlas,
+    )
 
 
 def _contrast_limits(volume: np.ndarray) -> tuple[float, float]:
@@ -167,24 +262,54 @@ def load_brain_import_inspect_volumes(
     config: BrainPipelineConfig,
     *,
     paths: BrainImportInspectPaths | None = None,
+    space: ViewSpace = "atlas",
 ) -> BrainImportInspectVolumes:
-    """Load atlas, registered channels, masks, and point layers for Napari."""
-    paths = paths or discover_brain_import_inspect_paths(config)
+    """Load registered channels, overlays, masks, and point layers for Napari."""
+    paths = paths or discover_brain_import_inspect_paths(config, space=space)
+    view_space = paths.space if paths is not None else space
+    if view_space == "sample":
+        from lightsuite.export.brain_sample_space import (
+            BrainSampleSpaceInspectPaths,
+            load_brain_sample_space_inspect_volumes,
+        )
+
+        sample_paths = BrainSampleSpaceInspectPaths(
+            volume_registered_dir=paths.volume_registered_dir,
+            sample_space_dir=paths.sample_space_dir,
+            template_path=paths.template_path,
+            annotation_path=paths.annotation_path,
+            registered_channels=paths.registered_channels,
+            point_npz_paths=paths.point_npz_paths,
+            mask_paths=paths.mask_paths,
+        )
+        return load_brain_sample_space_inspect_volumes(config, paths=sample_paths)
+    return _load_brain_import_inspect_volumes_atlas(config, paths=paths)
+
+
+def _load_brain_import_inspect_volumes_atlas(
+    config: BrainPipelineConfig,
+    *,
+    paths: BrainImportInspectPaths,
+) -> BrainImportInspectVolumes:
     save_path = config.sample.save_path.expanduser()
     transform_params = _load_transform_params(save_path)
     expected_shape = tuple(int(v) for v in transform_params.atlassize)
+
+    if paths.template_path is None or paths.annotation_path is None:
+        msg = "Atlas inspect paths missing template or annotation."
+        raise ValueError(msg)
 
     template = _load_atlas_volume_yxz(paths.template_path)
     annotation = _load_atlas_volume_yxz(paths.annotation_path)
     if template.shape != expected_shape:
         msg = (
-            f"Allen template shape {template.shape} != transform atlassize {expected_shape}. "
+            f"Atlas template shape {template.shape} != transform atlassize {expected_shape}. "
             "Re-run register/export on this sample."
         )
         raise ValueError(msg)
     if annotation.shape != expected_shape:
         msg = (
-            f"Allen annotation shape {annotation.shape} != transform atlassize {expected_shape}."
+            f"Atlas annotation shape {annotation.shape} != transform atlassize {expected_shape}."
         )
         raise ValueError(msg)
 
@@ -207,7 +332,6 @@ def load_brain_import_inspect_volumes(
     point_layers: dict[str, np.ndarray] = {}
     for label, npz_path in paths.point_npz_paths.items():
         point_layers[label] = _load_points_npz(npz_path)
-    # Optional CSV fallback when NPZ is absent
     for path in sorted(paths.volume_registered_dir.glob("*_atlas_coords.csv")):
         label = _label_from_stem(path.stem, "_atlas_coords")
         if label in point_layers:
@@ -226,12 +350,13 @@ def load_brain_import_inspect_volumes(
 def run_brain_inspect_imports(
     config: BrainPipelineConfig,
     *,
+    space: ViewSpace = "atlas",
     headless: bool = False,
 ) -> BrainImportInspectPaths:
-    """Open Napari to QC registered channels and imported annotations in atlas space."""
-    paths = discover_brain_import_inspect_paths(config)
+    """Open Napari to QC registered channels and imported annotations."""
+    paths = discover_brain_import_inspect_paths(config, space=space)
     if headless:
-        load_brain_import_inspect_volumes(config, paths=paths)
+        load_brain_import_inspect_volumes(config, paths=paths, space=space)
         return paths
 
     try:
@@ -241,32 +366,85 @@ def run_brain_inspect_imports(
         msg = "Napari GUI requires: uv sync --extra gui"
         raise RuntimeError(msg) from exc
 
-    volumes = load_brain_import_inspect_volumes(config, paths=paths)
-    viewer = napari.Viewer(title=f"LightSuite brain import QC — {config.sample.name}")
+    volumes = load_brain_import_inspect_volumes(config, paths=paths, space=space)
+    atlas_provider = atlas_display_provider_from_config(config.atlas)
+    permute_sample_to_atlas: list[int] | None = None
+    if space == "sample":
+        transform_params = _load_transform_params(config.sample.save_path.expanduser())
+        permute_sample_to_atlas = transform_params.permute_sample_to_atlas or [1, 2, 3]
+    reference_shape = (
+        volumes.template.shape
+        if volumes.template is not None
+        else next(iter(volumes.registered_channels.values())).shape
+        if volumes.registered_channels
+        else next(iter(volumes.mask_layers.values())).shape
+    )
 
-    template_limits = _contrast_limits(volumes.template)
-    viewer.add_image(
-        volume_yxz_to_napari_zyx(volumes.template),
-        name="Allen template",
-        colormap="gray",
-        blending="opaque",
-        contrast_limits=template_limits,
-    )
-    viewer.add_image(
-        volume_yxz_to_napari_zyx(volumes.annotation),
-        name="Allen annotation",
-        colormap="green",
-        blending="additive",
-        opacity=0.2,
-        contrast_limits=(0.0, float(np.max(volumes.annotation)) or 1.0),
-    )
+    if space == "sample":
+        title = f"LightSuite brain import QC — {config.sample.name} (sample, 20 µm registration grid)"
+        template_name = "atlas template (warped)"
+        annotation_name = "atlas annotation (warped)"
+        channel_suffix = "registration"
+    else:
+        title = f"LightSuite brain import QC — {config.sample.name} (atlas)"
+        template_name = "atlas template"
+        annotation_name = "atlas annotation"
+        channel_suffix = "registered"
+
+    viewer = napari.Viewer(title=title)
+
+    if volumes.template is not None:
+        viewer.add_image(
+            brain_volume_to_napari_zyx(
+                volumes.template,
+                space=space,
+                atlas_provider=atlas_provider,
+                permute_sample_to_atlas=permute_sample_to_atlas,
+            ),
+            name=template_name,
+            colormap="gray",
+            blending="opaque",
+            contrast_limits=_contrast_limits(volumes.template),
+        )
+
+    if volumes.annotation is not None:
+        if space == "atlas":
+            viewer.add_labels(
+                brain_volume_to_napari_zyx(
+                    volumes.annotation,
+                    space=space,
+                    atlas_provider=atlas_provider,
+                    permute_sample_to_atlas=permute_sample_to_atlas,
+                ).astype(np.int64, copy=False),
+                name=annotation_name,
+                opacity=0.45,
+            )
+        else:
+            viewer.add_image(
+                brain_volume_to_napari_zyx(
+                    volumes.annotation,
+                    space=space,
+                    atlas_provider=atlas_provider,
+                    permute_sample_to_atlas=permute_sample_to_atlas,
+                ),
+                name=annotation_name,
+                colormap="green",
+                blending="additive",
+                opacity=0.2,
+                contrast_limits=(0.0, float(np.max(volumes.annotation)) or 1.0),
+            )
 
     channel_cmaps = ["magenta", "cyan", "yellow", "red"]
     for idx, (ichan, vol) in enumerate(sorted(volumes.registered_channels.items())):
         cmap = channel_cmaps[idx % len(channel_cmaps)]
         viewer.add_image(
-            volume_yxz_to_napari_zyx(vol),
-            name=f"channel {ichan} registered",
+            brain_volume_to_napari_zyx(
+                vol,
+                space=space,
+                atlas_provider=atlas_provider,
+                permute_sample_to_atlas=permute_sample_to_atlas,
+            ),
+            name=f"channel {ichan} {channel_suffix}",
             colormap=cmap,
             blending="additive",
             opacity=0.55,
@@ -275,7 +453,12 @@ def run_brain_inspect_imports(
 
     for label, mask in volumes.mask_layers.items():
         viewer.add_image(
-            volume_yxz_to_napari_zyx(mask),
+            brain_volume_to_napari_zyx(
+                mask,
+                space=space,
+                atlas_provider=atlas_provider,
+                permute_sample_to_atlas=permute_sample_to_atlas,
+            ),
             name=f"mask: {label}",
             colormap="red",
             blending="additive",
@@ -284,7 +467,13 @@ def run_brain_inspect_imports(
         )
 
     for label, coords in volumes.point_layers.items():
-        napari_pts = atlas_points_to_napari_zyx(coords)
+        napari_pts = brain_points_to_napari_zyx(
+            coords,
+            space=space,
+            atlas_provider=atlas_provider,
+            volume_shape_yxz=reference_shape,
+            permute_sample_to_atlas=permute_sample_to_atlas,
+        )
         viewer.add_points(
             napari_pts,
             name=f"points: {label}",
@@ -294,17 +483,17 @@ def run_brain_inspect_imports(
         )
 
     summary_path = paths.volume_registered_dir / "import_annotations_summary.json"
+    space_note = "sample-space " if space == "sample" else ""
     if summary_path.is_file():
-        summary = json.loads(summary_path.read_text(encoding="utf-8"))
         show_info(
-            f"Loaded {len(volumes.registered_channels)} channel(s), "
+            f"Loaded {len(volumes.registered_channels)} {space_note}channel(s), "
             f"{len(volumes.point_layers)} point layer(s), "
             f"{len(volumes.mask_layers)} mask layer(s). "
             f"Summary: {summary_path.name}"
         )
     else:
         show_info(
-            f"Loaded {len(volumes.registered_channels)} channel(s), "
+            f"Loaded {len(volumes.registered_channels)} {space_note}channel(s), "
             f"{len(volumes.point_layers)} point layer(s), "
             f"{len(volumes.mask_layers)} mask layer(s)."
         )
