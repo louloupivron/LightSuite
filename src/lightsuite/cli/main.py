@@ -1824,6 +1824,39 @@ def multires_validate_config(
         typer.echo(f"Pair manifest: {manifest_path}")
 
 
+@multires_app.command("inspect-geometry")
+def multires_inspect_geometry(
+    config: str = typer.Option(..., "--config", "-c", help="Multires pipeline YAML config."),
+    headless: bool = typer.Option(
+        False,
+        "--headless",
+        help="Score the configured lateral_flip without opening Napari.",
+    ),
+    write_config: bool = typer.Option(
+        False,
+        "--write-config",
+        help="Patch multires.mesospim_geometry in the YAML (uses current toggles in GUI, or configured flip in headless mode).",
+    ),
+) -> None:
+    """Interactive mesoSPIM geometry QC (lateral_flip toggles + physical NCC)."""
+    from lightsuite.config.loader import load_multires_config
+    from lightsuite.gui.inspect_geometry_multires import run_multires_inspect_geometry
+
+    cfg = load_multires_config(config)
+    result = run_multires_inspect_geometry(
+        cfg,
+        config_path=config,
+        headless=headless,
+        write_config=write_config,
+    )
+    if headless:
+        typer.echo(
+            f"lateral_flip={list(result.lateral_flip)}  "
+            f"physical_ncc={result.physical_ncc:.3f}  "
+            f"has_overlap={result.has_overlap}"
+        )
+
+
 @multires_app.command("match-points")
 def multires_match_points(
     config: str = typer.Option(..., "--config", "-c", help="Multires pipeline YAML config."),

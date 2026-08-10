@@ -109,6 +109,17 @@ def _roi_volume_spec(
     return volume_spec_from_geometry(roi_path, shape_zyx, spacing, origin, direction)
 
 
+def _resolved_mesospim_geometries(
+    *,
+    geometry: MesospimGeometryConfig | None = None,
+    overview_geometry: MesospimGeometryConfig | None = None,
+    roi_geometry: MesospimGeometryConfig | None = None,
+) -> tuple[MesospimGeometryConfig, MesospimGeometryConfig]:
+    """Resolve shared vs per-volume geometry overrides."""
+    default = geometry or MesospimGeometryConfig()
+    return overview_geometry or default, roi_geometry or default
+
+
 def build_mesospim_pair_manifest(
     *,
     sample_name: str,
@@ -116,6 +127,8 @@ def build_mesospim_pair_manifest(
     overview_path: Path,
     roi_path: Path,
     geometry: MesospimGeometryConfig | None = None,
+    overview_geometry: MesospimGeometryConfig | None = None,
+    roi_geometry: MesospimGeometryConfig | None = None,
     tiff_remap: MesospimTiffRemapConfig | None = None,
     overview_meta_path: Path | None = None,
     roi_meta_path: Path | None = None,
@@ -130,7 +143,11 @@ def build_mesospim_pair_manifest(
     northern tile).
     """
     _ = tiff_remap
-    geometry = geometry or MesospimGeometryConfig()
+    overview_geometry, roi_geometry = _resolved_mesospim_geometries(
+        geometry=geometry,
+        overview_geometry=overview_geometry,
+        roi_geometry=roi_geometry,
+    )
     overview_path = overview_path.expanduser().resolve()
     roi_path = roi_path.expanduser().resolve()
 
@@ -139,8 +156,8 @@ def build_mesospim_pair_manifest(
     overview_meta = parse_mesospim_meta(overview_meta_path)
     roi_meta = parse_mesospim_meta(roi_meta_path)
 
-    overview_spec = _overview_volume_spec(overview_path, overview_meta, geometry)
-    roi_spec = _roi_volume_spec(roi_path, roi_meta, geometry)
+    overview_spec = _overview_volume_spec(overview_path, overview_meta, overview_geometry)
+    roi_spec = _roi_volume_spec(roi_path, roi_meta, roi_geometry)
 
     manifest = MultiresPairManifest(
         format=MANIFEST_FORMAT,
@@ -176,6 +193,8 @@ def build_mesospim_multichannel_pair_manifest(
     channels: dict[str, dict[str, Path]],
     reference_channel: str,
     geometry: MesospimGeometryConfig | None = None,
+    overview_geometry: MesospimGeometryConfig | None = None,
+    roi_geometry: MesospimGeometryConfig | None = None,
     overview_meta_path: Path | None = None,
     roi_meta_by_channel: dict[str, Path] | None = None,
     landmarks_path: Path | None = None,
@@ -190,7 +209,11 @@ def build_mesospim_multichannel_pair_manifest(
         msg = f"reference_channel {reference_channel!r} missing from channels"
         raise KeyError(msg)
 
-    geometry = geometry or MesospimGeometryConfig()
+    overview_geometry, roi_geometry = _resolved_mesospim_geometries(
+        geometry=geometry,
+        overview_geometry=overview_geometry,
+        roi_geometry=roi_geometry,
+    )
     roi_meta_by_channel = roi_meta_by_channel or {}
     channel_specs: dict[str, MultiresChannelSpecs] = {}
 
@@ -206,9 +229,9 @@ def build_mesospim_multichannel_pair_manifest(
             overview=_overview_volume_spec(
                 overview_path,
                 parse_mesospim_meta(overview_meta),
-                geometry,
+                overview_geometry,
             ),
-            roi=_roi_volume_spec(roi_path, parse_mesospim_meta(roi_meta_path), geometry),
+            roi=_roi_volume_spec(roi_path, parse_mesospim_meta(roi_meta_path), roi_geometry),
         )
 
     ref_specs = channel_specs[reference_channel]

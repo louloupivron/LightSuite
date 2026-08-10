@@ -10,7 +10,7 @@ import numpy as np
 import tifffile
 
 from lightsuite.multires.config_models import MultiresGeometryMode, MultiresPipelineConfig
-from lightsuite.multires.landmark_session import load_landmark_session
+from lightsuite.multires.prepare import load_landmark_session
 from lightsuite.multires.landmarks import fit_landmark_transform
 from lightsuite.multires.geometry import physical_corners, transform_physical_points
 from lightsuite.multires.spec_geometry import (

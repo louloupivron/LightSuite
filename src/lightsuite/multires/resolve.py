@@ -4,9 +4,19 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from lightsuite.multires.config_models import MultiresPipelineConfig
+from lightsuite.mesospim.config_models import MesospimGeometryConfig
+from lightsuite.multires.config_models import MesospimGeometryOverride, MultiresPipelineConfig
 from lightsuite.multires.manifest import load_pair_manifest, save_pair_manifest
 from lightsuite.multires.models import MultiresPairManifest
+
+
+def _merge_mesospim_geometry(override: MesospimGeometryOverride | None) -> MesospimGeometryConfig | None:
+    if override is None:
+        return None
+    base = MesospimGeometryConfig().model_dump()
+    for key, value in override.model_dump(exclude_none=True).items():
+        base[key] = value
+    return MesospimGeometryConfig(**base)
 
 
 def resolve_pair_manifest(
@@ -52,11 +62,20 @@ def resolve_pair_manifest(
             if channel.roi_meta_path is not None
         }
 
+        mesospim_geometry = meso.mesospim_geometry
+        overview_geometry = _merge_mesospim_geometry(
+            mesospim_geometry.overview if mesospim_geometry is not None else None
+        )
+        roi_geometry = _merge_mesospim_geometry(
+            mesospim_geometry.roi if mesospim_geometry is not None else None
+        )
         manifest = build_mesospim_multichannel_pair_manifest(
             sample_name=cfg.sample.name,
             pair_label=meso.resolved_pair_label(cfg.sample.name),
             channels=channels,
             reference_channel=reference_channel,
+            overview_geometry=overview_geometry,
+            roi_geometry=roi_geometry,
             overview_meta_path=overview_meta_path,
             roi_meta_by_channel=roi_meta_by_channel or None,
             output_manifest_path=manifest_path,

@@ -211,6 +211,158 @@ def save_content_box_to_config(
     return path
 
 
+def _line_indent(line: str) -> int:
+    match = re.match(r"^(\s*)", line.rstrip("\n\r"))
+    return len(match.group(1)) if match else 0
+
+
+def _find_section_line(lines: list[str], section: str) -> int | None:
+    section_re = re.compile(rf"^{re.escape(section)}:\s*$")
+    for index, line in enumerate(lines):
+        if section_re.match(line.rstrip("\n\r")):
+            return index
+    return None
+
+
+def _section_content_end(lines: list[str], section_idx: int) -> int:
+    base_indent = _line_indent(lines[section_idx])
+    index = section_idx + 1
+    while index < len(lines):
+        stripped = lines[index].rstrip("\n\r")
+        if stripped == "" or stripped.lstrip().startswith("#"):
+            index += 1
+            continue
+        if _line_indent(lines[index]) <= base_indent:
+            break
+        index += 1
+    return index
+
+
+def _find_child_section(
+    lines: list[str],
+    start: int,
+    end: int,
+    name: str,
+    *,
+    indent: int | None = None,
+) -> int | None:
+    pattern = re.compile(rf"^(\s+){re.escape(name)}:\s*$")
+    for index in range(start, end):
+        match = pattern.match(lines[index].rstrip("\n\r"))
+        if match is None:
+            continue
+        if indent is not None and len(match.group(1)) != indent:
+            continue
+        return index
+    return None
+
+
+def _set_lateral_flip_in_range(
+    lines: list[str],
+    start: int,
+    end: int,
+    lateral_flip: tuple[int, int],
+    *,
+    default_indent: int,
+) -> None:
+    flip_value = _format_yaml_list([int(lateral_flip[0]), int(lateral_flip[1])])
+    lateral_re = re.compile(r"^(\s*)lateral_flip:\s*.+$")
+    for index in range(start, end):
+        match = lateral_re.match(lines[index].rstrip("\n\r"))
+        if match is None:
+            continue
+        newline = "\n" if lines[index].endswith("\n") else ""
+        lines[index] = f"{match.group(1)}lateral_flip: {flip_value}" + newline
+        return
+    lines.insert(start, f"{' ' * default_indent}lateral_flip: {flip_value}\n")
+
+
+def save_mesospim_lateral_flip_to_multires_config(
+    config_path: str | Path,
+    lateral_flip: tuple[int, int],
+) -> Path:
+    """Update ``multires.mesospim_geometry`` lateral_flip for overview and ROI."""
+    fx, fy = (int(lateral_flip[0]), int(lateral_flip[1]))
+    if fx not in (-1, 1) or fy not in (-1, 1):
+        msg = "lateral_flip values must be +1 or -1"
+        raise ValueError(msg)
+
+    path = Path(config_path).expanduser().resolve()
+    if not path.is_file():
+        msg = f"Config file not found: {path}"
+        raise FileNotFoundError(msg)
+
+    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    multires_idx = _find_section_line(lines, "multires")
+    if multires_idx is None:
+        msg = f"No multires: section in {path}"
+        raise ValueError(msg)
+
+    multires_end = _section_content_end(lines, multires_idx)
+    multires_indent = _line_indent(lines[multires_idx])
+    child_indent = multires_indent + 2
+    flip_value = _format_yaml_list([fx, fy])
+
+    geo_idx = _find_child_section(
+        lines,
+        multires_idx + 1,
+        multires_end,
+        "mesospim_geometry",
+        indent=child_indent,
+    )
+    if geo_idx is None:
+        insert_at = multires_end
+        reg_idx = _find_child_section(
+            lines,
+            multires_idx + 1,
+            multires_end,
+            "registration",
+            indent=child_indent,
+        )
+        if reg_idx is not None:
+            insert_at = reg_idx
+        block = [
+            f"{' ' * child_indent}mesospim_geometry:\n",
+            f"{' ' * (child_indent + 2)}overview:\n",
+            f"{' ' * (child_indent + 4)}lateral_flip: {flip_value}\n",
+            f"{' ' * (child_indent + 2)}roi:\n",
+            f"{' ' * (child_indent + 4)}lateral_flip: {flip_value}\n",
+        ]
+        lines[insert_at:insert_at] = block
+    else:
+        geo_indent = _line_indent(lines[geo_idx])
+        vol_indent = geo_indent + 2
+        flip_indent = geo_indent + 4
+        for volume in ("overview", "roi"):
+            geo_end = _section_content_end(lines, geo_idx)
+            vol_idx = _find_child_section(
+                lines,
+                geo_idx + 1,
+                geo_end,
+                volume,
+                indent=vol_indent,
+            )
+            if vol_idx is None:
+                lines.insert(
+                    geo_end,
+                    f"{' ' * vol_indent}{volume}:\n"
+                    f"{' ' * flip_indent}lateral_flip: {flip_value}\n",
+                )
+                continue
+            vol_end = _section_content_end(lines, vol_idx)
+            _set_lateral_flip_in_range(
+                lines,
+                vol_idx + 1,
+                vol_end,
+                (fx, fy),
+                default_indent=flip_indent,
+            )
+
+    path.write_text("".join(lines), encoding="utf-8")
+    load_multires_config(path)
+    return path
+
+
 def load_cohort_config(path: str | Path):
     """Load and validate a cross-subject cohort YAML config."""
     from lightsuite.analysis.cohort_models import CohortConfig

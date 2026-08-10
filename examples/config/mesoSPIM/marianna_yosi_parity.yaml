@@ -15,7 +15,7 @@ sample:
   name: Marianna
   source:
     format: tiff_stack
-    path: /run/user/1002/gvfs/smb-share:server=h1data1.wysscenter.ch,share=computingdata/Alice/0003_CBT_WYSS_LIGHTSHEET/DATA/MESOSPIM/Marianna CMU
+    path: /media/gbm/NVME2/ALICe-pipelines-data/Marianna_CMU/0.8X
     tiff_type: channelperfile
   scratch: /media/gbm/NVME2/lightsuite_scratch
   save_path: /media/gbm/NVME2/ALICe-pipelines-data/Marianna_CMU/MATLAB_python_comparison/register_Yosi_test_python
@@ -49,3 +49,20 @@ compute:
 export:
   save_registered_volume: false
   write_cells_csv: false
+
+# Enable after Arivis conversion (2.5×) + multires register + manual warp to 0.8× native.
+# See examples/notebooks/convert_arivis_to_lightsuite.ipynb (SAMPLE=marianna_2p5x).
+# import:
+#   write_csv: true
+#   annotations:
+#     - format: points_csv
+#       path: /media/gbm/NVME2/ALICe-pipelines-data/Marianna_CMU/segmentation/converted/arivis_2p5x_points_0p8x.csv
+#       label: arivis_cells
+#     - format: mask_tiff
+#       path: /media/gbm/NVME2/ALICe-pipelines-data/Marianna_CMU/segmentation/converted/arivis_2p5x_mask_0p8x.tif
+#       label: arivis_mask
+
+# analysis:
+#   write_tidy_csv: true
+#   count_points: true
+#   point_labels: [arivis_cells]

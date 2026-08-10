@@ -4,11 +4,36 @@ from __future__ import annotations
 
 from enum import StrEnum
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from lightsuite.multires.landmark_session import LandmarkFitMode, default_landmark_session_path
+
+
+class MesospimGeometryOverride(BaseModel):
+    """Partial mesoSPIM geometry fields merged onto defaults when building manifests."""
+
+    stage_xy_is_center: bool | None = None
+    itk_lateral_dim0_motor: Literal["x", "y"] | None = None
+    lateral_flip: Annotated[list[int], Field(min_length=2, max_length=2)] | None = None
+
+    @field_validator("lateral_flip")
+    @classmethod
+    def validate_lateral_flip(cls, value: list[int] | None) -> list[int] | None:
+        if value is None:
+            return None
+        if any(v not in (-1, 1) for v in value):
+            msg = "lateral_flip values must be +1 or -1"
+            raise ValueError(msg)
+        return value
+
+
+class MultiresMesospimGeometryConfig(BaseModel):
+    """Optional per-volume mesoSPIM geometry when building manifests from ``channels``."""
+
+    overview: MesospimGeometryOverride | None = None
+    roi: MesospimGeometryOverride | None = None
 
 
 class MultiresGeometryMode(StrEnum):
@@ -90,6 +115,7 @@ class MultiresConfig(BaseModel):
     pair_label: str | None = None
     overview_meta_path: Path | None = None
     channels: dict[str, MultiresChannelPathConfig] | None = None
+    mesospim_geometry: MultiresMesospimGeometryConfig | None = None
     geometry_mode: MultiresGeometryMode = MultiresGeometryMode.METADATA
     landmarks: MultiresLandmarkConfig = Field(default_factory=MultiresLandmarkConfig)
     registration: MultiresRegistrationSettings = Field(default_factory=MultiresRegistrationSettings)
