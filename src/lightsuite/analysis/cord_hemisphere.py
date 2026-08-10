@@ -11,9 +11,13 @@ from lightsuite.analysis.hemisphere import SIDE_LABELS
 
 HEMISPHERE_ANNOTATION_FILENAME = "Hemisphere_Annotation.tif"
 REGISTERED_HEMISPHERE_FILENAME = "hemisphere_registered.tiff"
+HEMISPHERE_IN_SAMPLE = "hemisphere_in_sample_20um.tif"
 
 # Fiederling ``Hemisphere_Annotation.tif`` uses 255 for one hemisegment and 0 for the other.
 HEMI_ACTIVE_VALUE = 255
+
+# The atlas→sample export warp mirrors the lateral (Y) axis relative to the native mask.
+SAMPLE_SPACE_HEMISPHERE_WARP_MIRRORS_LATERAL = True
 
 
 def resolve_hemisphere_annotation_path(atlas_dir: Path) -> Path:
@@ -69,12 +73,28 @@ def hemisphere_label_from_side(side_id: int) -> str | None:
     return SIDE_LABELS[side_id]
 
 
+def sample_space_hemisphere_flip(*, atlas_hemisphere_flip: bool) -> bool:
+    """Return the ``flip`` flag for warped sample-space hemisphere masks.
+
+    Atlas-space stats use the native Fiederling mask. The sample-space export
+    warp mirrors the lateral axis, so the opposite ``flip`` is required for
+    consistent left/right labels across spaces (unless ``atlas_hemisphere_flip``
+    already swaps the native atlas convention).
+    """
+    if SAMPLE_SPACE_HEMISPHERE_WARP_MIRRORS_LATERAL:
+        return not atlas_hemisphere_flip
+    return atlas_hemisphere_flip
+
+
 __all__ = [
     "HEMI_ACTIVE_VALUE",
     "HEMISPHERE_ANNOTATION_FILENAME",
+    "HEMISPHERE_IN_SAMPLE",
     "REGISTERED_HEMISPHERE_FILENAME",
+    "SAMPLE_SPACE_HEMISPHERE_WARP_MIRRORS_LATERAL",
     "cord_hemisphere_side_volume",
     "hemisphere_label_from_side",
     "load_fiederling_hemisphere_native",
     "resolve_hemisphere_annotation_path",
+    "sample_space_hemisphere_flip",
 ]

@@ -18,7 +18,10 @@ from lightsuite.analysis.cord_counts import (
 )
 from lightsuite.analysis.cord_parcellation import parcellate_cord_intensities
 from lightsuite.analysis.cord_rollup import apply_cord_rollups
-from lightsuite.analysis.cord_hemisphere import cord_hemisphere_side_volume
+from lightsuite.analysis.cord_hemisphere import (
+    cord_hemisphere_side_volume,
+    sample_space_hemisphere_flip,
+)
 from lightsuite.analysis.counts import SAMPLE_POINTS_KEY
 from lightsuite.analysis.cord_ontology import load_cord_region_table
 from lightsuite.atlas.fiederling import resolve_fiederling_paths
@@ -33,6 +36,7 @@ from lightsuite.export.cord_registered import (
 )
 from lightsuite.export.cord_sample_space import (
     ANNOTATION_IN_SAMPLE,
+    HEMISPHERE_IN_SAMPLE,
     SEGMENTS_IN_SAMPLE,
     sample_space_dir,
 )
@@ -205,11 +209,36 @@ def run_cord_region_stats(
         sample_dir = sample_space_dir(config.sample.save_path.expanduser())
         ann_path = sample_dir / ANNOTATION_IN_SAMPLE
         seg_path = sample_dir / SEGMENTS_IN_SAMPLE
+        hem_path = sample_dir / HEMISPHERE_IN_SAMPLE
+        split_hemispheres = bool(config.analysis.split_hemispheres)
+        keep_whole = bool(config.analysis.hemisphere_keep_whole)
         if ann_path.is_file():
             annotation_sample = load_registration_volume(ann_path).astype(np.int32)
             segments_vol = None
             if seg_path.is_file():
                 segments_vol = load_registration_volume(seg_path).astype(np.int32)
+            hemisphere_side_sample: np.ndarray | None = None
+            if split_hemispheres and hem_path.is_file():
+                hemisphere_mask_sample = load_registration_volume(hem_path).astype(np.uint8)
+                if hemisphere_mask_sample.shape != annotation_sample.shape:
+                    msg = (
+                        f"Sample hemisphere shape {hemisphere_mask_sample.shape} != "
+                        f"annotation {annotation_sample.shape}. "
+                        "Re-run 'lightsuite spinal export --space sample'."
+                    )
+                    raise ValueError(msg)
+                hemisphere_side_sample = cord_hemisphere_side_volume(
+                    hemisphere_mask_sample,
+                    annotation_sample,
+                    flip=sample_space_hemisphere_flip(
+                        atlas_hemisphere_flip=bool(config.analysis.hemisphere_flip),
+                    ),
+                )
+            elif split_hemispheres:
+                console.print(
+                    f"[yellow]Sample-space hemisphere split skipped:[/yellow] missing {hem_path}. "
+                    "Re-run 'lightsuite spinal export --space sample'."
+                )
             registres_um = float(config.registration.resolution_um)
             voxel_um = (registres_um, registres_um, registres_um)
             for npz_path in sorted(register_path.glob("*_sample_coords.npz")):
@@ -226,6 +255,9 @@ def run_cord_region_stats(
                     region_table=region_table,
                     voxel_um_yxz=voxel_um,
                     segments_volume=segments_vol,
+                    hemisphere_side=hemisphere_side_sample,
+                    split_hemispheres=split_hemispheres and hemisphere_side_sample is not None,
+                    keep_whole=keep_whole,
                 )
                 if len(tidy):
                     sample_frames.append(tidy)

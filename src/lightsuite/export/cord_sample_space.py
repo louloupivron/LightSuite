@@ -13,6 +13,7 @@ import tifffile
 from rich.console import Console
 from scipy import ndimage
 
+from lightsuite.analysis.cord_hemisphere import HEMISPHERE_IN_SAMPLE, load_fiederling_hemisphere_native
 from lightsuite.atlas.fiederling import load_fiederling_atlas_volumes, resolve_fiederling_paths
 from lightsuite.config.models import SpinalCordPipelineConfig
 from lightsuite.export.cord_registered import warp_output_to_uint16
@@ -45,6 +46,21 @@ ANNOTATION_IN_SAMPLE = "annotation_in_sample_20um.tif"
 TEMPLATE_IN_SAMPLE = "template_in_sample_20um.tif"
 SEGMENTS_IN_SAMPLE = "segments_in_sample_20um.tif"
 MANIFEST_NAME = "sample_space_manifest.json"
+
+__all__ = [
+    "ANNOTATION_IN_SAMPLE",
+    "CordSampleSpaceInspectPaths",
+    "CordSampleSpaceInspectVolumes",
+    "HEMISPHERE_IN_SAMPLE",
+    "MANIFEST_NAME",
+    "SAMPLE_SPACE_SUBDIR",
+    "SEGMENTS_IN_SAMPLE",
+    "TEMPLATE_IN_SAMPLE",
+    "discover_cord_sample_space_paths",
+    "export_cord_sample_space",
+    "load_cord_sample_space_volumes",
+    "sample_space_dir",
+]
 _SAMPLE_CHANNEL_PATTERN = re.compile(r"chan_(\d+)_sample_straight_20um\.tif$", re.IGNORECASE)
 
 
@@ -54,6 +70,7 @@ class CordSampleSpaceInspectPaths:
     manifest_path: Path
     annotation_path: Path
     template_path: Path
+    hemisphere_path: Path | None = None
     channel_paths: dict[int, Path] = field(default_factory=dict)
     point_npz_paths: dict[str, Path] = field(default_factory=dict)
 
@@ -63,6 +80,7 @@ class CordSampleSpaceInspectVolumes:
     annotation: np.ndarray
     template: np.ndarray
     channels: dict[int, np.ndarray]
+    hemisphere: np.ndarray | None = None
     point_layers: dict[str, np.ndarray] = field(default_factory=dict)
 
 
@@ -91,6 +109,7 @@ def discover_cord_sample_space_paths(config: SpinalCordPipelineConfig) -> CordSa
     channel_paths: dict[int, Path] = {}
     annotation_path = out_dir / ANNOTATION_IN_SAMPLE
     template_path = out_dir / TEMPLATE_IN_SAMPLE
+    hemisphere_path: Path | None = out_dir / HEMISPHERE_IN_SAMPLE
 
     if manifest_path.is_file():
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -100,6 +119,10 @@ def discover_cord_sample_space_paths(config: SpinalCordPipelineConfig) -> CordSa
             annotation_path = Path(manifest["annotation_path"]).resolve()
         if manifest.get("template_path"):
             template_path = Path(manifest["template_path"]).resolve()
+        if manifest.get("hemisphere_path"):
+            hemisphere_path = Path(manifest["hemisphere_path"]).resolve()
+        elif not (out_dir / HEMISPHERE_IN_SAMPLE).is_file():
+            hemisphere_path = None
     else:
         for path in sorted(out_dir.glob("chan_*_sample_straight_20um.tif")):
             match = _SAMPLE_CHANNEL_PATTERN.fullmatch(path.name)
@@ -126,11 +149,15 @@ def discover_cord_sample_space_paths(config: SpinalCordPipelineConfig) -> CordSa
         label = _label_from_stem(path.stem, "_sample_coords")
         point_npz_paths[label] = path.resolve()
 
+    if hemisphere_path is not None and not hemisphere_path.is_file():
+        hemisphere_path = None
+
     return CordSampleSpaceInspectPaths(
         sample_space_dir=out_dir.resolve(),
         manifest_path=manifest_path.resolve(),
         annotation_path=annotation_path.resolve(),
         template_path=template_path.resolve(),
+        hemisphere_path=hemisphere_path.resolve() if hemisphere_path is not None else None,
         channel_paths=channel_paths,
         point_npz_paths=point_npz_paths,
     )
@@ -177,10 +204,21 @@ def load_cord_sample_space_volumes(
     for label, npz_path in paths.point_npz_paths.items():
         point_layers[label] = load_atlas_points(npz_path, key=SAMPLE_POINTS_KEY)
 
+    hemisphere: np.ndarray | None = None
+    if paths.hemisphere_path is not None and paths.hemisphere_path.is_file():
+        hemisphere = load_registration_volume(paths.hemisphere_path).astype(np.uint8, copy=False)
+        if expected_shape is not None and hemisphere.shape != expected_shape:
+            msg = (
+                f"Hemisphere shape {hemisphere.shape} != channel shape {expected_shape}. "
+                "Re-run 'lightsuite spinal export --space sample'."
+            )
+            raise ValueError(msg)
+
     return CordSampleSpaceInspectVolumes(
         annotation=annotation,
         template=template,
         channels=channels,
+        hemisphere=hemisphere,
         point_layers=point_layers,
     )
 
@@ -295,6 +333,24 @@ def export_cord_sample_space(
         nearest=True,
     )
 
+    hem_native = load_fiederling_hemisphere_native(config.atlas.atlas_dir).astype(np.float32)
+    hem_affine = warp_cord_atlas_to_straightvol(
+        hem_native,
+        transinit=transinit,
+        elastix_affine_path=elastix_affine_path,
+        output_shape=target_shape,
+        spacing_mm=spacing_mm,
+        work_dir=cord_work_dir(config, "transformix", "sample_export", "hem_affine"),
+        nearest=True,
+    )
+    hemisphere_sample = run_transformix(
+        moving_volume=hem_affine.astype(np.float32),
+        transform_path=bspline_fwd_path,
+        output_dir=cord_work_dir(config, "transformix", "sample_export", "hem_bspline"),
+        spacing_mm=spacing_mm,
+        nearest=True,
+    )
+
     finvol = load_registration_volumes(checkpoint)
     perm = [p - 1 for p in transform_params.how_to_perm]
     finvol = np.transpose(finvol, perm + [3])
@@ -323,6 +379,10 @@ def export_cord_sample_space(
         save_registration_volume(
             np.rint(segments_sample).astype(np.uint16),
             out_dir / SEGMENTS_IN_SAMPLE,
+        )
+        save_registration_volume(
+            np.rint(hemisphere_sample).astype(np.uint8),
+            out_dir / HEMISPHERE_IN_SAMPLE,
         )
 
         for ich in range(finvol.shape[3]):
@@ -354,6 +414,7 @@ def export_cord_sample_space(
         "annotation_path": str(out_dir / ANNOTATION_IN_SAMPLE),
         "template_path": str(out_dir / TEMPLATE_IN_SAMPLE),
         "segments_path": str(out_dir / SEGMENTS_IN_SAMPLE),
+        "hemisphere_path": str(out_dir / HEMISPHERE_IN_SAMPLE),
         "segments_csv": str(paths.segments_csv),
     }
     manifest_path = out_dir / MANIFEST_NAME

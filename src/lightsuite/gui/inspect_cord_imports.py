@@ -54,6 +54,7 @@ class CordImportInspectVolumes:
     annotation: np.ndarray
     registered_channels: dict[int, np.ndarray]
     point_layers: dict[str, np.ndarray]
+    hemisphere: np.ndarray | None = None
 
 
 def discover_cord_import_inspect_paths(
@@ -227,6 +228,7 @@ def _load_cord_import_inspect_volumes_sample(
         annotation=volumes.annotation,
         registered_channels=volumes.channels,
         point_layers=point_layers,
+        hemisphere=volumes.hemisphere,
     )
 
 
@@ -291,6 +293,14 @@ def run_cord_inspect_imports(
         name=annotation_name,
         opacity=0.45,
     )
+
+    if space == "sample" and volumes.hemisphere is not None:
+        viewer.add_labels(
+            volume_yxz_to_napari_zyx(volumes.hemisphere),
+            name="hemisphere (warped)",
+            opacity=0.2,
+            visible=False,
+        )
 
     if volumes.point_layers:
         _add_point_layers(viewer, volumes.point_layers)

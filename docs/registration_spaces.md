@@ -63,6 +63,7 @@ volume_registered/
 │   ├── annotation_in_sample_20um.tif
 │   ├── template_in_sample_20um.tif
 │   ├── segments_in_sample_20um.tif
+│   ├── hemisphere_in_sample_20um.tif
 │   ├── chan_01_sample_straight_20um.tif
 │   ├── sample_space_manifest.json
 │   └── region_stats_sample.csv
@@ -79,6 +80,10 @@ volume_registered/
 - **Cell densities** use different denominators.
 
 Use atlas space for cohort comparison; use sample space for QC and native-resolution workflows that bin into warped labels.
+
+Sample-space hemisphere splits use ``hemisphere_in_sample_20um.tif`` (warped like the
+annotation). The atlas→sample export mirrors the lateral axis, so left/right assignment
+applies the complementary ``flip`` to stay consistent with atlas-space stats.
 
 ## Re-running registration
 
