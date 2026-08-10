@@ -16,6 +16,7 @@ from lightsuite.export.cord_sample_space import (
     discover_cord_sample_space_paths,
     load_cord_sample_space_volumes,
 )
+from lightsuite.gui.cord_napari_display import align_sample_space_for_atlas_qc, load_cord_tofliprc
 from lightsuite.gui.inspect_brain_imports import (
     _contrast_limits,
     atlas_points_to_napari_zyx,
@@ -145,36 +146,47 @@ def _run_spinal_sample_space_view(
         raise RuntimeError(msg) from exc
 
     volumes = load_cord_sample_space_volumes(config, paths=paths)
+    tofliprc = load_cord_tofliprc(config.sample.save_path)
+    template, annotation, channels, point_layers, _hemisphere = align_sample_space_for_atlas_qc(
+        template=volumes.template,
+        annotation=volumes.annotation,
+        channels=volumes.channels,
+        point_layers=volumes.point_layers,
+        hemisphere=volumes.hemisphere,
+        tofliprc=tofliprc,
+    )
     viewer = napari.Viewer(
         title=f"LightSuite spinal registration — {config.sample.name} (sample, 20 µm straightened)"
     )
 
     viewer.add_image(
-        volume_yxz_to_napari_zyx(volumes.template),
+        volume_yxz_to_napari_zyx(template),
         name="atlas template (warped)",
         colormap="green",
         blending="additive",
         opacity=0.35,
-        contrast_limits=_contrast_limits(volumes.template),
+        contrast_limits=_contrast_limits(template),
     )
 
-    _add_channel_layers(viewer, volumes.channels, name_suffix="straightened")
+    _add_channel_layers(viewer, channels, name_suffix="straightened")
 
     viewer.add_labels(
-        volume_yxz_to_napari_zyx(volumes.annotation),
+        volume_yxz_to_napari_zyx(annotation),
         name="atlas annotation (warped)",
         opacity=0.45,
     )
 
-    if volumes.point_layers:
-        _add_point_layers(viewer, volumes.point_layers)
+    if point_layers:
+        _add_point_layers(viewer, point_layers)
 
     summary = (
-        f"Loaded {len(volumes.channels)} straightened channel(s) and warped annotation "
+        f"Loaded {len(channels)} straightened channel(s) and warped annotation "
         f"from {paths.sample_space_dir.name}/ on the 20 µm registration grid."
     )
-    if volumes.point_layers:
-        summary += f" Point layers: {len(volumes.point_layers)}."
+    if point_layers:
+        summary += f" Point layers: {len(point_layers)}."
+    if tofliprc:
+        summary += " Sample Z flipped for atlas-aligned rostrocaudal QC."
     show_info(summary)
     napari.run()
     return paths

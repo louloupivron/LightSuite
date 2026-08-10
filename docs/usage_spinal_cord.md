@@ -290,6 +290,12 @@ uv run lightsuite spinal inspect-imports -c my_spinal.yaml --space sample
 
 Use `--headless` to validate inputs without opening the GUI.
 
+When `cord_orientation.txt` sets `caudorostral` (`tofliprc: true`), sample-space inspect
+flips the registration **Z** axis for display so rostrocaudal scrolling matches atlas-space
+inspect. Left/right hemisegment placement uses the warped `hemisphere_in_sample_20um.tif`
+(see [Registration spaces](registration_spaces.md)); that is separate from the longitudinal
+orientation flip.
+
 ### View registration (Napari)
 
 Atlas space (default) — sample warped onto the Fiederling export grid:

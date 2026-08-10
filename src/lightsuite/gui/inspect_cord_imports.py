@@ -23,6 +23,7 @@ from lightsuite.export.cord_sample_space import (
     discover_cord_sample_space_paths,
     load_cord_sample_space_volumes,
 )
+from lightsuite.gui.cord_napari_display import align_sample_space_for_atlas_qc, load_cord_tofliprc
 from lightsuite.gui.inspect_brain_imports import (
     _contrast_limits,
     _label_from_stem,
@@ -223,12 +224,22 @@ def _load_cord_import_inspect_volumes_sample(
             continue
         point_layers[label] = load_atlas_points(npz_path, key=SAMPLE_POINTS_KEY)
 
-    return CordImportInspectVolumes(
+    tofliprc = load_cord_tofliprc(config.sample.save_path)
+    template, annotation, channels, point_layers, hemisphere = align_sample_space_for_atlas_qc(
         template=volumes.template,
         annotation=volumes.annotation,
-        registered_channels=volumes.channels,
+        channels=volumes.channels,
         point_layers=point_layers,
         hemisphere=volumes.hemisphere,
+        tofliprc=tofliprc,
+    )
+
+    return CordImportInspectVolumes(
+        template=template,
+        annotation=annotation,
+        registered_channels=channels,
+        point_layers=point_layers,
+        hemisphere=hemisphere,
     )
 
 
@@ -312,6 +323,11 @@ def run_cord_inspect_imports(
             f"Loaded {len(volumes.registered_channels)} {space_note}channel(s) and "
             f"{len(volumes.point_layers)} point layer(s). "
             f"Summary: {summary_path.name}"
+            + (
+                " Sample Z flipped to match atlas rostrocaudal orientation (tofliprc)."
+                if space == "sample" and load_cord_tofliprc(config.sample.save_path)
+                else ""
+            )
         )
     else:
         show_info(
