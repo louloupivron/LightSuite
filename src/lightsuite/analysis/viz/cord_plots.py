@@ -15,6 +15,7 @@ from lightsuite.analysis.viz.cord_io import (
     division_profile_table,
     filter_cord_stats,
     horn_heatmap_matrix,
+    laminae_grouped_totals_table,
     laminae_level_table,
     laminae_pct_gm_table,
     segment_grouped_totals_table,
@@ -22,6 +23,7 @@ from lightsuite.analysis.viz.cord_io import (
     segment_totals_table,
     structure_heatmap_matrix,
     structure_names_ordered,
+    top_regions_grouped_table,
     top_regions_table,
 )
 
@@ -538,6 +540,150 @@ def plot_cord_segment_grouped_bars(
     return fig, pivot
 
 
+def plot_cord_laminae_grouped_bars(
+    df: pd.DataFrame,
+    *,
+    channels: list[str],
+    metric: str = "cell_count",
+    segments: list[str] | None = None,
+    hemisphere: str | None = None,
+    title: str | None = None,
+    output_path: Path | None = None,
+    dpi: int = 200,
+    show: bool = False,
+    save_csv: bool = True,
+    crop_empty_laminae: bool = True,
+    show_composition: bool = True,
+) -> tuple[plt.Figure, pd.DataFrame]:
+    """Grouped bar chart: compare import labels per combined Rexed lamina."""
+    pivot = laminae_grouped_totals_table(
+        df,
+        channels=channels,
+        metric=metric,
+        segments=segments,
+        hemisphere=hemisphere,
+        crop_empty_laminae=crop_empty_laminae,
+    )
+    label_cols = [col for col in pivot.columns if col != "lamina"]
+    if pivot.empty:
+        msg = "No laminae totals to plot after filtering."
+        raise ValueError(msg)
+
+    n_laminae = len(pivot)
+    n_labels = len(label_cols)
+    bar_width = 0.8 / max(n_labels, 1)
+    x = np.arange(n_laminae)
+    colors = [_color_for_import_label(channel, idx) for idx, channel in enumerate(label_cols)]
+    pretty = [_legend_label(channel) for channel in label_cols]
+    totals_per_label = {channel: float(pivot[channel].sum()) for channel in label_cols}
+
+    fig_w = max(10.0, n_laminae * 0.85)
+    if show_composition:
+        fig, (ax, ax_comp) = plt.subplots(
+            2,
+            1,
+            figsize=(fig_w, 7.2),
+            sharex=True,
+            gridspec_kw={"height_ratios": [2.2, 1.2], "hspace": 0.12},
+            constrained_layout=True,
+        )
+    else:
+        fig, ax = plt.subplots(figsize=(fig_w, 5.0))
+        ax_comp = None
+
+    for idx, channel in enumerate(label_cols):
+        offset = (idx - (n_labels - 1) / 2.0) * bar_width
+        label = f"{pretty[idx]} (n={totals_per_label[channel]:g})"
+        ax.bar(
+            x + offset,
+            pivot[channel],
+            width=bar_width,
+            label=label,
+            color=colors[idx],
+            alpha=0.92,
+            edgecolor="white",
+            linewidth=0.4,
+        )
+
+    metric_label = _METRIC_LABELS.get(metric, metric)
+    ax.set_ylabel(metric_label)
+    ax.set_title(title or f"{metric_label} per Rexed lamina", fontweight="bold")
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.grid(axis="y", alpha=0.3, linestyle="--")
+    ax.legend(loc="upper right", fontsize=8, framealpha=0.92)
+    ymax = float(pivot[label_cols].to_numpy(dtype=float).max()) if n_laminae else 1.0
+    ax.set_ylim(0, ymax * 1.12)
+
+    for lam_i, (_, row) in enumerate(pivot.iterrows()):
+        vals = [float(row[channel]) for channel in label_cols]
+        peak = max(vals) if vals else 0.0
+        if peak <= 0:
+            continue
+        peak_idx = int(np.argmax(vals))
+        offset = (peak_idx - (n_labels - 1) / 2.0) * bar_width
+        ax.text(
+            float(lam_i) + offset,
+            peak + ymax * 0.015,
+            f"{peak:g}",
+            ha="center",
+            va="bottom",
+            fontsize=7,
+            color="#333333",
+        )
+
+    if ax_comp is not None:
+        bottoms = np.zeros(n_laminae, dtype=float)
+        row_sums = pivot[label_cols].sum(axis=1).to_numpy(dtype=float)
+        row_sums = np.where(row_sums > 0, row_sums, 1.0)
+        for idx, channel in enumerate(label_cols):
+            shares = pivot[channel].to_numpy(dtype=float) / row_sums
+            ax_comp.bar(
+                x,
+                shares,
+                bottom=bottoms,
+                width=0.72,
+                color=colors[idx],
+                alpha=0.92,
+                edgecolor="white",
+                linewidth=0.4,
+                label=pretty[idx],
+            )
+            bottoms = bottoms + shares
+        ax_comp.set_ylim(0, 1.0)
+        ax_comp.set_ylabel("Share of lamina")
+        ax_comp.set_yticks([0, 0.25, 0.5, 0.75, 1.0])
+        ax_comp.set_yticklabels(["0%", "25%", "50%", "75%", "100%"], fontsize=8)
+        ax_comp.spines["top"].set_visible(False)
+        ax_comp.spines["right"].set_visible(False)
+        ax_comp.grid(axis="y", alpha=0.25, linestyle="--")
+        ax_comp.set_xlabel("Rexed lamina")
+        ax.tick_params(labelbottom=False)
+        ax_set = ax_comp
+    else:
+        ax.set_xlabel("Rexed lamina")
+        ax_set = ax
+
+    ax_set.set_xticks(x)
+    ax_set.set_xticklabels(pivot["lamina"].tolist(), rotation=0, fontsize=9)
+    if ax_comp is None:
+        fig.tight_layout()
+
+    if output_path is not None:
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
+        if save_csv:
+            pivot.to_csv(output_path.with_suffix(".csv"), index=False)
+
+    if show:
+        plt.show()
+    elif output_path is not None:
+        plt.close(fig)
+
+    return fig, pivot
+
+
 def _percentile_limits(values: np.ndarray, *, lo: float = 2.0, hi: float = 98.0) -> tuple[float, float]:
     flat = values[np.isfinite(values)]
     if flat.size == 0:
@@ -766,6 +912,114 @@ def plot_cord_top_regions(
         plt.close(fig)
 
     return fig, top
+
+
+def plot_cord_top_regions_grouped(
+    df: pd.DataFrame,
+    *,
+    channels: list[str],
+    top_n: int = 3,
+    segments: list[str] | None = None,
+    hemisphere: str | None = None,
+    metric: str = "cell_count",
+    title: str | None = None,
+    output_path: Path | None = None,
+    dpi: int = 200,
+    show: bool = False,
+    save_csv: bool = True,
+    annotate: bool = True,
+) -> tuple[plt.Figure, pd.DataFrame]:
+    """Grouped horizontal bars comparing labels at union of per-label top regions."""
+    table = top_regions_grouped_table(
+        df,
+        channels=channels,
+        top_n=top_n,
+        segments=segments,
+        hemisphere=hemisphere,
+        metric=metric,
+    )
+    if table.empty:
+        msg = "No top regions to plot."
+        raise ValueError(msg)
+
+    label_cols = [
+        col
+        for col in table.columns
+        if col not in {"plot_label", "segment", "acronym", "name", "structure", "division", "total"}
+    ]
+    plot_df = table.sort_values("total", ascending=True).reset_index(drop=True)
+    n_rows = len(plot_df)
+    n_labels = len(label_cols)
+    bar_height = 0.8 / max(n_labels, 1)
+    y = np.arange(n_rows)
+    colors = [_color_for_import_label(channel, idx) for idx, channel in enumerate(label_cols)]
+    pretty = [_legend_label(channel) for channel in label_cols]
+    totals_per_label = {channel: float(plot_df[channel].sum()) for channel in label_cols}
+
+    fig_h = max(4.5, n_rows * 0.55)
+    fig, ax = plt.subplots(figsize=(11, fig_h))
+    for idx, channel in enumerate(label_cols):
+        offset = (idx - (n_labels - 1) / 2.0) * bar_height
+        legend = f"{pretty[idx]} (n={totals_per_label[channel]:g})"
+        ax.barh(
+            y + offset,
+            plot_df[channel],
+            height=bar_height,
+            label=legend,
+            color=colors[idx],
+            alpha=0.92,
+            edgecolor="white",
+            linewidth=0.4,
+        )
+
+    metric_label = _METRIC_LABELS.get(metric, metric)
+    ax.set_yticks(y)
+    ax.set_yticklabels(plot_df["plot_label"].astype(str).tolist(), fontsize=8)
+    ax.set_xlabel(metric_label)
+    ax.set_title(
+        title or f"Top {top_n} regions per label ({metric_label.lower()})",
+        fontweight="bold",
+    )
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.grid(axis="x", alpha=0.3, linestyle="--")
+    ax.legend(loc="lower right", fontsize=8, framealpha=0.92)
+    xmax = float(plot_df[label_cols].to_numpy(dtype=float).max()) if n_rows else 1.0
+    ax.set_xlim(0, xmax * 1.18)
+
+    if annotate:
+        for row_i, (_, row) in enumerate(plot_df.iterrows()):
+            vals = [float(row[channel]) for channel in label_cols]
+            peak = max(vals) if vals else 0.0
+            if peak <= 0:
+                continue
+            peak_idx = int(np.argmax(vals))
+            offset = (peak_idx - (n_labels - 1) / 2.0) * bar_height
+            ax.text(
+                peak + xmax * 0.02,
+                float(row_i) + offset,
+                f"{peak:g}",
+                va="center",
+                ha="left",
+                fontsize=7,
+                color="#333333",
+            )
+
+    fig.tight_layout()
+
+    if output_path is not None:
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
+        if save_csv:
+            plot_df.to_csv(output_path.with_suffix(".csv"), index=False)
+
+    if show:
+        plt.show()
+    elif output_path is not None:
+        plt.close(fig)
+
+    return fig, plot_df
 
 
 def plot_cord_coloc_overlap(
@@ -1355,6 +1609,7 @@ __all__ = [
     "plot_cord_df_subregion_heatmap",
     "plot_cord_division_profile",
     "plot_cord_horn_heatmap",
+    "plot_cord_laminae_grouped_bars",
     "plot_cord_laminae_level_bars",
     "plot_cord_laminae_pct_gm_bars",
     "plot_cord_segment_bars",
@@ -1362,5 +1617,6 @@ __all__ = [
     "plot_cord_structure_heatmap",
     "plot_cord_structure_hemisphere_panel",
     "plot_cord_structure_panel",
+    "plot_cord_top_regions_grouped",
     "plot_cord_top_regions",
 ]

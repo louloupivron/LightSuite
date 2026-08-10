@@ -288,6 +288,11 @@ def division_profile_table(
     centers = segment_centers_mm(segments_df, z_voxel_um=z_voxel_um)
     work = df.merge(centers[["Segment", "center_mm"]], left_on="segment", right_on="Segment", how="inner")
     work["division"] = work["acronym"].astype(str)
+    if "hemisphere" in work.columns and work["hemisphere"].astype(str).nunique() > 1:
+        work = (
+            work.groupby(["division", "segment", "center_mm"], as_index=False)["value"]
+            .mean()
+        )
     work = work.sort_values(["division", "center_mm"]).reset_index(drop=True)
 
     if crop_empty_segments and not work.empty:
@@ -346,6 +351,7 @@ def filter_cord_stats_multi(
     metric: str = "cell_count",
     rollup_level: str = "region",
     sample: str | None = None,
+    hemisphere: str | None = None,
 ) -> pd.DataFrame:
     """Filter cord stats to several import labels (or channels) at one rollup level."""
     if not channels:
@@ -361,6 +367,8 @@ def filter_cord_stats_multi(
     work = work[work["channel_norm"].isin(wanted)]
     if sample is not None:
         work = work[work["sample"].astype(str) == str(sample)]
+    if hemisphere is not None:
+        work = work[work["hemisphere"].astype(str).str.lower() == str(hemisphere).lower()]
     level = str(rollup_level).strip().lower()
     work = work[work["rollup_level"].astype(str).str.lower() == level]
     if work.empty:
@@ -411,6 +419,52 @@ def segment_grouped_totals_table(
     return pivot.reset_index()
 
 
+def laminae_grouped_totals_table(
+    df: pd.DataFrame,
+    *,
+    channels: list[str],
+    metric: str = "cell_count",
+    segments: list[str] | None = None,
+    hemisphere: str | None = None,
+    crop_empty_laminae: bool = True,
+) -> pd.DataFrame:
+    """Pivot summed metric values to one row per Rexed lamina, one column per label."""
+    if not channels:
+        msg = "At least one channel/label is required."
+        raise ValueError(msg)
+
+    work = df.copy()
+    work["channel_norm"] = work["channel"].map(_normalize_channel)
+    wanted = [_normalize_channel(channel) for channel in channels]
+    work = work[work["channel_norm"].isin(set(wanted))]
+    work = work[work["metric"] == metric]
+    work = work[work["rollup_level"].astype(str).str.lower() == "structure"]
+    if hemisphere is not None:
+        work = work[work["hemisphere"].astype(str).str.lower() == str(hemisphere).lower()]
+    work = _filter_segments(work, segments)
+    work = work[work["acronym"].astype(str).isin(LAMINAE_STRUCTURE_ACRONYMS)].copy()
+    if work.empty:
+        msg = f"No laminae data for channels={channels!r}, metric={metric!r}."
+        raise ValueError(msg)
+
+    totals = (
+        work.groupby(["acronym", "channel_norm"], sort=False)["value"]
+        .sum()
+        .reset_index()
+    )
+    pivot = totals.pivot(index="acronym", columns="channel_norm", values="value").fillna(0.0)
+    col_order = [channel for channel in wanted]
+    for channel in col_order:
+        if channel not in pivot.columns:
+            pivot[channel] = 0.0
+    pivot = pivot.reindex(columns=col_order)
+    pivot = pivot.reindex(index=LAMINAE_STRUCTURE_ACRONYMS).fillna(0.0)
+    if crop_empty_laminae:
+        nonempty = pivot.sum(axis=1) > 0
+        pivot = pivot.loc[nonempty]
+    pivot.index = [LAMINAE_DISPLAY_LABELS.get(str(acr), str(acr)) for acr in pivot.index]
+    pivot.index.name = "lamina"
+    return pivot.reset_index()
 
 
 def _filter_segments(work: pd.DataFrame, segments: list[str] | None) -> pd.DataFrame:
@@ -661,6 +715,94 @@ def top_regions_table(
     return top[keep].reset_index(drop=True)
 
 
+def _region_segment_key(segment: object, acronym: object) -> tuple[str, str]:
+    return str(segment), str(acronym)
+
+
+def _region_segment_label(segment: str, acronym: str, name: str) -> str:
+    return f"{acronym} — {name} @ {segment}"
+
+
+def top_regions_grouped_table(
+    df: pd.DataFrame,
+    *,
+    channels: list[str],
+    top_n: int = 3,
+    segments: list[str] | None = None,
+    hemisphere: str | None = None,
+    metric: str = "cell_count",
+) -> pd.DataFrame:
+    """Union of per-label top region × segment rows, pivoted to one column per label."""
+    if not channels:
+        msg = "At least one channel/label is required."
+        raise ValueError(msg)
+
+    work = df.copy()
+    work["channel_norm"] = work["channel"].map(_normalize_channel)
+    wanted = [_normalize_channel(channel) for channel in channels]
+    work = work[work["channel_norm"].isin(set(wanted))]
+    work = work[work["metric"] == metric]
+    work = work[work["rollup_level"].astype(str).str.lower() == "region"]
+    if hemisphere is not None:
+        work = work[work["hemisphere"].astype(str).str.lower() == str(hemisphere).lower()]
+    work = _filter_segments(work, segments)
+    work = work[work["value"] > 0].copy()
+    if work.empty:
+        msg = f"No region-level data for channels={channels!r}, metric={metric!r}."
+        raise ValueError(msg)
+
+    selected_keys: set[tuple[str, str]] = set()
+    label_by_key: dict[tuple[str, str], str] = {}
+    meta_by_key: dict[tuple[str, str], dict[str, str]] = {}
+
+    for channel in wanted:
+        ch_work = work[work["channel_norm"] == channel]
+        if ch_work.empty:
+            continue
+        top = ch_work.nlargest(int(top_n), "value")
+        for row in top.itertuples(index=False):
+            key = _region_segment_key(row.segment, row.acronym)
+            selected_keys.add(key)
+            label_by_key[key] = _region_segment_label(str(row.segment), str(row.acronym), str(row.name))
+            meta_by_key[key] = {
+                "segment": str(row.segment),
+                "acronym": str(row.acronym),
+                "name": str(row.name),
+                "structure": str(getattr(row, "structure", "")),
+                "division": str(getattr(row, "division", "")),
+            }
+
+    if not selected_keys:
+        msg = "No top regions found for the requested labels."
+        raise ValueError(msg)
+
+    lookup = {
+        (str(row.channel_norm), *_region_segment_key(row.segment, row.acronym)): float(row.value)
+        for row in work.itertuples(index=False)
+    }
+
+    records: list[dict[str, object]] = []
+    for key in selected_keys:
+        segment, acronym = key
+        record: dict[str, object] = {
+            "plot_label": label_by_key[key],
+            **meta_by_key[key],
+        }
+        total = 0.0
+        for channel in wanted:
+            value = lookup.get((channel, segment, acronym), 0.0)
+            record[channel] = value
+            total += value
+        record["total"] = total
+        records.append(record)
+
+    out = pd.DataFrame.from_records(records)
+    out = out.sort_values("total", ascending=False).reset_index(drop=True)
+    col_order = ["plot_label", "segment", "acronym", "name", "structure", "division", "total", *wanted]
+    present = [col for col in col_order if col in out.columns]
+    return out[present]
+
+
 def horn_heatmap_matrix(
     df: pd.DataFrame,
     *,
@@ -721,6 +863,7 @@ __all__ = [
     "horn_heatmap_matrix",
     "HORN_ACRONYMS",
     "HORN_DISPLAY_LABELS",
+    "laminae_grouped_totals_table",
     "laminae_level_table",
     "laminae_pct_gm_table",
     "load_cord_stats_csv",
@@ -736,5 +879,6 @@ __all__ = [
     "segment_totals_table",
     "structure_heatmap_matrix",
     "structure_names_ordered",
+    "top_regions_grouped_table",
     "top_regions_table",
 ]

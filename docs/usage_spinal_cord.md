@@ -207,8 +207,10 @@ uv run lightsuite analysis plot-cord-horn-heatmap \
 | `plot-cord-segment-bars` | `region` (summed per segment) | — |
 | `plot-cord-segment-grouped-bars` | `region` (summed per segment, multiple labels) | — |
 | `plot-cord-top-regions` | `region` | — |
+| `plot-cord-top-regions-grouped` | `region` | Multi-label top region comparison |
 | `plot-cord-laminae-pct-gm` | `structure` (laminae I–X) | % GM bar chart |
 | `plot-cord-laminae-level-bars` | `structure` (laminae I–X) | Level-grouped bar chart |
+| `plot-cord-laminae-grouped-bars` | `structure` (laminae I–X) | Multi-label lamina comparison |
 | `plot-cord-df-subregion-heatmap` | `region` + `structure` (`df`) | Dorsal funiculus heatmap |
 | `plot-cord-horn-heatmap` | `horn` (`DH`, `VH`, `C`) | Dorsal/ventral horn heatmap |
 | `cord-coloc-overlap` | atlas-space spot coords | — |
@@ -232,6 +234,11 @@ bars appear automatically when multiple samples are present in the CSV.
 level (default cervical / thoracic / lumbar). Override levels with
 `--levels C,T,L,S` and filter segments with `--segments C4,C5,C6,C7`.
 
+`plot-cord-laminae-grouped-bars` compares several import labels side-by-side at
+each combined Rexed lamina (structure rollup). Labels default to
+`analysis.point_labels` from `--config`; override with `--channels`. Use
+`--segments L3,L4,L5,L6` to restrict rostrocaudal extent.
+
 `plot-cord-df-subregion-heatmap` shows dorsal funiculus subregions
 (`dcs`, `cu`, `gr`, `psdc`) at finest `region` rollup, plus the combined
 `df` row from `structure` rollup. Disable the parent row with
@@ -239,7 +246,9 @@ level (default cervical / thoracic / lumbar). Override levels with
 
 `plot-cord-horn-heatmap` shows dorsal horn (`DH`), ventral horn (`VH`), and
 central (`C`) regions at `horn` rollup (requires `analysis.rollups` to include
-`horn`). Use `--hemisphere left|right` when `split_hemispheres: true`.
+`horn`). Horn rollup assigns each finest-level region to exactly one horn by
+walking `parent_ID` ancestors (not by overlapping descendant sets). Use
+`--hemisphere left|right` when `split_hemispheres: true`.
 
 Enable left/right hemisegment stats in the YAML before running `region-stats`:
 

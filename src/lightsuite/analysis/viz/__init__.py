@@ -7,6 +7,7 @@ from lightsuite.analysis.viz.cord_plots import (
     plot_cord_coloc_overlap,
     plot_cord_df_subregion_heatmap,
     plot_cord_division_profile,
+    plot_cord_laminae_grouped_bars,
     plot_cord_laminae_level_bars,
     plot_cord_laminae_pct_gm_bars,
     plot_cord_segment_bars,
@@ -14,6 +15,7 @@ from lightsuite.analysis.viz.cord_plots import (
     plot_cord_structure_heatmap,
     plot_cord_structure_hemisphere_panel,
     plot_cord_structure_panel,
+    plot_cord_top_regions_grouped,
     plot_cord_top_regions,
 )
 from lightsuite.analysis.viz.io import (
@@ -27,6 +29,7 @@ __all__ = [
     "plot_cord_coloc_overlap",
     "plot_cord_df_subregion_heatmap",
     "plot_cord_division_profile",
+    "plot_cord_laminae_grouped_bars",
     "plot_cord_laminae_level_bars",
     "plot_cord_laminae_pct_gm_bars",
     "plot_cord_segment_bars",
@@ -34,6 +37,7 @@ __all__ = [
     "plot_cord_structure_heatmap",
     "plot_cord_structure_hemisphere_panel",
     "plot_cord_structure_panel",
+    "plot_cord_top_regions_grouped",
     "plot_cord_top_regions",
     "plot_division_bars",
     "plot_group_division_bars",

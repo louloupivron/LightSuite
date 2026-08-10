@@ -15,23 +15,27 @@ from lightsuite.analysis.viz.cord_io import (
     df_subregion_table,
     filter_cord_stats,
     filter_cord_stats_multi,
+    laminae_grouped_totals_table,
     laminae_level_table,
     laminae_pct_gm_table,
     load_cord_stats_csv,
     segment_grouped_totals_table,
     structure_heatmap_matrix,
+    top_regions_grouped_table,
     top_regions_table,
 )
 from lightsuite.analysis.viz.cord_plots import (
     plot_cord_coloc_overlap,
     plot_cord_df_subregion_heatmap,
     plot_cord_division_profile,
+    plot_cord_laminae_grouped_bars,
     plot_cord_laminae_level_bars,
     plot_cord_laminae_pct_gm_bars,
     plot_cord_segment_bars,
     plot_cord_segment_grouped_bars,
     plot_cord_structure_heatmap,
     plot_cord_structure_panel,
+    plot_cord_top_regions_grouped,
     plot_cord_top_regions,
 )
 
@@ -289,6 +293,111 @@ def test_plot_cord_segment_grouped_bars_writes_png(tmp_path: Path) -> None:
     sub = filter_cord_stats_multi(pd.DataFrame(rows), channels=["imaris_a", "imaris_b"])
     out = tmp_path / "grouped_segments.png"
     plot_cord_segment_grouped_bars(sub, channels=["imaris_a", "imaris_b"], output_path=out)
+    assert out.is_file()
+    assert out.with_suffix(".csv").is_file()
+
+
+def _laminae_cell_count_rows() -> list[dict]:
+    rows = []
+    for label, lamina_acr, seg, val in [
+        ("imaris_a", "Lamina_VII", "L4", 8.0),
+        ("imaris_a", "Lamina_IX", "L4", 2.0),
+        ("imaris_b", "Lamina_VII", "L4", 5.0),
+        ("imaris_b", "Lamina_IX", "L4", 7.0),
+    ]:
+        rows.append(
+            {
+                "sample": "op87",
+                "channel": label,
+                "atlas": "fiederling",
+                "parcellation_index": 207 if lamina_acr == "Lamina_VII" else 209,
+                "acronym": lamina_acr,
+                "name": lamina_acr.replace("_", " "),
+                "structure": "DH",
+                "division": "GM",
+                "segment": seg,
+                "rollup_level": "structure",
+                "hemisphere": "right",
+                "metric": "cell_count",
+                "value": val,
+            }
+        )
+    return rows
+
+
+def test_laminae_grouped_totals_table_shape() -> None:
+    df = pd.DataFrame(_laminae_cell_count_rows())
+    pivot = laminae_grouped_totals_table(
+        df,
+        channels=["imaris_a", "imaris_b"],
+        hemisphere="right",
+    )
+    assert list(pivot.columns) == ["lamina", "imaris_a", "imaris_b"]
+    vii = pivot.loc[pivot.lamina == "VII"].iloc[0]
+    assert vii["imaris_a"] == 8.0
+    assert vii["imaris_b"] == 5.0
+
+
+def test_plot_cord_laminae_grouped_bars_writes_png(tmp_path: Path) -> None:
+    df = pd.DataFrame(_laminae_cell_count_rows())
+    out = tmp_path / "laminae_grouped.png"
+    plot_cord_laminae_grouped_bars(
+        df,
+        channels=["imaris_a", "imaris_b"],
+        hemisphere="right",
+        output_path=out,
+    )
+    assert out.is_file()
+    assert out.with_suffix(".csv").is_file()
+
+
+def _top_regions_grouped_rows() -> list[dict]:
+    rows = []
+    for label, segment, acronym, val in [
+        ("imaris_a", "L4", "CEx9", 10.0),
+        ("imaris_a", "L4", "7Sp", 5.0),
+        ("imaris_b", "L4", "CEx9", 7.0),
+        ("imaris_b", "L5", "7Sp", 8.0),
+    ]:
+        rows.append(
+            {
+                "sample": "op87",
+                "channel": label,
+                "atlas": "fiederling",
+                "parcellation_index": 31 if acronym == "CEx9" else 18,
+                "acronym": acronym,
+                "name": acronym,
+                "structure": "MN" if acronym == "CEx9" else "VH",
+                "division": "GM",
+                "segment": segment,
+                "rollup_level": "region",
+                "hemisphere": "right",
+                "metric": "cell_count",
+                "value": val,
+            }
+        )
+    return rows
+
+
+def test_top_regions_grouped_table_unions_per_label_top_rows() -> None:
+    df = pd.DataFrame(_top_regions_grouped_rows())
+    table = top_regions_grouped_table(df, channels=["imaris_a", "imaris_b"], top_n=1)
+    assert len(table) == 2
+    cex9 = table.loc[table.acronym == "CEx9"].iloc[0]
+    assert cex9["imaris_a"] == 10.0
+    assert cex9["imaris_b"] == 7.0
+
+
+def test_plot_cord_top_regions_grouped_writes_png(tmp_path: Path) -> None:
+    df = pd.DataFrame(_top_regions_grouped_rows())
+    out = tmp_path / "top_regions_grouped.png"
+    plot_cord_top_regions_grouped(
+        df,
+        channels=["imaris_a", "imaris_b"],
+        top_n=1,
+        hemisphere="right",
+        output_path=out,
+    )
     assert out.is_file()
     assert out.with_suffix(".csv").is_file()
 

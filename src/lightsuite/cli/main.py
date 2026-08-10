@@ -1178,6 +1178,62 @@ def analysis_plot_cord_top_regions(
     typer.echo(f"Saved: {out.resolve()}")
 
 
+@analysis_app.command("plot-cord-top-regions-grouped")
+def analysis_plot_cord_top_regions_grouped(
+    output: str = typer.Option(..., "--output", "-o", help="Output PNG path."),
+    input_path: str | None = typer.Option(None, "--input", "-i", help="Cord region_stats.csv."),
+    spinal_config: str | None = typer.Option(
+        None, "--config", "-c", help="Spinal YAML; uses volume_registered/region_stats.csv."
+    ),
+    channels: str | None = typer.Option(
+        None,
+        "--channels",
+        help="Comma-separated import labels (default: analysis.point_labels from --config).",
+    ),
+    metric: str = typer.Option("cell_count", "--metric", help="Metric to plot."),
+    top_n: int = typer.Option(3, "--top-n", help="Top region × segment rows per label."),
+    segments: str | None = typer.Option(
+        None,
+        "--segments",
+        help="Comma-separated segment filter (e.g. L3,L4,L5,L6).",
+    ),
+    hemisphere: str | None = typer.Option(None, "--hemisphere", help="Filter to left or right."),
+    title: str | None = typer.Option(None, "--title", help="Figure title."),
+    dpi: int = typer.Option(200, "--dpi", help="Figure DPI."),
+) -> None:
+    """Grouped horizontal bars: union of per-label top region × segment combinations."""
+    from lightsuite.analysis.viz.cord_io import (
+        filter_cord_stats_multi,
+        load_cord_stats_csv,
+    )
+    from lightsuite.analysis.viz.cord_plots import plot_cord_top_regions_grouped
+
+    stats_path, _segments_csv, _segment_order = _resolve_cord_plot_context(
+        input_path=input_path, spinal_config=spinal_config
+    )
+    channel_list = _resolve_cord_channel_list(channels, spinal_config)
+    table = filter_cord_stats_multi(
+        load_cord_stats_csv(stats_path),
+        channels=channel_list,
+        metric=metric,
+        rollup_level="region",
+        hemisphere=hemisphere,
+    )
+    out = Path(output).expanduser()
+    plot_cord_top_regions_grouped(
+        table,
+        channels=channel_list,
+        top_n=top_n,
+        segments=_parse_segment_list(segments),
+        hemisphere=hemisphere,
+        metric=metric,
+        title=title,
+        output_path=out,
+        dpi=dpi,
+    )
+    typer.echo(f"Saved: {out.resolve()}")
+
+
 def _parse_segment_list(value: str | None) -> list[str] | None:
     if value is None:
         return None
@@ -1264,6 +1320,73 @@ def analysis_plot_cord_laminae_level_bars(
         title=title,
         output_path=out,
         dpi=dpi,
+    )
+    typer.echo(f"Saved: {out.resolve()}")
+
+
+@analysis_app.command("plot-cord-laminae-grouped-bars")
+def analysis_plot_cord_laminae_grouped_bars(
+    output: str = typer.Option(..., "--output", "-o", help="Output PNG path."),
+    input_path: str | None = typer.Option(None, "--input", "-i", help="Cord region_stats.csv."),
+    spinal_config: str | None = typer.Option(
+        None, "--config", "-c", help="Spinal YAML; uses volume_registered/region_stats.csv."
+    ),
+    channels: str | None = typer.Option(
+        None,
+        "--channels",
+        help="Comma-separated import labels (default: analysis.point_labels from --config).",
+    ),
+    metric: str = typer.Option("cell_count", "--metric", help="Metric to plot."),
+    segments: str | None = typer.Option(
+        None,
+        "--segments",
+        help="Comma-separated segment filter (e.g. L3,L4,L5,L6).",
+    ),
+    hemisphere: str | None = typer.Option(None, "--hemisphere", help="Filter to left or right."),
+    title: str | None = typer.Option(None, "--title", help="Figure title."),
+    crop_empty_laminae: bool = typer.Option(
+        True,
+        "--crop-empty-laminae/--no-crop-empty-laminae",
+        help="Drop laminae with zero counts across all labels (default: on).",
+    ),
+    show_composition: bool = typer.Option(
+        True,
+        "--composition/--no-composition",
+        help="Add a 100% stacked composition panel under the counts (default: on).",
+    ),
+    dpi: int = typer.Option(200, "--dpi", help="Figure DPI."),
+) -> None:
+    """Grouped bar chart: compare import labels per Rexed lamina (structure rollup)."""
+    from lightsuite.analysis.viz.cord_io import (
+        filter_cord_stats_multi,
+        load_cord_stats_csv,
+        parse_plot_channels,
+    )
+    from lightsuite.analysis.viz.cord_plots import plot_cord_laminae_grouped_bars
+
+    stats_path, _segments_csv, _segment_order = _resolve_cord_plot_context(
+        input_path=input_path, spinal_config=spinal_config
+    )
+    channel_list = _resolve_cord_channel_list(channels, spinal_config)
+    table = filter_cord_stats_multi(
+        load_cord_stats_csv(stats_path),
+        channels=channel_list,
+        metric=metric,
+        rollup_level="structure",
+        hemisphere=hemisphere,
+    )
+    out = Path(output).expanduser()
+    plot_cord_laminae_grouped_bars(
+        table,
+        channels=channel_list,
+        metric=metric,
+        segments=_parse_segment_list(segments),
+        hemisphere=hemisphere,
+        title=title,
+        output_path=out,
+        dpi=dpi,
+        crop_empty_laminae=crop_empty_laminae,
+        show_composition=show_composition,
     )
     typer.echo(f"Saved: {out.resolve()}")
 

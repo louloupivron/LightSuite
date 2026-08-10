@@ -12,6 +12,7 @@ from lightsuite.analysis.cord_counts import CORD_TIDY_COLUMNS
 
 RollupLevel = Literal["division", "structure", "horn"]
 
+_HORN_ACRONYMS = frozenset({"DH", "VH", "C"})
 _SUM_METRICS = frozenset({"cell_count", "volume_mm3"})
 _WEIGHTED_METRICS = frozenset({"median_intensity", "relative_median_intensity", "std"})
 _REGION_ROLLUP_LEVEL = "region"
@@ -58,6 +59,41 @@ def _resolve_target_row(regions_df: pd.DataFrame, target: str) -> pd.Series | No
     if rows.empty and target == "lf":
         rows = regions_df.loc[regions_df["acronym"].astype(str) == "lfc"]
     return rows.iloc[0] if not rows.empty else None
+
+
+def resolve_horn_acronym(region_id: int, regions_df: pd.DataFrame) -> str | None:
+    """Return DH, VH, or C by walking ``parent_ID`` ancestors from a finest-level region."""
+    by_id = regions_df.set_index("id", drop=False)
+    current = int(region_id)
+    visited: set[int] = set()
+    while current and current not in visited:
+        visited.add(current)
+        if current not in by_id.index:
+            return None
+        row = by_id.loc[current]
+        acronym = str(row.get("acronym", ""))
+        if acronym in _HORN_ACRONYMS:
+            return acronym
+        parent = int(row.get("parent_ID", 0) or 0)
+        if parent <= 0 or parent == current:
+            break
+        current = parent
+    return None
+
+
+def _horn_member_ids(
+    region_ids: list[int] | pd.Index,
+    regions_df: pd.DataFrame,
+    horn_acronym: str,
+) -> list[int]:
+    """Finest-level region ids assigned exclusively to one horn target."""
+    target = str(horn_acronym)
+    members: list[int] = []
+    for region_id in region_ids:
+        assigned = resolve_horn_acronym(int(region_id), regions_df)
+        if assigned == target:
+            members.append(int(region_id))
+    return sorted(members)
 
 
 def resolve_rollup_targets(aggtype: RollupLevel, regions_df: pd.DataFrame) -> list[tuple[int, str, str]]:
@@ -176,9 +212,12 @@ def rollup_cord_tidy(
         volume_series = pivot["volume_mm3"] if "volume_mm3" in pivot.columns else pd.Series(dtype=float)
         count_series = pivot["cell_count"] if "cell_count" in pivot.columns else pd.Series(dtype=float)
 
-        for target_id, _acronym, _name in targets:
-            member_ids = sorted(set(get_descendants(target_id, regions)) | {target_id})
-            present = [rid for rid in member_ids if rid in pivot.index]
+        for target_id, target_acronym, _name in targets:
+            if aggtype.lower() == "horn":
+                present = _horn_member_ids(pivot.index, regions, target_acronym)
+            else:
+                member_ids = sorted(set(get_descendants(target_id, regions)) | {target_id})
+                present = [rid for rid in member_ids if rid in pivot.index]
             if not present:
                 continue
 
@@ -249,6 +288,7 @@ def apply_cord_rollups(
 __all__ = [
     "apply_cord_rollups",
     "get_descendants",
+    "resolve_horn_acronym",
     "resolve_rollup_targets",
     "rollup_cord_tidy",
 ]
