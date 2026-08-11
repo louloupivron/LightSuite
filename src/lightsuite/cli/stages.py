@@ -116,16 +116,6 @@ def brain_stage_specs(config: BrainPipelineConfig) -> list[StageSpec]:
                 manual=True,
             ),
         )
-        init_idx = next(i for i, s in enumerate(stages) if s.id == "init-registration")
-        stages.insert(
-            init_idx + 1,
-            StageSpec(
-                "refine-auto-points",
-                "Refine auto points",
-                "regopts.json → auto_points_refined",
-                optional=True,
-            ),
-        )
     if _has_import_annotations(config):
         stages.append(
             StageSpec(
@@ -253,12 +243,6 @@ def _brain_stage_done(stage_id: str, save_path: Path, config: BrainPipelineConfi
         if regopts is None or regopts.original_trans is None:
             return False, "missing original_trans"
         return True, "original_trans present"
-    if stage_id == "refine-auto-points":
-        if regopts is None:
-            return False, "missing regopts.json"
-        if regopts.auto_points_refined:
-            return True, "auto_points_refined=true"
-        return False, "auto points not refined"
     if stage_id == "match-points":
         session_path = default_session_path(save_path)
         if not session_path.is_file():
@@ -381,7 +365,7 @@ def evaluate_stage_statuses(
 ) -> list[StageStatus]:
     statuses: list[StageStatus] = []
     for spec in specs:
-        if spec.optional and spec.id in {"align-slices", "refine-auto-points", "match-points"}:
+        if spec.optional and spec.id in {"align-slices", "match-points"}:
             done, detail = done_fn(spec.id, save_path, config)
             state = StageState.DONE if done else StageState.OPTIONAL
             statuses.append(StageStatus(spec, state, detail))

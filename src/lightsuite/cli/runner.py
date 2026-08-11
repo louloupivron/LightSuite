@@ -85,11 +85,6 @@ def _run_brain_stage(
 
         initialize_brain_registration(cfg)
         return
-    if spec.id == "refine-auto-points":
-        from lightsuite.registration.refine_auto_points import refine_brain_auto_points
-
-        refine_brain_auto_points(cfg, bootstrap_correspondence=True)
-        return
     if spec.id == "match-points":
         from lightsuite.gui.match_points_brain import run_brain_match_points
 

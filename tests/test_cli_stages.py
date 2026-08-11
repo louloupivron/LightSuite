@@ -54,7 +54,7 @@ def test_brain_stage_specs_include_slice_stages_by_default(tmp_path: Path) -> No
     cfg = load_config(cfg_path)
     ids = [spec.id for spec in brain_stage_specs(cfg)]
     assert "align-slices" in ids
-    assert "refine-auto-points" in ids
+    assert "refine-auto-points" not in ids
 
 
 def test_brain_preprocess_status_done_with_regopts(tmp_path: Path) -> None:

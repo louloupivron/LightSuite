@@ -88,7 +88,7 @@ def register_brain_commands(app: typer.Typer) -> None:
         include_optional: bool = typer.Option(
             False,
             "--include-optional",
-            help="Run optional stages (align-slices, refine-auto-points, import-annotations).",
+            help="Run optional stages (align-slices, import-annotations).",
         ),
         headless: bool = typer.Option(
             False,

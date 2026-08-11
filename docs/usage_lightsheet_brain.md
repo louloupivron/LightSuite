@@ -27,12 +27,11 @@ You will need:
 | 2 | `lightsuite brain check-orientation` | **Manual (GUI)** | `getBrainOrientation.m` |
 | 3 | `lightsuite brain init-registration` | Automated | `initializeRegistration.m` |
 | 4 | `lightsuite brain align-slices` | **Manual (GUI)** | *(new — AP slice correspondence)* |
-| 5 | `lightsuite brain refine-auto-points` | Automated | *(new — AP-filtered auto landmarks)* |
-| 6 | `lightsuite brain match-points` | **Manual (GUI)** | `matchControlPoints_unified.m` |
-| 7 | `lightsuite brain register` | Automated | `multiobjRegistration.m` |
-| 8 | `lightsuite brain export` | Automated | `generateRegisteredBrainVolumes.m` |
-| 9 | `lightsuite brain import-annotations` | Automated | `transformPointsToAtlas.m` |
-| 10 | `lightsuite brain inspect-imports` | **Manual (GUI)** | *(Napari — atlas- or sample-space import QC)* |
+| 5 | `lightsuite brain match-points` | **Manual (GUI)** | `matchControlPoints_unified.m` |
+| 6 | `lightsuite brain register` | Automated | `multiobjRegistration.m` |
+| 7 | `lightsuite brain export` | Automated | `generateRegisteredBrainVolumes.m` |
+| 8 | `lightsuite brain import-annotations` | Automated | `transformPointsToAtlas.m` |
+| 9 | `lightsuite brain inspect-imports` | **Manual (GUI)** | *(Napari — atlas- or sample-space import QC)* |
 
 Built-in cell detection is **not implemented in Python**; set `detection.enabled: false` and use `import-annotations` with external `points.csv` / `mask.tif` exports (see [Annotation import](annotation_import.md)). For other MATLAB-only features, see [Python vs MATLAB](python_vs_matlab.md).
 
@@ -136,12 +135,10 @@ uv run lightsuite doctor -c my_mouse.yaml
 | `registration.bspline_bending_weight` | Weight of the Elastix `TransformBendingEnergyPenalty` smoothness term; `0` disables it (MATLAB parity) | `2.0` |
 | `registration.control_point_weight` | Landmark weight in Elastix (0–1) | `0.2` |
 | `registration.augment_points` | Add thinned auto-landmarks to user control points | `false` |
-| `registration.ap_pair_tolerance_vox` | AP residual tolerance for `refine-auto-points` (registration voxels) | `12.0` |
 | `registration.use_slice_correspondence_affine` | Compose align-slices correspondence into the affine pre-warp before B-spline | `true` |
 | `registration.use_slice_correspondence_landmarks` | Add align-slices anchors as extra B-spline landmarks in register | `true` |
 | `registration.correspondence_landmark_weight` | Minimum landmark metric weight when correspondence landmarks are merged | `0.2` |
 | `registration.correspondence_landmark_max_count` | Cap on total B-spline landmark pairs after merging correspondence anchors | `96` |
-| `registration.ap_pair_min_kept` | Minimum auto pairs kept after AP filtering | `24` |
 | `registration.orientation` | Axis permutation, e.g. `[1, 2, 3]`; flips use negative indices | auto |
 
 #### Export
@@ -263,7 +260,7 @@ Requires `uv sync --extra gui`.
 
 - `slice_correspondence.json` (v2) — per-axis sample index ↔ atlas plane maps under `axes.{1,2,3}`
 
-`match-points` and `refine-auto-points` read this file and pre-fill / filter using the curve for each cut axis. Older v1 files (single AP axis) are still loaded and migrated on save.
+`match-points` reads this file and pre-fills using the curve for each cut axis. Older v1 files (single AP axis) are still loaded and migrated on save.
 
 **Automated (all three axes, no GUI):**
 
@@ -271,28 +268,7 @@ Requires `uv sync --extra gui`.
 uv run lightsuite brain align-slices -c my_mouse.yaml --headless
 ```
 
-### 5. Refine auto points (optional)
-
-Filters automatic landmark pairs from **init-registration** using the **multi-axis** slice maps from **align-slices**. A pair is removed if its atlas position disagrees with the correspondence curve on **any** confirmed axis. Useful for **auto-only** registration on stretched or sparse samples.
-
-```bash
-uv run lightsuite brain refine-auto-points -c my_mouse.yaml
-```
-
-Requires `slice_correspondence.json` with confirmed anchors (run **align-slices** first). To auto-estimate all three axes without the GUI:
-
-```bash
-uv run lightsuite brain refine-auto-points -c my_mouse.yaml --bootstrap-correspondence
-```
-
-Re-run with `--force` after changing correspondence or re-running init-registration.
-
-**Outputs:**
-
-- Updated `regopts.json` (`autocpsample` / `autocpatlas`, `auto_points_refined`, `auto_points_mode`)
-- `auto_points_refine_stats.json` — pair counts, active axes, and median max-axis residual before/after
-
-### 6. Match control points (optional)
+### 5. Match control points (optional)
 
 Opens a Napari dual-pane GUI: sample on the left, atlas on the right.
 
@@ -335,7 +311,7 @@ For automated tests only:
 uv run lightsuite brain match-points -c my_mouse.yaml --headless
 ```
 
-### 7. Register (Elastix B-spline)
+### 6. Register (Elastix B-spline)
 
 Runs affine + deformable registration using your control points and Elastix.
 
@@ -396,7 +372,7 @@ finest resolution means the last pyramid level is adding noise rather than align
 Cropping the registration volume to the brain with `registration.sample_content_crop: auto`
 reduces the wasted grid too, though it is a smaller effect than the two settings above.
 
-### 8. Export
+### 7. Export
 
 Warps channels to atlas space (default) and optionally exports atlas labels warped onto the **registration grid** (sample space). See [Registration spaces](registration_spaces.md).
 
@@ -434,7 +410,6 @@ uv run lightsuite brain preprocess -c $CONFIG
 uv run lightsuite brain check-orientation -c $CONFIG
 uv run lightsuite brain init-registration -c $CONFIG
 uv run lightsuite brain align-slices -c $CONFIG
-uv run lightsuite brain refine-auto-points -c $CONFIG
 uv run lightsuite brain match-points -c $CONFIG
 uv run lightsuite brain register -c $CONFIG
 uv run lightsuite brain export -c $CONFIG --save-volume --write-csv
@@ -457,7 +432,6 @@ Atlas-space Napari QC applies the same canonical coronal orientation used in reg
 ├── sample_reference.json                 # Native grid for external segmentation
 ├── brain_orientation.txt                 # Axis permutation
 ├── slice_correspondence.json             # AP sample ↔ atlas plane map (align-slices)
-├── auto_points_refine_stats.json         # AP filter stats (refine-auto-points)
 ├── correspondence_affine_stats.json      # Correspondence affine in register
 ├── correspondence_landmark_stats.json    # Correspondence B-spline landmarks
 ├── atlas2histology_tform.json            # Manual control points
