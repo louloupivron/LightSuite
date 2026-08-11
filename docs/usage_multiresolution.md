@@ -240,7 +240,8 @@ Example configs in the repository:
 
 | Config | Microscope | Geometry mode |
 |--------|------------|---------------|
-| [`JulieBuron_multires_manifest.yaml`](../examples/config/multiresolution/JulieBuron_multires_manifest.yaml) | mesoSPIM | `metadata` |
+| [`JulieBuron_multires.yaml`](../examples/config/multiresolution/JulieBuron_multires.yaml) | mesoSPIM | `metadata`, `lateral_flip: [1, -1]` |
+| [`JulieBuron_multires_manifest.yaml`](../examples/config/multiresolution/JulieBuron_multires_manifest.yaml) | mesoSPIM | alias of `JulieBuron_multires.yaml` |
 | [`marianna_multires.yaml`](../examples/config/multiresolution/marianna_multires.yaml) | mesoSPIM (0.8× ↔ 2.5×, dual channel) | `metadata`, `lateral_flip: [-1, -1]` |
 | [`OP39M2_multires_manifest.yaml`](../examples/config/multiresolution/OP39M2_multires_manifest.yaml) | mesoSPIM (stitched + dual channel) | `metadata` |
 | [`Multi_RES_SCANs_cortex_9x_manifest.yaml`](../examples/config/multiresolution/Multi_RES_SCANs_cortex_9x_manifest.yaml) | SmartSPIM | `hybrid` |
@@ -409,9 +410,9 @@ The checkpoint `save_path/multires_regopts.json` is updated with paths, overlap 
 uv sync --extra registration
 
 # 1. Publish manifest (notebook or Python helper)
-uv run lightsuite multires validate-config -c examples/config/multiresolution/JulieBuron_multires_manifest.yaml
-uv run lightsuite multires check-geometry      -c examples/config/multiresolution/JulieBuron_multires_manifest.yaml
-uv run lightsuite multires register            -c examples/config/multiresolution/JulieBuron_multires_manifest.yaml
+uv run lightsuite multires validate-config -c examples/config/multiresolution/JulieBuron_multires.yaml
+uv run lightsuite multires check-geometry      -c examples/config/multiresolution/JulieBuron_multires.yaml
+uv run lightsuite multires register            -c examples/config/multiresolution/JulieBuron_multires.yaml
 ```
 
 ### mesoSPIM — Marianna CMU (0.8× overview ↔ 2.5× ROI, dual channel)
@@ -483,7 +484,7 @@ Install registration extras: `uv sync --extra registration`.
 
 ### Legacy `lightsuite mesospim` config
 
-Older direct-mesoSPIM YAML files (e.g. [`JulieBuron_multires.yaml`](../examples/config/multiresolution/JulieBuron_multires.yaml)) remain for reference. New work should use the manifest-driven `lightsuite multires` path described in this guide.
+Older direct-mesoSPIM YAML files under `examples/config/mesoSPIM/` used a top-level `mesospim:` block. Convert them to `multires.channels` + `multires.mesospim_geometry` as in [`JulieBuron_multires.yaml`](../examples/config/multiresolution/JulieBuron_multires.yaml). New work should use `lightsuite multires` only.
 
 ---
 

@@ -165,6 +165,62 @@ def test_discover_brain_import_inspect_paths_sample(tmp_path: Path) -> None:
     assert volumes.annotation is None
 
 
+def test_sample_space_inspect_permutes_legacy_atlas_volumes(tmp_path: Path) -> None:
+    """Legacy sample-space atlas TIFFs are unpermuted on disk; inspect permutes them."""
+    from lightsuite.registration.volume import permute_brain_volume
+
+    save_path = tmp_path / "results"
+    vr = save_path / "volume_registered"
+    ss = vr / "sample_space"
+    ss.mkdir(parents=True)
+
+    shape = (6, 5, 4)
+    perm = [2, 1, 3]
+    marker = np.zeros(shape, dtype=np.uint16)
+    marker[2, 3, 1] = 999
+    save_registration_volume(marker, save_path / "chan_1_sample_register_20um.tif")
+    save_registration_volume(marker, ss / "annotation_in_sample_20um.tif")
+
+    (save_path / "regopts.json").write_text(
+        json.dumps({"regvolpaths": {"1": str(save_path / "chan_1_sample_register_20um.tif")}, "registres": 20}),
+        encoding="utf-8",
+    )
+    _write_transform_params(save_path, shape_yxz=shape)
+    tp_path = save_path / "transform_params.json"
+    tp = json.loads(tp_path.read_text(encoding="utf-8"))
+    tp["permute_sample_to_atlas"] = perm
+    tp_path.write_text(json.dumps(tp), encoding="utf-8")
+
+    config_path = tmp_path / "brain.yaml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "sample": {
+                    "name": "test",
+                    "source": {"path": str(tmp_path / "data")},
+                    "scratch": str(tmp_path / "scratch"),
+                    "save_path": str(save_path),
+                    "voxel_um": [1.0, 1.0, 1.0],
+                },
+                "atlas": {"provider": "allen", "atlas_dir": str(tmp_path / "atlas")},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "data").mkdir()
+
+    from lightsuite.config.loader import load_config
+    from lightsuite.export.brain_sample_space import load_brain_sample_space_inspect_volumes
+
+    cfg = load_config(config_path)
+    volumes = load_brain_sample_space_inspect_volumes(cfg)
+    expected = permute_brain_volume(marker.astype(np.float32), perm)
+    assert volumes.annotation is not None
+    assert float(volumes.annotation[3, 2, 1]) == 999.0
+    assert float(volumes.registered_channels[1][3, 2, 1]) == 999.0
+    assert np.array_equal(volumes.annotation, expected)
+
+
 def test_sample_space_inspect_applies_orientation_permute(tmp_path: Path) -> None:
     """Registration TIFFs on disk are unpermuted; imports use permuted grid coordinates."""
     from lightsuite.registration.volume import permute_brain_volume

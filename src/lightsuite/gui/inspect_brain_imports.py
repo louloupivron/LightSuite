@@ -49,6 +49,7 @@ class BrainImportInspectVolumes:
     registered_channels: dict[int, np.ndarray]
     point_layers: dict[str, np.ndarray]
     mask_layers: dict[str, np.ndarray]
+    channels_warped_on_the_fly: bool = False
 
 
 def _volume_registered_dir(config: BrainPipelineConfig) -> Path:
@@ -258,6 +259,61 @@ def _contrast_limits(volume: np.ndarray) -> tuple[float, float]:
     return float(lo), float(hi)
 
 
+def _warp_registration_channels_for_atlas_inspect(
+    config: BrainPipelineConfig,
+    transform_params,
+    *,
+    expected_shape: tuple[int, int, int],
+) -> dict[int, np.ndarray]:
+    """Warp registration-grid channels to atlas space when export TIFFs are absent."""
+    import shutil
+
+    from lightsuite.export.atlas_space import transform_volume_to_atlas
+    from lightsuite.preprocess.checkpoint import RegOptsCheckpoint
+
+    if shutil.which("transformix") is None:
+        return {}
+
+    save_path = config.sample.save_path.expanduser()
+    regopts_path = save_path / "regopts.json"
+    if not regopts_path.is_file():
+        return {}
+
+    checkpoint = RegOptsCheckpoint.load(regopts_path)
+    channel_paths = {
+        int(k): Path(v).expanduser()
+        for k, v in (checkpoint.regvolpaths or {}).items()
+    }
+    if not channel_paths:
+        return {}
+
+    permute = transform_params.permute_sample_to_atlas or [1, 2, 3]
+    spacing_mm = checkpoint.registres_um * 1e-3
+    transformix_root = save_path / "transformix_inspect_temp"
+    transformix_root.mkdir(parents=True, exist_ok=True)
+
+    registered_channels: dict[int, np.ndarray] = {}
+    for ichan, volpath in sorted(channel_paths.items()):
+        if not volpath.is_file():
+            continue
+        volume = load_registration_volume(volpath)
+        registered = transform_volume_to_atlas(
+            volume,
+            transform_params,
+            permute=permute,
+            spacing_mm=spacing_mm,
+            temp_dir=transformix_root / f"chan_{ichan:02d}",
+        )
+        if tuple(registered.shape) != expected_shape:
+            msg = (
+                f"On-the-fly atlas warp for {volpath.name} produced shape "
+                f"{registered.shape}, expected {expected_shape}."
+            )
+            raise ValueError(msg)
+        registered_channels[ichan] = registered.astype(np.float32, copy=False)
+    return registered_channels
+
+
 def load_brain_import_inspect_volumes(
     config: BrainPipelineConfig,
     *,
@@ -321,6 +377,15 @@ def _load_brain_import_inspect_volumes_atlas(
             raise ValueError(msg)
         registered_channels[ichan] = vol.astype(np.float32, copy=False)
 
+    channels_warped_on_the_fly = False
+    if not registered_channels:
+        registered_channels = _warp_registration_channels_for_atlas_inspect(
+            config,
+            transform_params,
+            expected_shape=expected_shape,
+        )
+        channels_warped_on_the_fly = bool(registered_channels)
+
     mask_layers: dict[str, np.ndarray] = {}
     for label, path in paths.mask_paths.items():
         vol = load_registration_volume(path)
@@ -344,6 +409,7 @@ def _load_brain_import_inspect_volumes_atlas(
         registered_channels=registered_channels,
         point_layers=point_layers,
         mask_layers=mask_layers,
+        channels_warped_on_the_fly=channels_warped_on_the_fly,
     )
 
 
@@ -384,12 +450,12 @@ def run_brain_inspect_imports(
         title = f"LightSuite brain import QC — {config.sample.name} (sample, 20 µm registration grid)"
         template_name = "atlas template (warped)"
         annotation_name = "atlas annotation (warped)"
-        channel_suffix = "registration"
+        channel_suffix = "(sample warped)"
     else:
         title = f"LightSuite brain import QC — {config.sample.name} (atlas)"
         template_name = "atlas template"
         annotation_name = "atlas annotation"
-        channel_suffix = "registered"
+        channel_suffix = "(sample warped)"
 
     viewer = napari.Viewer(title=title)
 
@@ -408,31 +474,16 @@ def run_brain_inspect_imports(
         )
 
     if volumes.annotation is not None:
-        if space == "atlas":
-            viewer.add_labels(
-                brain_volume_to_napari_zyx(
-                    volumes.annotation,
-                    space=space,
-                    atlas_provider=atlas_provider,
-                    permute_sample_to_atlas=permute_sample_to_atlas,
-                ).astype(np.int64, copy=False),
-                name=annotation_name,
-                opacity=0.45,
-            )
-        else:
-            viewer.add_image(
-                brain_volume_to_napari_zyx(
-                    volumes.annotation,
-                    space=space,
-                    atlas_provider=atlas_provider,
-                    permute_sample_to_atlas=permute_sample_to_atlas,
-                ),
-                name=annotation_name,
-                colormap="green",
-                blending="additive",
-                opacity=0.2,
-                contrast_limits=(0.0, float(np.max(volumes.annotation)) or 1.0),
-            )
+        viewer.add_labels(
+            brain_volume_to_napari_zyx(
+                volumes.annotation,
+                space=space,
+                atlas_provider=atlas_provider,
+                permute_sample_to_atlas=permute_sample_to_atlas,
+            ).astype(np.int64, copy=False),
+            name=annotation_name,
+            opacity=0.45,
+        )
 
     channel_cmaps = ["magenta", "cyan", "yellow", "red"]
     for idx, (ichan, vol) in enumerate(sorted(volumes.registered_channels.items())):
@@ -484,18 +535,27 @@ def run_brain_inspect_imports(
 
     summary_path = paths.volume_registered_dir / "import_annotations_summary.json"
     space_note = "sample-space " if space == "sample" else ""
+    atlas_overlay_note = ""
+    if space == "sample" and volumes.annotation is None:
+        atlas_overlay_note = (
+            " No warped atlas annotation — run "
+            "'lightsuite brain export -c <config> --space sample' first."
+        )
+    warp_note = ""
+    if space == "atlas" and volumes.channels_warped_on_the_fly:
+        warp_note = (
+            " Sample channels warped on the fly from regopts.json "
+            "(run 'brain export --space atlas --save-volume' to cache)."
+        )
+    channel_info = (
+        f"Loaded {len(volumes.registered_channels)} {space_note}channel(s), "
+        f"{len(volumes.point_layers)} point layer(s), "
+        f"{len(volumes.mask_layers)} mask layer(s)."
+        f"{atlas_overlay_note}{warp_note}"
+    )
     if summary_path.is_file():
-        show_info(
-            f"Loaded {len(volumes.registered_channels)} {space_note}channel(s), "
-            f"{len(volumes.point_layers)} point layer(s), "
-            f"{len(volumes.mask_layers)} mask layer(s). "
-            f"Summary: {summary_path.name}"
-        )
+        show_info(f"{channel_info} Summary: {summary_path.name}")
     else:
-        show_info(
-            f"Loaded {len(volumes.registered_channels)} {space_note}channel(s), "
-            f"{len(volumes.point_layers)} point layer(s), "
-            f"{len(volumes.mask_layers)} mask layer(s)."
-        )
+        show_info(channel_info)
     napari.run()
     return paths

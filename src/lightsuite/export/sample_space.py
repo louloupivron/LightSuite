@@ -17,7 +17,6 @@ from lightsuite.registration.canvas import (
 )
 from lightsuite.registration.coordinates import affine_with_source_offset
 from lightsuite.registration.elastix.runner import run_transformix
-from lightsuite.registration.volume import unpermute_brain_volume
 from lightsuite.registration.warp import warp_volume_affine
 
 
@@ -132,4 +131,4 @@ def transform_atlas_volume_to_sample(
     cropped = crop_from_warp_canvas(warped_bspline, warp_pad, inner_shape)
     full_shape = tuple(int(v) for v in transform_params.regvolsize)
     embedded = undo_canvas_sample_crop(cropped, canvas, full_shape)
-    return unpermute_brain_volume(embedded, transform_params.permute_sample_to_atlas)
+    return embedded

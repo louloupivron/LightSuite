@@ -305,6 +305,33 @@ def coronal_napari_permutation(atlas_provider: str) -> tuple[int, tuple[int, int
     return coronal_cut, in_plane + (coronal_axis,)
 
 
+def registration_coronal_display_transform(
+    atlas_provider: str,
+    permute_sample_to_atlas: list[int],
+) -> SliceDisplayTransform:
+    """Canonical coronal QC transform for a permuted registration grid.
+
+    When ``permute_sample_to_atlas`` moves the coronal axis to a different
+    volume axis than in native atlas order, the left/right in-plane flip must be
+    inverted so Napari matches atlas-space inspect for the same anatomy.
+    """
+    coronal_cut = cut_axis_for_plot_dim(atlas_provider, 1)
+    native_coronal_axis = coronal_cut - 1
+    _, coronal_perm = coronal_napari_permutation_for_registration(
+        atlas_provider,
+        permute_sample_to_atlas,
+    )
+    permuted_coronal_axis = coronal_perm[-1]
+    transform = canonical_view_transform(atlas_provider, coronal_cut)
+    if permuted_coronal_axis != native_coronal_axis:
+        transform = SliceDisplayTransform(
+            rot90_k=transform.rot90_k,
+            flip_ud=transform.flip_ud,
+            flip_lr=not transform.flip_lr,
+        )
+    return transform
+
+
 def coronal_napari_permutation_for_registration(
     atlas_provider: str,
     permute_sample_to_atlas: list[int],
@@ -332,6 +359,7 @@ def _volume_yxz_to_napari_coronal_zyx(
     atlas_provider: str,
     coronal_cut: int,
     coronal_perm: tuple[int, int, int],
+    display_transform: SliceDisplayTransform | None = None,
 ) -> np.ndarray:
     """Shared Napari reorientation: move coronal to Z and apply canonical in-plane QC."""
     vol = np.asarray(volume_yxz)
@@ -342,7 +370,7 @@ def _volume_yxz_to_napari_coronal_zyx(
     oriented = np.transpose(vol, coronal_perm)
     napari_vol = np.transpose(oriented, (2, 0, 1))
 
-    transform = canonical_view_transform(atlas_provider, coronal_cut)
+    transform = display_transform or canonical_view_transform(atlas_provider, coronal_cut)
     if (
         transform.rot90_k == 0
         and not transform.flip_ud
@@ -391,11 +419,16 @@ def registration_volume_yxz_to_napari_zyx(
         atlas_provider,
         permute_sample_to_atlas,
     )
+    display_transform = registration_coronal_display_transform(
+        atlas_provider,
+        permute_sample_to_atlas,
+    )
     return _volume_yxz_to_napari_coronal_zyx(
         volume_yxz,
         atlas_provider=atlas_provider,
         coronal_cut=coronal_cut,
         coronal_perm=perm,
+        display_transform=display_transform,
     )
 
 
@@ -406,6 +439,7 @@ def _points_xyz_to_napari_coronal_zyx(
     volume_shape_yxz: tuple[int, int, int],
     coronal_cut: int,
     coronal_perm: tuple[int, int, int],
+    display_transform: SliceDisplayTransform | None = None,
 ) -> np.ndarray:
     """Map 1-based ``(x, y, z)`` points to Napari ``(z, y, x)`` with coronal QC layout."""
     pts = np.asarray(coords_xyz_1based, dtype=float)
@@ -422,7 +456,7 @@ def _points_xyz_to_napari_coronal_zyx(
     permuted_shape = tuple(int(volume_shape_yxz[axis]) for axis in coronal_perm)
     slice_shape = (permuted_shape[0], permuted_shape[1])
 
-    transform = canonical_view_transform(atlas_provider, coronal_cut)
+    transform = display_transform or canonical_view_transform(atlas_provider, coronal_cut)
     disp_row, disp_col = map_slice_pixels_to_display(
         permuted[:, 0],
         permuted[:, 1],
@@ -461,10 +495,15 @@ def registration_points_xyz_to_napari_zyx(
         atlas_provider,
         permute_sample_to_atlas,
     )
+    display_transform = registration_coronal_display_transform(
+        atlas_provider,
+        permute_sample_to_atlas,
+    )
     return _points_xyz_to_napari_coronal_zyx(
         coords_xyz_1based,
         atlas_provider=atlas_provider,
         volume_shape_yxz=volume_shape_yxz,
         coronal_cut=coronal_cut,
         coronal_perm=perm,
+        display_transform=display_transform,
     )

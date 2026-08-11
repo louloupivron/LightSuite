@@ -137,7 +137,19 @@ def run_region_stats(
         sample_dir = sample_space_dir(save_path)
         ann_path = sample_dir / ANNOTATION_IN_SAMPLE
         if ann_path.is_file() and checkpoint is not None:
-            annotation_sample = load_registration_volume(ann_path).astype(np.int32)
+            from lightsuite.export.brain_export import _load_transform_params
+            from lightsuite.export.brain_sample_space import (
+                atlas_volumes_permuted_on_disk,
+                load_sample_space_atlas_volume,
+            )
+
+            transform_params = _load_transform_params(save_path)
+            permute = transform_params.permute_sample_to_atlas or [1, 2, 3]
+            annotation_sample = load_sample_space_atlas_volume(
+                ann_path,
+                permute,
+                permuted_on_disk=atlas_volumes_permuted_on_disk(sample_dir),
+            ).astype(np.int32, copy=False)
             registres_um = float(checkpoint.registres_um)
             for npz_path in sorted(register_path.glob("*_sample_coords.npz")):
                 label = npz_path.stem.replace("_sample_coords", "")

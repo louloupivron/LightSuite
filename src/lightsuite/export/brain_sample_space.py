@@ -40,6 +40,7 @@ from lightsuite.registration.plots import (
 from lightsuite.registration.volume import (
     load_permuted_registration_volume,
     load_registration_volume,
+    permute_brain_volume,
 )
 
 console = Console()
@@ -54,6 +55,30 @@ MANIFEST_NAME = "sample_space_manifest.json"
 
 def sample_space_dir(save_path: Path) -> Path:
     return save_path / "volume_registered" / SAMPLE_SPACE_SUBDIR
+
+
+def atlas_volumes_permuted_on_disk(sample_dir: Path | None) -> bool:
+    """Whether exported atlas TIFFs are already on the permuted registration grid."""
+    if sample_dir is None:
+        return False
+    manifest_path = sample_dir / MANIFEST_NAME
+    if not manifest_path.is_file():
+        return False
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    return bool(manifest.get("atlas_volumes_permuted", False))
+
+
+def load_sample_space_atlas_volume(
+    path: Path,
+    permute_sample_to_atlas: list[int],
+    *,
+    permuted_on_disk: bool,
+) -> np.ndarray:
+    """Load a warped atlas TIFF for overlay with permuted registration channels."""
+    vol = load_registration_volume(path).astype(np.float32, copy=False)
+    if permuted_on_disk:
+        return vol
+    return permute_brain_volume(vol, permute_sample_to_atlas)
 
 
 def export_brain_sample_space(
@@ -155,6 +180,7 @@ def export_brain_sample_space(
         "template_path": str(out_dir / TEMPLATE_IN_SAMPLE),
         "boundary_path": str(out_dir / BOUNDARY_IN_SAMPLE),
         "division_labels_path": str(out_dir / DIVISION_IN_SAMPLE),
+        "atlas_volumes_permuted": True,
     }
     manifest_path = out_dir / MANIFEST_NAME
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
@@ -339,9 +365,15 @@ def load_brain_sample_space_inspect_volumes(
             raise ValueError(msg)
         registered_channels[ichan] = vol
 
+    atlas_permuted = atlas_volumes_permuted_on_disk(paths.sample_space_dir)
+
     template: np.ndarray | None = None
     if paths.template_path is not None and paths.template_path.is_file():
-        template = load_registration_volume(paths.template_path).astype(np.float32, copy=False)
+        template = load_sample_space_atlas_volume(
+            paths.template_path,
+            permute,
+            permuted_on_disk=atlas_permuted,
+        )
         if tuple(template.shape) != expected_shape:
             msg = (
                 f"Template shape {template.shape} != registration shape {expected_shape}. "
@@ -351,7 +383,11 @@ def load_brain_sample_space_inspect_volumes(
 
     annotation: np.ndarray | None = None
     if paths.annotation_path is not None and paths.annotation_path.is_file():
-        annotation = load_registration_volume(paths.annotation_path).astype(np.float32, copy=False)
+        annotation = load_sample_space_atlas_volume(
+            paths.annotation_path,
+            permute,
+            permuted_on_disk=atlas_permuted,
+        )
         if tuple(annotation.shape) != expected_shape:
             msg = (
                 f"Annotation shape {annotation.shape} != registration shape {expected_shape}. "

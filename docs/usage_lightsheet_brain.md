@@ -447,7 +447,7 @@ uv run lightsuite brain inspect-imports -c $CONFIG
 uv run lightsuite brain inspect-imports -c $CONFIG --space sample
 ```
 
-`inspect-imports` defaults to **atlas** space (Perens/Allen export grid). Use `--space sample` to overlay imported points/masks on the **20 µm registration grid** (`chan_*_sample_register_*um.tif` from preprocess) — useful when atlas volumes were not exported but `import-annotations` has already run.
+`inspect-imports` defaults to **atlas** space (Perens/Allen export grid). Use `--space sample` to overlay imported points/masks on the **20 µm registration grid** (`chan_*_sample_register_*um.tif` from preprocess). Warped atlas **template** and **annotation** labels are shown when present under `volume_registered/sample_space/` — run `lightsuite brain export --space sample` first (or set `export.spaces: [sample]`).
 
 Atlas-space Napari QC applies the same canonical coronal orientation used in registration plots (Perens coronal is no longer upside-down vs Allen). Annotation volumes render as **label** layers rather than float images so CCF structure ids are fully visible.
 

@@ -69,11 +69,18 @@ def load_registration_qc_volumes(
             msg = f"Missing {labels_path}"
             raise FileNotFoundError(msg)
         transform_params = _load_transform_params(save_path)
-        volume = load_permuted_registration_volume(
-            vol_path,
-            transform_params.permute_sample_to_atlas,
+        from lightsuite.export.brain_sample_space import (
+            atlas_volumes_permuted_on_disk,
+            load_sample_space_atlas_volume,
         )
-        labels = np.asarray(tifffile.imread(labels_path), dtype=np.int32)
+
+        permute = transform_params.permute_sample_to_atlas or [1, 2, 3]
+        volume = load_permuted_registration_volume(vol_path, permute)
+        labels = load_sample_space_atlas_volume(
+            labels_path,
+            permute,
+            permuted_on_disk=atlas_volumes_permuted_on_disk(sample_dir),
+        ).astype(np.int32, copy=False)
         if volume.shape != labels.shape:
             msg = f"Channel volume {volume.shape} != sample labels {labels.shape}"
             raise ValueError(msg)

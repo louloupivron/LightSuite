@@ -1,12 +1,7 @@
-# Manifest-driven multiresolution registration — Julie Buron mesoSPIM example
+# Alias of JulieBuron_multires.yaml (kept for older docs / notebook paths).
+# Prefer: examples/config/multiresolution/JulieBuron_multires.yaml
 #
-# 1. Run the conversion notebook to publish a pair manifest:
-#      examples/notebooks/convert_mesospim_to_multires.ipynb
-# 2. Then:
-#      uv sync --extra registration
-#      uv run lightsuite multires validate-config -c examples/config/multiresolution/JulieBuron_multires_manifest.yaml
-#      uv run lightsuite multires check-geometry      -c examples/config/multiresolution/JulieBuron_multires_manifest.yaml
-#      uv run lightsuite multires register            -c examples/config/multiresolution/JulieBuron_multires_manifest.yaml
+#   uv run lightsuite multires validate-config -c examples/config/multiresolution/JulieBuron_multires_manifest.yaml
 
 sample:
   name: JulieBuron
@@ -14,9 +9,21 @@ sample:
   scratch: /media/gbm/NVME2/lightsuite_scratch
 
 multires:
+  pair_label: baseline_561_TC
   pair_manifest: /media/gbm/NVME2/ALICe-pipelines-data/JulieBuron/multiresolution_results/converted/baseline_561_TC_pair.json
 
+  channels:
+    "561":
+      overview: /media/gbm/NVME2/ALICe-pipelines-data/JulieBuron/1X/1-561-1x.tif
+      roi: /media/gbm/NVME2/ALICe-pipelines-data/JulieBuron/3.2X/1-561-3.2x_TC.tif
+
   geometry_mode: metadata
+
+  mesospim_geometry:
+    overview:
+      lateral_flip: [1, -1]
+    roi:
+      lateral_flip: [1, -1]
 
   registration:
     overlap_margin_um: 0.0
@@ -24,3 +31,4 @@ multires:
     experiment_name: baseline_561_TC
     elastix_stages: [translation, rigid]
     write_full_overview_canvas: true
+    reference_channel: "561"

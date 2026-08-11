@@ -21,6 +21,7 @@ from lightsuite.atlas.display import (
     get_display_profile,
     map_display_pixels_to_slice,
     map_slice_pixels_to_display,
+    registration_coronal_display_transform,
     registration_points_xyz_to_napari_zyx,
     registration_volume_yxz_to_napari_zyx,
 )
@@ -144,6 +145,20 @@ def test_coronal_napari_permutation_for_registration_perens_213() -> None:
     assert cut_axis_for_permuted_volume_axis(0, [2, 1, 3]) == 2
 
 
+def test_registration_coronal_display_inverts_lr_when_coronal_axis_moves() -> None:
+    native = canonical_view_transform("perens", 2)
+    reg = registration_coronal_display_transform("perens", [2, 1, 3])
+    assert reg.flip_lr != native.flip_lr
+    assert reg.rot90_k == native.rot90_k
+    assert reg.flip_ud == native.flip_ud
+
+
+def test_registration_coronal_display_unchanged_for_identity_permute() -> None:
+    native = canonical_view_transform("perens", 2)
+    reg = registration_coronal_display_transform("perens", [1, 2, 3])
+    assert reg == native
+
+
 def test_registration_volume_napari_matches_canonical_coronal_slice() -> None:
     volume = np.arange(24, dtype=np.uint8).reshape(4, 3, 2)
     permute = [2, 1, 3]
@@ -151,11 +166,9 @@ def test_registration_volume_napari_matches_canonical_coronal_slice() -> None:
     coronal_array_axis = perm[-1]
     mid = volume.shape[coronal_array_axis] // 2
     chooserow = np.array([mid + 1, coronal_array_axis + 1, 1, 1], dtype=int)
-    expected = canonical_view_slice(
-        volume_index_to_image(volume, chooserow),
-        atlas_provider="perens",
-        cut_axis=coronal_cut,
-    )
+    raw_slice = volume_index_to_image(volume, chooserow)
+    transform = registration_coronal_display_transform("perens", permute)
+    expected = apply_slice_display_transform(raw_slice, transform)
     napari_vol = registration_volume_yxz_to_napari_zyx(
         volume,
         atlas_provider="perens",

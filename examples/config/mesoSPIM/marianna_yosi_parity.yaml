@@ -47,7 +47,9 @@ compute:
   workers: 4
 
 export:
+  spaces: [sample]
   save_registered_volume: false
+  save_sample_space_volume: true
   write_cells_csv: false
 
 # Arivis segmentation warped to 0.8× native (see scratch_warp_arivis_to_0p8x.py).
