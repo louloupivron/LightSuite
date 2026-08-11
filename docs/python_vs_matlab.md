@@ -25,7 +25,7 @@ These capabilities exist in the MATLAB LightSuite demos but **have no Python equ
 | Workflow | CLI namespace | Status |
 |----------|---------------|--------|
 | Brain lightsheet | `lightsuite brain` | Preprocess → orientation → init → match-points → register → export |
-| Multiresolution (mesoSPIM / SmartSPIM) | `lightsuite multires`, `lightsuite mesospim` | Manifest-driven overview ↔ ROI registration |
+| Multiresolution (mesoSPIM / SmartSPIM) | `lightsuite multires` | Manifest-driven overview ↔ ROI registration |
 | Spinal cord | `lightsuite spinal` | Preprocess → straighten → register → export → `region-stats` |
 | External annotations | `lightsuite brain import-annotations` | Native `points_csv` / `mask_tiff` at sample resolution |
 

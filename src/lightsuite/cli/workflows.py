@@ -23,9 +23,6 @@ multires
   Template: declare channels in YAML or build a manifest first.
   Run:      lightsuite multires run -c my.yaml
 
-mesospim (legacy)
-  Prefer multires. See docs/usage_multiresolution.md § Legacy mesospim.
-
 Stay on MATLAB for
   • Widefield coronal slices (demos/ls_analyze_slice_volume.m)
   • Built-in cell detection

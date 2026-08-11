@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- README quick start uses canonical example paths (no feature-branch checkout required for templates)
+- Removed legacy `lightsuite mesospim` CLI and direct-mesoSPIM YAML workflow (use `lightsuite multires` instead)
 - `pyproject.toml` PyPI metadata: authors, URLs, classifiers
 
 ### Known gaps vs MATLAB

@@ -23,21 +23,6 @@ def _validate_config(model, raw: dict[str, Any], config_path: Path):
         ) from exc
 
 
-def load_mesospim_config(path: str | Path):
-    """Load and validate a mesoSPIM overview / ROI YAML config."""
-    from lightsuite.mesospim.config_models import MesospimPipelineConfig
-
-    config_path = Path(path).expanduser().resolve()
-    if not config_path.is_file():
-        msg = f"Config file not found: {config_path}"
-        raise FileNotFoundError(msg)
-
-    with config_path.open(encoding="utf-8") as handle:
-        raw: dict[str, Any] = yaml.safe_load(handle) or {}
-
-    return _validate_config(MesospimPipelineConfig, raw, config_path)
-
-
 def load_multires_config(path: str | Path):
     """Load and validate a manifest-driven multiresolution YAML config."""
     from lightsuite.multires.config_models import MultiresPipelineConfig

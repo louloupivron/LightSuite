@@ -583,10 +583,6 @@ Install registration extras: `uv sync --extra registration`.
 - Set `write_full_overview_canvas: false` when you only need the overlap-registered ROI.
 - Ensure `sample.scratch` points to fast local SSD space.
 
-### Legacy `lightsuite mesospim` config
-
-Older direct-mesoSPIM YAML files under `examples/config/mesoSPIM/` used a top-level `mesospim:` block. Convert them to `multires.channels` + `multires.mesospim_geometry` as in [`JulieBuron_multires.yaml`](../examples/config/multiresolution/JulieBuron_multires.yaml). New work should use `lightsuite multires` only.
-
 ---
 
 ## Related documentation

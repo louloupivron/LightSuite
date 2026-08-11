@@ -25,11 +25,9 @@ app = typer.Typer(
 )
 brain_app = typer.Typer(help="Brain lightsheet pipeline stages.")
 spinal_app = typer.Typer(help="Spinal cord lightsheet pipeline stages.")
-mesospim_app = typer.Typer(help="mesoSPIM overview ↔ ROI registration.")
 multires_app = typer.Typer(help="Manifest-driven overview ↔ ROI multiresolution registration.")
 app.add_typer(brain_app, name="brain")
 app.add_typer(spinal_app, name="spinal")
-app.add_typer(mesospim_app, name="mesospim")
 app.add_typer(multires_app, name="multires")
 app.add_typer(config_app, name="config")
 app.add_typer(workflow_app, name="workflow")
@@ -578,79 +576,6 @@ def brain_preprocess(
     cfg = load_config(config)
     result = preprocess_lightsheet_volume(cfg, force=force)
     typer.echo(f"Primary registration volume: {result.checkpoint.regvolpath}")
-
-
-@mesospim_app.command("validate-config")
-def mesospim_validate_config(
-    config: str = typer.Option(..., "--config", "-c", help="mesoSPIM pipeline YAML config."),
-) -> None:
-    """Load and validate a mesoSPIM overview / ROI YAML config."""
-    from lightsuite.config.loader import load_mesospim_config
-
-    cfg = load_mesospim_config(config)
-    typer.echo(
-        f"Config valid: {cfg.sample.name} "
-        f"({cfg.mesospim.overview.path.name} → {cfg.mesospim.roi.path.name})"
-    )
-
-
-@mesospim_app.command("check-geometry")
-def mesospim_check_geometry(
-    config: str = typer.Option(..., "--config", "-c", help="mesoSPIM pipeline YAML config."),
-) -> None:
-    """Validate FOV overlap and write geometry QA artifacts."""
-    from lightsuite.config.loader import load_mesospim_config
-    from lightsuite.mesospim.runner import check_mesospim_geometry
-
-    check_mesospim_geometry(load_mesospim_config(config))
-
-
-@mesospim_app.command("register")
-def mesospim_register(
-    config: str = typer.Option(..., "--config", "-c", help="mesoSPIM pipeline YAML config."),
-) -> None:
-    """Register ROI stack to overview using metadata geometry and elastix."""
-    from lightsuite.config.loader import load_mesospim_config
-    from lightsuite.mesospim.runner import run_mesospim_registration
-
-    run_mesospim_registration(load_mesospim_config(config))
-
-
-@mesospim_app.command("match-points")
-def mesospim_match_points(
-    config: str = typer.Option(..., "--config", "-c", help="mesoSPIM pipeline YAML config."),
-    headless: bool = typer.Option(
-        False,
-        "--headless",
-        help="Create an empty landmark session without opening Napari (for tests).",
-    ),
-) -> None:
-    """Interactive overview / ROI landmark placement (Napari)."""
-    from lightsuite.config.loader import load_mesospim_config
-    from lightsuite.gui.match_points_mesospim import run_mesospim_match_points
-
-    cfg = load_mesospim_config(config)
-    path = run_mesospim_match_points(cfg, headless=headless)
-    typer.echo(f"Landmark session: {path}")
-
-
-@mesospim_app.command("inspect")
-def mesospim_inspect(
-    config: str = typer.Option(..., "--config", "-c", help="mesoSPIM pipeline YAML config."),
-    headless: bool = typer.Option(
-        False,
-        "--headless",
-        help="Validate inspect inputs without opening Napari.",
-    ),
-) -> None:
-    """Compare the 1× overview and registered ROI embedded in the full overview canvas."""
-    from lightsuite.config.loader import load_mesospim_config
-    from lightsuite.gui.inspect_mesospim import run_mesospim_inspect
-
-    cfg = load_mesospim_config(config)
-    paths =     run_mesospim_inspect(cfg, headless=headless)
-    typer.echo(f"Overview: {paths.overview_path}")
-    typer.echo(f"Registered canvas: {paths.registered_full_overview_path}")
 
 
 @multires_app.command("validate-config")
