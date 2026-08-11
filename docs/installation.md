@@ -38,7 +38,7 @@ uv sync --extra dev
 uv sync --extra gui
 
 # All optional extras
-uv sync --extra dev --extra gui --extra formats --extra gpu --extra atlas
+uv sync --extra dev --extra gui --extra formats --extra atlas
 ```
 
 This creates a virtual environment in `.venv` and installs the `lightsuite` command.
@@ -238,8 +238,9 @@ Expected checks:
 | Python ≥3.11 | Yes |
 | `elastix` / `transformix` on PATH | Yes |
 | Atlas NIfTIs | Yes (for registration) |
-| GPU (CuPy) | Optional |
 | Scratch free space | Warning if low |
+
+GPU-accelerated cell detection is **not implemented in Python** — see [Python vs MATLAB](python_vs_matlab.md).
 
 ---
 
@@ -249,9 +250,8 @@ Expected checks:
 |-------|---------|---------|
 | `gui` | `uv sync --extra gui` | Napari match-points GUI |
 | `dev` | `uv sync --extra dev` | pytest, ruff |
-| `formats` | `uv sync --extra formats` | Future OME-Zarr / Imaris readers |
+| `formats` | `uv sync --extra formats` | Imaris `.ims` file reader (experimental) |
 | `atlas` | `uv sync --extra atlas` | BrainGlobe Atlas API (`atlas.source: brainglobe` in config) |
-| `gpu` | `uv sync --extra gpu` | CuPy (future GPU detection) |
 
 ---
 

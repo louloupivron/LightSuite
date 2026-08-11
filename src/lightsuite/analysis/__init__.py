@@ -1,24 +1,11 @@
-"""Post-registration analysis: region statistics, cell counts, and taxonomy.
+"""Shared helpers for parcellation and per-sample region tables.
 
-This package consumes the atlas-space artifacts produced by ``lightsuite brain
-export`` and ``lightsuite brain import-annotations`` and turns them into tidy,
-cross-atlas region tables (median intensity, std, volume, cell count, density).
-
-Foundation milestone modules:
-
-- :mod:`lightsuite.analysis.ontology` — shared region metadata table keyed on the
-  Allen ontology (works for both the Allen ABC and Perens atlases).
-- :mod:`lightsuite.analysis.hemisphere` — single source of truth for the
-  left/right voxel split used by both intensity stats and cell counts.
-- :mod:`lightsuite.analysis.region_stats` — canonical long-form (tidy) schema and
-  converters to/from the legacy wide ``chanXX_intensities.csv`` layout.
-- :mod:`lightsuite.analysis.counts` — per-region cell counts and densities from
-  imported atlas-space point clouds.
+Used by ``brain export``, ``spinal region-stats``, and annotation import — not a
+standalone CLI module.
 """
 
 from __future__ import annotations
 
-from lightsuite.analysis.cohort_models import CohortConfig, CohortSampleEntry, GroupAnalysisConfig
 from lightsuite.analysis.counts import count_points_in_regions, load_atlas_points
 from lightsuite.analysis.hemisphere import (
     SIDE_LABELS,
@@ -39,9 +26,6 @@ __all__ = [
     "METRICS",
     "SIDE_LABELS",
     "TIDY_COLUMNS",
-    "CohortConfig",
-    "CohortSampleEntry",
-    "GroupAnalysisConfig",
     "RegionTable",
     "concat_tidy",
     "count_points_in_regions",

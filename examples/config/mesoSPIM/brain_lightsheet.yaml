@@ -26,7 +26,7 @@ registration:
   control_point_weight: 0.2
 
 detection:
-  enabled: true
+  enabled: false
   backend: classical
   cell_diameter_um: 14
   thresholds: [0.5, 0.4]
@@ -34,12 +34,11 @@ detection:
   debug: false
 
 compute:
-  use_gpu: true
   workers: 4
 
 export:
-  registered_volume_format: ome_zarr
-  write_pyramid: true
+  registered_volume_format: tiff
+  write_pyramid: false
 
 # Optional: import native sample-space annotations after register (see docs/annotation_import.md)
 # import:

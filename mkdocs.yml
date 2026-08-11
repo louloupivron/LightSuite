@@ -20,6 +20,7 @@ extra_css:
 nav:
   - Home: index.md
   - Installation: installation.md
+  - Python vs MATLAB: python_vs_matlab.md
   - Usage:
       - Brain lightsheet (Python): usage_lightsheet_brain.md
       - Multiresolution registration: usage_multiresolution.md

@@ -187,8 +187,7 @@ The multires stage reads 1-based **ROI** voxel indices and writes 1-based **over
 ## Limitations
 
 - **Native resolution only** — registration-resolution (20 µm) masks/coordinates are not accepted.
-- **Allen cell-count parcellation** — atlas coordinates are written; region counts are not yet joined in Python.
-- **OME-Zarr masks** — use TIFF at native resolution; zarr pyramids are not supported in v1.
+- **Allen cell-count parcellation** — atlas coordinates are written; per-region counts require MATLAB or external tooling.
 
 ---
 

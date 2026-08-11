@@ -1,6 +1,8 @@
 # Widefield slice analysis
 
-The **Python pipeline does not yet include the coronal slice module.** Use the MATLAB workflow described below until this module is ported.
+The **coronal slice module is not implemented in Python.** Use the MATLAB workflow below.
+
+See [Python vs MATLAB](python_vs_matlab.md) for the full list of MATLAB-only features.
 
 For the Python brain pipeline, see [Brain lightsheet analysis](usage_lightsheet_brain.md).
 
@@ -29,4 +31,4 @@ The slice module registers individual 2D coronal (or arbitrary) brain sections t
 
 ### Python status
 
-Slice registration and the Napari-based slice GUI are not implemented in Python yet. Planned as a separate pipeline under `lightsuite slice` (name TBD) after brain export and cell detection are complete.
+Not planned for the current Python release. Use MATLAB for slice registration and per-slice cell detection.

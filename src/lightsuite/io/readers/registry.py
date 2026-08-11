@@ -29,10 +29,6 @@ def open_volume(
         if TiffStackReader.supports(path):
             return TiffStackReader.open(path, tiff_type=tiff_type, voxel_um=voxel_um)
 
-    if source_format == SourceFormat.OME_ZARR:
-        msg = "OME-Zarr reader not yet installed. Use: uv sync --extra formats"
-        raise NotImplementedError(msg)
-
     if source_format == SourceFormat.IMARIS:
         msg = "Imaris reader not yet installed. Use: uv sync --extra formats"
         raise NotImplementedError(msg)

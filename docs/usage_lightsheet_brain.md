@@ -33,12 +33,8 @@ You will need:
 | 8 | `lightsuite brain export` | Automated | `generateRegisteredBrainVolumes.m` |
 | 9 | `lightsuite brain import-annotations` | Automated | `transformPointsToAtlas.m` |
 | 10 | `lightsuite brain inspect-imports` | **Manual (GUI)** | *(Napari — atlas- or sample-space import QC)* |
-| 11 | `lightsuite analysis region-stats` | Automated | *(new — tidy region table + cell counts)* |
-| 12 | `lightsuite analysis group-stats` | Automated | *(new — cross-subject group summaries)* |
-| 13 | `lightsuite analysis view-divisions` | **Manual (GUI)** | *(Napari — division-masked channel QC)* |
-| 14 | `lightsuite analysis registration-qc` | Automated / **GUI** | *(unassigned-voxel registration score)* |
 
-Built-in cell detection is **not yet ported**; set `detection.enabled: false` and use `import-annotations` with native `points.csv` / `mask.tif` exports (see [Annotation import](annotation_import.md)).
+Built-in cell detection is **not implemented in Python**; set `detection.enabled: false` and use `import-annotations` with external `points.csv` / `mask.tif` exports (see [Annotation import](annotation_import.md)). For other MATLAB-only features, see [Python vs MATLAB](python_vs_matlab.md).
 
 ---
 
@@ -478,7 +474,7 @@ Atlas-space Napari QC applies the same canonical coronal orientation used in reg
     ├── chan01_intensities.csv          # legacy wide intensity table
     ├── chan01_intensities.json
     ├── chan01_region_stats.csv         # tidy per-channel table (with region names)
-    └── region_stats.csv                # combined tidy table (analysis region-stats)
+    └── region_stats.csv                # combined tidy table (brain export)
 ```
 
 Checkpoints use **JSON** instead of MATLAB `.mat` files. Legacy MATLAB outputs in the same folder are not read automatically — re-run the Python stages to produce JSON checkpoints.
@@ -560,254 +556,36 @@ Outputs land in `volume_registered/` (`*_atlas_coords.npz`, optional CSV, mask T
 
 ---
 
-## Region statistics and cell counts
+## Region statistics (export)
 
-After `export` (and optionally `import-annotations`), build a tidy region table:
-
-```bash
-uv run lightsuite analysis region-stats -c my_mouse.yaml
-```
-
-This reads the existing atlas-space outputs (no transformix run) and writes
-`volume_registered/region_stats.csv`, a **long-form** table with one row per
-`(sample, channel, parcellation_index, hemisphere, metric)` measurement:
+During `brain export` with `--write-csv`, LightSuite writes per-channel intensity parcellation tables and, when `analysis.write_tidy_csv: true` (default), long-form `chanXX_region_stats.csv` files plus a combined `volume_registered/region_stats.csv`.
 
 | Column | Notes |
 |--------|-------|
 | `sample`, `channel`, `atlas` | provenance |
-| `parcellation_index` | atlas label value (Allen ABC index, or Perens/Allen CCF id) |
-| `acronym`, `name`, `structure`, `division` | region metadata in a common **Allen** vocabulary |
-| `hemisphere` | `right` / `left` (same split as the intensity stats) |
-| `metric` | `median_intensity`, `std`, `volume_mm3`, `cell_count`, `cell_density` |
+| `parcellation_index` | atlas label value |
+| `acronym`, `name`, `structure`, `division` | region metadata |
+| `hemisphere` | `right` / `left` |
+| `metric` | `median_intensity`, `std`, `volume_mm3` |
 | `value` | the measurement |
 
-Intensity/std/volume rows come from each `chanXX_intensities.json`; `cell_count`
-and `cell_density` come from binning each `*_atlas_coords.npz` point cloud into
-atlas regions (gated by `analysis.count_points`). The Perens atlas is translated
-into the Allen division grouping where CCF ids match.
-
-`export` also writes a per-channel `chanXX_region_stats.csv` (same schema) unless
-`analysis.write_tidy_csv: false`.
+Imported spot coordinates are written by `import-annotations` (`*_atlas_coords.npz`). Per-region **cell counts** and cross-subject **cohort statistics** are MATLAB-only today — see [Python vs MATLAB](python_vs_matlab.md).
 
 ```yaml
 analysis:
-  write_tidy_csv: true       # emit chanXX_region_stats.csv during export
-  count_points: true         # bin imported points into per-region counts/density
-  point_labels: null         # restrict to specific import labels; null = all
+  write_tidy_csv: true   # emit chanXX_region_stats.csv during export
 ```
-
----
-
-## Cross-subject group analysis
-
-After each subject has a `region_stats.csv` (step 11), define a **cohort YAML** listing
-subjects, experimental groups, and comparison options. See `examples/cohort_region_stats.yaml`.
-
-```bash
-uv run lightsuite analysis validate-cohort -c examples/cohort_region_stats.yaml
-uv run lightsuite analysis group-stats -c examples/cohort_region_stats.yaml
-```
-
-Each sample entry needs either:
-
-| Field | Role |
-|-------|------|
-| `group` | Experimental group label (e.g. `control`, `treatment`) |
-| `id` | Subject id (optional; defaults to brain config `sample.name`) |
-| `region_stats` | Direct path to `volume_registered/region_stats.csv` |
-| `config` | Brain pipeline YAML — `region_stats` resolved from `sample.save_path` |
-
-### Cohort configuration
-
-```yaml
-name: amyloid_study
-output_dir: ./cohort_results/amyloid_study
-
-samples:
-  - id: M001
-    group: control
-    config: examples/M001.yaml
-  - id: M002
-    group: treatment
-    region_stats: /data/M002/volume_registered/region_stats.csv
-
-group_analysis:
-  channels: [1]                    # null = all channels
-  metrics: [median_intensity]      # null = all metrics
-  hemispheres: [right, left]       # null = both
-  rollups: [division]              # optional division/structure summaries
-  comparisons:
-    - [control, treatment]
-  test: mannwhitney
-  fdr_alpha: 0.05
-```
-
-### Cohort outputs
-
-Written under `output_dir`:
-
-| File | Contents |
-|------|----------|
-| `cohort_region_stats_long.csv` | All subjects concatenated (filtered) with `group` column |
-| `group_summary_by_region.csv` | Per-group mean, std, SEM, `n_subjects` at region level |
-| `group_comparisons_by_region.csv` | Pairwise Mann–Whitney tests with BH-FDR `q_value` |
-| `group_summary_by_division.csv` | Division rollup (if `rollups` includes `division`) |
-| `group_comparisons_by_division.csv` | Division-level comparisons (optional) |
-
-Division/structure rollups first average region values **within each subject**, then
-summarize across subjects — so each subject contributes equally regardless of how many
-fine regions fall in a division.
-
----
-
-## Visualization
-
-Simple matplotlib plots read `region_stats.csv`, legacy `chanXX_intensities.csv`, or cohort
-`group_summary_by_division.csv`. No extra dependencies beyond the core package.
-
-### Per-subject plots
-
-Write figures under `sample.save_path/plots/` (not inside the LightSuite repository).
-
-```bash
-PLOTS=/media/gbm/NVME2/ALICe-pipelines-data/JulieBuron/registered_allen/plots
-mkdir -p "$PLOTS"
-
-# From brain config (resolves volume_registered/region_stats.csv)
-uv run lightsuite analysis plot-division-bars \
-  -c examples/config/mesoSPIM/JulieBuron.yaml -o "$PLOTS/division_bars.png" --channel 1
-
-uv run lightsuite analysis plot-lr-scatter \
-  -c examples/config/mesoSPIM/JulieBuron.yaml -o "$PLOTS/lr_scatter.png" \
-  --keep-division Isocortex --keep-division Thalamus
-
-uv run lightsuite analysis plot-top-regions \
-  -c examples/config/mesoSPIM/JulieBuron.yaml -o "$PLOTS/top_regions.png" \
-  --metric cell_count --top-n 15 --channel 1
-
-# Or pass a CSV directly
-uv run lightsuite analysis plot-division-bars \
-  -i /data/M001/volume_registered/region_stats.csv \
-  -o /data/M001/plots/division_bars.png --metric median_intensity --channel 1
-```
-
-| Command | Description |
-|---------|-------------|
-| `plot-division-bars` | Horizontal bars: left vs right **per division** (sum for `cell_count`, mean for intensity by default) |
-| `plot-lr-scatter` | Left vs right **per region**, points coloured by division |
-| `plot-top-regions` | Horizontal bars: left vs right for the **top N regions** ranked by left + right total (`--top-n`, default 10) |
-| `plot-group-division` | Cohort **group means by division** (from `group_summary_by_division.csv`) |
-
-Common options: `--metric` (`median_intensity`, `cell_count`, …), `--channel`, `--aggregate` (`auto`, `sum`, `mean`),
-`--title`, `--exclude-division`, `--dpi`. Scatter also supports `--keep-division`, `--axis-min`, `--axis-max`.
-Top-region plots support `--keep-division` and `--top-n` / `-n` (default 10).
-
-`--aggregate auto` (default) sums fine regions within each division for `cell_count`, and averages them for
-continuous metrics such as `median_intensity`.
-
-Division bar plots also write a `.csv` aggregation next to the PNG.
-
-### Cohort plot
-
-After `group-stats` with `rollups: [division]`:
-
-```bash
-uv run lightsuite analysis plot-group-division \
-  -i ./cohort_results/study/group_summary_by_division.csv \
-  -o ./cohort_results/study/group_division_bars.png
-```
-
-Brain atlas heatmaps (brainglobe slice figures) are planned as an optional extra; these plots
-cover the main QC views from the legacy notebook workflow.
-
-### Napari division viewer
-
-Interactive QC: toggle which Allen **divisions** contribute voxels and mask all registered
-channel layers at once (ported from the legacy `ccf_division_napari_viewer` notebook).
-
-Requires `uv sync --extra gui` and registered atlas-space volumes:
-
-```bash
-uv run lightsuite brain export -c my_mouse.yaml --save-volume
-uv run lightsuite analysis build-division-map -c my_mouse.yaml   # optional pre-cache
-uv run lightsuite analysis view-divisions -c my_mouse.yaml
-```
-
-| Option | Purpose |
-|--------|---------|
-| `--stride 2` | Downsample 2× per axis for faster interaction on large brains |
-| `--force` | Rebuild cached division labels beside the atlas NIfTIs |
-| `--headless` | Validate inputs only (for CI / scripting) |
-
-**Cached atlas assets** (built once per atlas, shared across samples):
-
-- `division_labels_10um.tif` / `division_labels_20um.tif`
-- `division_id_legend_10um.csv` / `division_id_legend_20um.csv`
-
-The dock panel lists divisions from the legend; unchecked divisions become transparent (NaN)
-on every channel image layer. Enable the optional `division labels` layer for anatomical
-reference.
-
-### Registration QC (unassigned-voxel score)
-
-Naive alignment proxy from the legacy `unassigned_registration_score` notebook: among
-voxels above an intensity threshold, what fraction fall in **unassigned** division
-labels (`division_id == 0`)? A higher percentage suggests signal spilling outside the
-atlas — often a registration warning sign.
-
-```bash
-uv run lightsuite brain export -c my_mouse.yaml --save-volume
-
-# Inspect threshold in Napari (magenta = id-0 signal above threshold), then score
-uv run lightsuite analysis registration-qc -c my_mouse.yaml --inspect --threshold 500
-
-# Headless score with auto-threshold + sensitivity sweep
-uv run lightsuite analysis registration-qc -c my_mouse.yaml --channel 1 --sweep
-```
-
-| Option | Purpose |
-|--------|---------|
-| `--threshold` / `-t` | Global intensity cutoff for “signal” voxels; auto-estimated if omitted |
-| `--inspect` | Open Napari to validate threshold before scoring (`uv sync --extra gui`) |
-| `--sweep` | Save threshold sensitivity CSV + PNG (9 points, 0.5×–1.5× reference threshold) |
-| `--headless` | Skip Napari; write score only |
-
-**Outputs** under `<save_path>/registration_qc/`:
-
-| File | Contents |
-|------|----------|
-| `chan01_unassigned_score.csv` | Score row + sample/channel metadata |
-| `chan01_unassigned_score.json` | Same summary as JSON |
-| `chan01_threshold_sweep.csv` | Optional multi-threshold sweep |
-| `chan01_threshold_sweep.png` | Optional sensitivity plot |
-
-**Caveats:** global threshold sensitivity; boundary biology and acquisition artifacts can
-inflate the score. Treat as a quick QC flag, not a geometric error metric.
-
----
-
-## Analysis roadmap (future improvements)
-
-| Area | Next steps |
-|------|------------|
-| **Replicate combine** | Median-match LLS/RLS (or other replicates) before averaging intensities — deferred for now |
-| **Brain heatmaps** | Optional `brainglobe-heatmap` slice figures on tidy/cohort tables (Allen atlas) |
-| **Registration QC** | Adaptive/local thresholds; boundary-band restriction; morphology cleanup |
-| **Statistics** | Effect sizes, volcano plots, cluster-corrected voxel-wise group tests |
-| **Segmentation** | Wire cellpose/stardist imports → `cell_count` / `cell_density` in one `region-stats` pass |
-| **Cross-atlas** | Full Perens ontology-tree rollup; explicit Allen↔Perens report views |
-| **Outputs** | Parquet / AnnData export; dashboard notebook template for cohort studies |
-| **Performance** | OME-Zarr registered volumes; lazy loading in Napari for full-resolution brains |
-| **Automation** | `analysis run-all` meta-command: region-stats → plots → cohort summary from one config |
 
 ---
 
 ## Known limitations
 
-- **Cell detection** — not implemented; preprocessing warns if `detection.enabled: true`
-- **Orientation GUI** — `lightsuite brain check-orientation` (Napari); or set `registration.orientation` in YAML
-- **OME-Zarr / Imaris** — planned; TIFF only today
-- **Perens division names** — cross-atlas division grouping fills in only where Perens CCF ids match the Allen ontology; full ontology-tree rollup is a planned enhancement
+See [Python vs MATLAB](python_vs_matlab.md) for the full comparison. Summary:
+
+- **Cell detection** — not implemented in Python; preprocessing warns if `detection.enabled: true`
+- **Slice module, CZI reader, spinal cohort analysis, GPU detection** — MATLAB only
+- **Registered volume format** — TIFF only (`export.registered_volume_format: tiff`)
+- **Perens division names** — cross-atlas division grouping fills in only where Perens CCF ids match the Allen ontology
 
 ---
 

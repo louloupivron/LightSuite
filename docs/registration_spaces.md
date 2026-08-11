@@ -4,7 +4,7 @@ LightSuite supports two **complementary** registration output directions:
 
 | Direction | Transform | Typical use |
 |-----------|-----------|-------------|
-| **Atlas space** (`sample → atlas`) | Warp sample channels into the atlas grid | Cross-subject comparison, CCF/ontology queries, cohort stats on a fixed grid |
+| **Atlas space** (`sample → atlas`) | Warp sample channels into the atlas grid | Cross-subject comparison on a fixed CCF grid |
 | **Sample space** (`atlas → sample`) | Warp atlas labels/template onto the registration grid | Native-grid QC, label transfer without resampling huge volumes, brainreg-style inspection |
 
 Both directions use the **same** elastix transform chain; only the resampling direction differs.
@@ -32,7 +32,7 @@ analysis:
   stats_spaces: [atlas]          # or [sample] or [atlas, sample]
 ```
 
-CLI override: `--space atlas|sample|both` on `brain export`, `spinal export`, `analysis region-stats`, `spinal region-stats`, and `analysis registration-qc`.
+CLI override: `--space atlas|sample|both` on `brain export`, `spinal export`, and `spinal region-stats`.
 
 ## Output layout (brain)
 
@@ -79,7 +79,7 @@ volume_registered/
 - **Region volumes** in sample space reflect **warped** label footprints (deformation), not canonical atlas volumes.
 - **Cell densities** use different denominators.
 
-Use atlas space for cohort comparison; use sample space for QC and native-resolution workflows that bin into warped labels.
+Use atlas space for cross-subject comparison; use sample space for QC and native-resolution workflows that bin into warped labels.
 
 Sample-space hemisphere splits use ``hemisphere_in_sample_20um.tif`` (warped like the
 annotation). The atlas→sample export mirrors the lateral axis, so left/right assignment

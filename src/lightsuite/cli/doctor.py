@@ -108,34 +108,19 @@ def _check_elastix_binary(name: str) -> CheckResult:
 
 
 def _check_gpu(request_gpu: bool) -> CheckResult:
-    if not request_gpu:
-        return CheckResult("GPU (optional)", True, "Disabled in config (compute.use_gpu=false).", required=False)
-
-    try:
-        import cupy  # noqa: F401
-    except ImportError:
+    if request_gpu:
         return CheckResult(
             "GPU (optional)",
             True,
-            "CuPy not installed. Install with: uv sync --extra gpu",
+            "compute.use_gpu=true is ignored — GPU-accelerated cell detection is not implemented in Python.",
             required=False,
         )
-
-    try:
-        import cupy as cp
-
-        device = cp.cuda.Device(0)
-        device.use()
-        name = cp.cuda.runtime.getDeviceProperties(0)["name"].decode()
-        mem_gb = cp.cuda.runtime.memGetInfo()[1] / (1024**3)
-        return CheckResult(
-            "GPU (optional)",
-            True,
-            f"{name}, {mem_gb:.1f} GB free",
-            required=False,
-        )
-    except Exception as exc:  # noqa: BLE001
-        return CheckResult("GPU (optional)", False, str(exc), required=False)
+    return CheckResult(
+        "GPU (optional)",
+        True,
+        "GPU-accelerated cell detection is not implemented in Python (MATLAB only).",
+        required=False,
+    )
 
 
 def _check_disk(path: Path | None, label: str, min_gb: float) -> CheckResult:

@@ -13,7 +13,6 @@ class SourceFormat(str, Enum):
     AUTO = "auto"
     TIFF_STACK = "tiff_stack"
     CZI = "czi"
-    OME_ZARR = "ome_zarr"
     IMARIS = "imaris"
 
 
@@ -293,7 +292,10 @@ class DetectionConfig(BaseModel):
 
 
 class ComputeConfig(BaseModel):
-    use_gpu: bool = True
+    use_gpu: bool = Field(
+        default=False,
+        description="Reserved for future GPU-accelerated cell detection (not implemented in Python).",
+    )
     workers: int = Field(default=4, ge=1)
     max_in_memory_scratch_gb: float = Field(
         default=24.0,
@@ -306,7 +308,7 @@ class ComputeConfig(BaseModel):
 
 
 class ExportConfig(BaseModel):
-    registered_volume_format: str = "ome_zarr"
+    registered_volume_format: str = "tiff"
     write_pyramid: bool = True
     write_cells_csv: bool = True
     save_registered_volume: bool = False
@@ -367,17 +369,6 @@ class AnalysisConfig(BaseModel):
         default=False,
         description="When split_hemispheres is true, also emit whole-cord summary rows.",
     )
-    plots_dir: Path | None = Field(
-        default=None,
-        description="Directory for matplotlib analysis outputs; default is sample.save_path/plots.",
-    )
-
-    @field_validator("plots_dir")
-    @classmethod
-    def expand_plots_dir(cls, value: Path | None) -> Path | None:
-        if value is None:
-            return None
-        return value.expanduser()
 
 
 class AnnotationFormat(str, Enum):

@@ -34,8 +34,8 @@ uv run lightsuite brain export               -c my_sample.yaml --save-volume --w
 | Stage | Status |
 |-------|--------|
 | Preprocess, init registration, match points, register, export | Implemented |
-| Cell detection & atlas cell mapping | Planned |
-| Spinal cord & slice modules | MATLAB only (for now) |
+| Spinal cord registration & per-sample region-stats | Implemented (`lightsuite spinal`) |
+| Cell detection, slice module, CZI reader, spinal cohort, GPU detection | **Not in Python** — see [docs](https://lightsuite.readthedocs.io/en/latest/python_vs_matlab/) |
 
 **Guides:**
 
@@ -69,8 +69,10 @@ The original MATLAB workflows remain available for all three modalities:
 * **Atlas registration** — Allen CCF v3 (2020) for brain; [Fiederling et al. (2021)](https://data.mendeley.com/datasets/4rrggzv5d5/1) for spinal cord
 * **Interactive refinement** — manual control-point matching (Napari in Python; MATLAB GUI in legacy pipeline)
 * **Deformable registration** — Elastix B-spline with landmark constraints
-* **Atlas-space outputs** — registered volumes and regional intensity tables per channel
-* **Cell detection** — 3D band-pass + local maxima (MATLAB; Python port planned)
+* **Atlas-space outputs** — registered volumes (TIFF) and regional intensity tables per channel
+* **External annotations** — import native `points.csv` / mask TIFF after registration
+
+For MATLAB-only features (built-in cell detection, slice registration, cohort analysis), see the [Python vs MATLAB guide](https://lightsuite.readthedocs.io/en/latest/python_vs_matlab/).
 
 ---
 

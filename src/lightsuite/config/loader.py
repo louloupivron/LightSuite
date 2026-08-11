@@ -362,17 +362,3 @@ def save_mesospim_lateral_flip_to_multires_config(
     load_multires_config(path)
     return path
 
-
-def load_cohort_config(path: str | Path):
-    """Load and validate a cross-subject cohort YAML config."""
-    from lightsuite.analysis.cohort_models import CohortConfig
-
-    config_path = Path(path).expanduser().resolve()
-    if not config_path.is_file():
-        msg = f"Cohort config file not found: {config_path}"
-        raise FileNotFoundError(msg)
-
-    with config_path.open(encoding="utf-8") as handle:
-        raw: dict[str, Any] = yaml.safe_load(handle) or {}
-
-    return CohortConfig.model_validate(raw)

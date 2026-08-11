@@ -7,7 +7,6 @@ from pathlib import Path
 import yaml
 
 from lightsuite.config.loader import load_spinal_config
-from lightsuite.analysis.viz.cord_io import resolve_cord_plot_output, resolve_cord_plots_dir
 
 
 def test_load_spinal_config(tmp_path: Path) -> None:
@@ -141,24 +140,3 @@ def _minimal_spinal_config(tmp_path: Path, *, analysis: dict | None = None) -> P
     config_path = tmp_path / "spinal.yaml"
     config_path.write_text(yaml.dump(config_data), encoding="utf-8")
     return config_path
-
-
-def test_resolve_cord_plots_dir_default(tmp_path: Path) -> None:
-    config_path = _minimal_spinal_config(tmp_path)
-    plots_dir = resolve_cord_plots_dir(config_path)
-    assert plots_dir == (tmp_path / "results" / "plots").resolve()
-    assert plots_dir.is_dir()
-
-
-def test_resolve_cord_plots_dir_override(tmp_path: Path) -> None:
-    custom = tmp_path / "custom_plots"
-    config_path = _minimal_spinal_config(tmp_path, analysis={"plots_dir": str(custom)})
-    plots_dir = resolve_cord_plots_dir(config_path)
-    assert plots_dir == custom.resolve()
-    assert plots_dir.is_dir()
-
-
-def test_resolve_cord_plot_output(tmp_path: Path) -> None:
-    config_path = _minimal_spinal_config(tmp_path)
-    out = resolve_cord_plot_output(config_path, "structure.png")
-    assert out == (tmp_path / "results" / "plots" / "structure.png").resolve()
