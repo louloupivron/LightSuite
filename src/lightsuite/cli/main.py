@@ -2082,6 +2082,56 @@ def multires_register(
     run_multires_registration(load_multires_config(config))
 
 
+@multires_app.command("inspect-registration")
+def multires_inspect_registration(
+    config: str = typer.Option(..., "--config", "-c", help="Multires pipeline YAML config."),
+    full_overview: bool = typer.Option(
+        False,
+        "--full-overview",
+        help="Load the full-overview canvas instead of the overlap crop (much larger).",
+    ),
+    headless: bool = typer.Option(
+        False,
+        "--headless",
+        help="Resolve and load layers without opening Napari (for tests).",
+    ),
+) -> None:
+    """Compare the registered ROI against the overview in Napari."""
+    from lightsuite.config.loader import load_multires_config
+    from lightsuite.gui.inspect_registration_multires import run_multires_inspect_registration
+
+    paths = run_multires_inspect_registration(
+        load_multires_config(config),
+        full_overview=full_overview,
+        headless=headless,
+    )
+    typer.echo(
+        f"overview: {paths.overview_path}\n"
+        f"registered ROI channels: {', '.join(sorted(paths.registered_roi_paths))}"
+    )
+
+
+@multires_app.command("import-annotations")
+def multires_import_annotations(
+    config: str = typer.Option(..., "--config", "-c", help="Multires pipeline YAML config."),
+    no_csv: bool = typer.Option(False, "--no-csv", help="Skip writing the overview points CSV."),
+    full_overview_canvas: bool | None = typer.Option(
+        None,
+        "--full-overview-canvas/--crop-only",
+        help="Write warped masks on the full overview grid, or only the overlap crop.",
+    ),
+) -> None:
+    """Warp ROI-native segmentation into overview-native space."""
+    from lightsuite.config.loader import load_multires_config
+    from lightsuite.multires.import_annotations import run_multires_import_annotations
+
+    run_multires_import_annotations(
+        load_multires_config(config),
+        write_csv=False if no_csv else None,
+        full_overview_canvas=full_overview_canvas,
+    )
+
+
 @spinal_app.command("validate-config")
 def spinal_validate_config(
     config: str = typer.Option(..., "--config", "-c", help="Spinal cord pipeline YAML config."),

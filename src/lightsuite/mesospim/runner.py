@@ -107,7 +107,7 @@ def check_mesospim_geometry(cfg: MesospimPipelineConfig) -> MesospimRegOptsCheck
     report_path.write_text(json.dumps(serializable, indent=2), encoding="utf-8")
 
     overview_stem = _volume_stem(overview_path)
-    cropped_path = geometry_dir / f"{overview_stem}_cropped_overlap.tif"
+    cropped_path = geometry_dir / f"{overview_stem}_overview_crop.tif"
 
     title = f"{overview_stem} vs {_volume_stem(roi_path)} — landmark placement (µm)"
     fov_plot_path = geometry_dir / "fov_overlap.png"
@@ -209,7 +209,7 @@ def _check_metadata_geometry(cfg: MesospimPipelineConfig) -> MesospimRegOptsChec
     report_path.write_text(json.dumps(serializable, indent=2), encoding="utf-8")
 
     overview_stem = _volume_stem(overview_path)
-    cropped_path = geometry_dir / f"{overview_stem}_cropped_overlap.tif"
+    cropped_path = geometry_dir / f"{overview_stem}_overview_crop.tif"
 
     title = f"{overview_stem} vs {_volume_stem(roi_path)} — stage frame (µm)"
     fov_plot_path = geometry_dir / "fov_overlap.png"

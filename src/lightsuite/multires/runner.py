@@ -185,7 +185,7 @@ def _write_geometry_artifacts(
     )
 
     qc_plot_path = geometry_dir / "geometry_overlap_qc.png"
-    cropped_path = geometry_dir / f"{overview_stem}_cropped_overlap.tif"
+    cropped_path = geometry_dir / f"{overview_stem}_overview_crop.tif"
     geometry_report_paths = {
         "geometry_report_json": str(report_path),
         "fov_overlap_png": str(fov_plot_path),

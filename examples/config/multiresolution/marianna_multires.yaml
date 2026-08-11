@@ -6,6 +6,8 @@
 #   uv run lightsuite multires match-points       -c examples/config/multiresolution/marianna_multires.yaml
 #   uv run lightsuite multires check-geometry    -c examples/config/multiresolution/marianna_multires.yaml
 #   uv run lightsuite multires register          -c examples/config/multiresolution/marianna_multires.yaml
+#   uv run lightsuite multires inspect-registration -c examples/config/multiresolution/marianna_multires.yaml
+#   uv run lightsuite multires import-annotations   -c examples/config/multiresolution/marianna_multires.yaml
 #
 # See docs/usage_multiresolution.md — mesoSPIM lateral_flip (Marianna needs [-1, -1]).
 # Atlas registration: examples/config/mesoSPIM/marianna_yosi_parity.yaml (Perens, register_Yosi_test_python).
@@ -51,3 +53,17 @@ multires:
     write_full_overview_canvas: false
     reference_channel: "488"
     apply_transform_to: ["561"]
+
+# Arivis segmentation runs on the 2.5x ROI; warp it onto the 0.8x overview grid so the
+# atlas registration in examples/config/mesoSPIM/marianna_yosi_parity.yaml can consume it.
+# Coordinates are 1-based ROI voxel indices; masks must be on the ROI native grid.
+# Outputs land in save_path/annotations_in_overview/.
+import:
+  write_csv: true
+  annotations:
+    - format: points_csv
+      path: /media/gbm/NVME2/ALICe-pipelines-data/Marianna_CMU/segmentation/converted/arivis_2p5x_points.csv
+      label: arivis_cells
+    - format: mask_tiff
+      path: /media/gbm/NVME2/ALICe-pipelines-data/Marianna_CMU/segmentation/converted/arivis_2p5x_mask.tif
+      label: arivis_mask

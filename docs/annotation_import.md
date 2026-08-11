@@ -172,6 +172,18 @@ Validate against `sample_reference.json` before import:
 
 ---
 
+## Multiresolution: segmenting on a higher-resolution ROI
+
+The spec above assumes annotations sit on the same native grid as the registered sample. When segmentation runs on a high-resolution ROI that was registered to a lower-resolution overview, use [`lightsuite multires import-annotations`](usage_multiresolution.md#step-9--optional--import-segmentation-from-the-roi) as a first stage:
+
+```
+ROI-native CSV/mask  ──multires import-annotations──▶  overview-native CSV/mask  ──brain import-annotations──▶  atlas
+```
+
+The multires stage reads 1-based **ROI** voxel indices and writes 1-based **overview** voxel indices in the exact formats documented here, so the two stages compose without any conversion step. Masks are warped with nearest-neighbour interpolation to preserve labels.
+
+---
+
 ## Limitations
 
 - **Native resolution only** — registration-resolution (20 µm) masks/coordinates are not accepted.
@@ -183,4 +195,5 @@ Validate against `sample_reference.json` before import:
 ## See also
 
 - [Brain lightsheet usage](usage_lightsheet_brain.md) — full pipeline and command cheat sheet
+- [Multiresolution registration](usage_multiresolution.md) — ROI → overview segmentation transfer
 - `examples/annotation_sample/` — minimal example CSV

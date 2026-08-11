@@ -388,28 +388,27 @@ def _read_mhd_vector_field(mhd_path: Path) -> np.ndarray:
     return np.transpose(vol, (1, 2, 0, 3)).astype(np.float32, copy=False)
 
 
-def run_transformix_points(
+def run_transformix_physical_points(
     *,
-    points_yxz: np.ndarray,
+    points_xyz: np.ndarray,
     transform_path: Path,
     output_dir: Path,
-    spacing_mm: float,
 ) -> np.ndarray:
-    """Transform 0-based (Y, X, Z) points with ``transformix -def`` (physical mm I/O).
+    """Transform physical ``(x, y, z)`` points with ``transformix -def``.
 
-    Elastix transforms map fixed→moving for volume resampling. Applying the same
-    parameter file to points with ``-def`` maps feature coordinates in the moving
-    image to the fixed domain — the inverse relationship of volume resampling.
+    Input and output are in the transform's own physical units, so callers own
+    the index↔physical mapping. Use this when the volumes carry a non-identity
+    direction or anisotropic spacing that a scalar spacing cannot express.
     """
     if shutil.which("transformix") is None:
         msg = "transformix not found on PATH"
         raise RuntimeError(msg)
 
-    pts = np.asarray(points_yxz, dtype=float)
+    pts = np.asarray(points_xyz, dtype=float)
     if pts.size == 0:
         return pts.reshape(0, 3)
     if pts.ndim != 2 or pts.shape[1] != 3:
-        msg = f"points_yxz must be Nx3, got {pts.shape}"
+        msg = f"points_xyz must be Nx3, got {pts.shape}"
         raise ValueError(msg)
 
     output_dir = Path(output_dir).expanduser()
@@ -420,8 +419,7 @@ def run_transformix_points(
             path.unlink()
 
     input_path = output_dir / "inputPoints.txt"
-    phys = volume_indices_to_elastix_physical(pts, spacing_mm, zero_based=True)
-    write_landmark_file(input_path, phys)
+    write_landmark_file(input_path, pts)
     cmd = [
         "transformix",
         "-def",
@@ -443,19 +441,47 @@ def run_transformix_points(
         msg = f"transformix did not write {out_path}"
         raise FileNotFoundError(msg)
 
-    sp = float(spacing_mm)
     mapped: list[list[float]] = []
     for line in out_path.read_text(encoding="utf-8").splitlines():
         match = re.search(r"OutputPoint\s*=\s*\[([^\]]+)\]", line)
         if match is None:
             continue
-        x_mm, y_mm, z_mm = (float(v) for v in match.group(1).split())
-        # ITK physical (x,y,z) mm → volume indices (Y,X,Z)
-        mapped.append([y_mm / sp, x_mm / sp, z_mm / sp])
+        mapped.append([float(v) for v in match.group(1).split()])
     if len(mapped) != pts.shape[0]:
         msg = f"Expected {pts.shape[0]} transformed points, got {len(mapped)} in {out_path}"
         raise RuntimeError(msg)
     return np.asarray(mapped, dtype=float)
+
+
+def run_transformix_points(
+    *,
+    points_yxz: np.ndarray,
+    transform_path: Path,
+    output_dir: Path,
+    spacing_mm: float,
+) -> np.ndarray:
+    """Transform 0-based (Y, X, Z) points with ``transformix -def`` (physical mm I/O).
+
+    Elastix transforms map fixed→moving for volume resampling. Applying the same
+    parameter file to points with ``-def`` maps feature coordinates in the moving
+    image to the fixed domain — the inverse relationship of volume resampling.
+    """
+    pts = np.asarray(points_yxz, dtype=float)
+    if pts.size == 0:
+        return pts.reshape(0, 3)
+    if pts.ndim != 2 or pts.shape[1] != 3:
+        msg = f"points_yxz must be Nx3, got {pts.shape}"
+        raise ValueError(msg)
+
+    phys = volume_indices_to_elastix_physical(pts, spacing_mm, zero_based=True)
+    out_phys = run_transformix_physical_points(
+        points_xyz=phys,
+        transform_path=transform_path,
+        output_dir=output_dir,
+    )
+    sp = float(spacing_mm)
+    # ITK physical (x,y,z) mm → volume indices (Y,X,Z)
+    return np.column_stack([out_phys[:, 1] / sp, out_phys[:, 0] / sp, out_phys[:, 2] / sp])
 
 
 def run_transformix(

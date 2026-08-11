@@ -556,6 +556,8 @@ Supported formats (YAML `import.annotations`):
 
 Outputs land in `volume_registered/` (`*_atlas_coords.npz`, optional CSV, mask TIFF).
 
+**Segmented on a higher-resolution ROI?** Run [`lightsuite multires import-annotations`](usage_multiresolution.md#step-9--optional--import-segmentation-from-the-roi) first. It warps ROI-native points and masks onto the overview grid and writes them in the same `points_csv` / `mask_tiff` formats, so its outputs go straight into the `import.annotations` block above.
+
 ---
 
 ## Region statistics and cell counts

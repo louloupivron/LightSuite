@@ -41,6 +41,8 @@ Supported input layouts today:
 | 4 | `lightsuite multires check-geometry` | Automated / QC | FOV overlap plots and geometry report |
 | 5 | `lightsuite multires export-preview` | Optional | Small TIFF crops for visual alignment checks |
 | 6 | `lightsuite multires register` | Automated | Elastix translation / rigid on overlap crops |
+| 7 | `lightsuite multires inspect-registration` | **Manual (GUI)** | Overlay the registered ROI on the overview in Napari |
+| 8 | `lightsuite multires import-annotations` | Optional | Warp ROI-native segmentation into overview-native space |
 
 The pipeline streams planes from disk. Full overview and ROI stacks are **not** loaded into RAM at once.
 
@@ -351,7 +353,7 @@ Written under `save_path/geometry/<pair_label>/`:
 | `geometry_report.json` | Overlap box, alignment metrics, optional landmark fit |
 | `fov_overlap.png` | Schematic FOV diagram |
 | `geometry_overlap_qc.png` | Slice or stack overlay QC |
-| `<overview>_cropped_overlap.tif` | Cropped overview preview *(full level only)* |
+| `<overview>_overview_crop.tif` | Overview cropped to the overlap box *(full level only)* |
 
 A checkpoint is always updated at `save_path/multires_regopts.json`.
 
@@ -392,13 +394,98 @@ Under `save_path/elastix_roi_to_overview/<experiment_name>/`:
 
 | File | Description |
 |------|-------------|
-| `<experiment>_<overview>_cropped_overlap.tif` | Fixed (overview) overlap crop |
+| `<experiment>_<overview>_overview_crop.tif` | Fixed (overview) overlap crop |
 | `<experiment>_<roi>_registered_to_<overview>.tif` | ROI warped into overview overlap space |
 | `<experiment>_<roi>_registered_to_<overview>_in_full_overview.tif` | ROI embedded in full overview grid *(when `write_full_overview_canvas: true`)* |
 | `TransformParameters.*.txt` | Elastix transform chain |
 | `registration_overlay_qc.png` | Mid-plane overlay QC |
 
 The checkpoint `save_path/multires_regopts.json` is updated with paths, overlap box, and optional NCC score.
+
+> **Renamed in 2026-08:** the overview crop was previously `<...>_cropped_overlap.tif`, which read as "the overlap, cropped" rather than "the overview, cropped to the overlap". Re-run `check-geometry` / `register` to regenerate under the new name; old checkpoints still point at the old path.
+
+---
+
+## Step 8 — Inspect the registration in Napari
+
+```bash
+uv run lightsuite multires inspect-registration -c my_multires.yaml
+```
+
+Loads the overview and every registered ROI channel as additive layers so you can scroll through and confirm the warp. By default it uses the **overlap crop**, where the overview and ROI share one small grid. Add `--full-overview` to load the full-overview canvas instead — much larger, and only the reference channel is available there.
+
+Volumes are memory-mapped where the TIFF layout allows, so opening a multi-GB canvas does not read it all into RAM.
+
+| Flag | Effect |
+|------|--------|
+| *(default)* | Overview crop + all registered channels (`registered_roi_path`, `additional_channel_paths`) |
+| `--full-overview` | Full overview volume + `registered_roi_full_overview_path` |
+| `--headless` | Resolve and load layers without opening Napari (tests) |
+
+Requires `uv sync --extra gui`.
+
+---
+
+## Step 9 — (Optional) Import segmentation from the ROI
+
+Segmentation is usually run on the **high-resolution ROI**, but quantification happens on the overview (which is what gets registered to an atlas). This command carries ROI-native annotations across using the transforms from `register`:
+
+```bash
+uv run lightsuite multires import-annotations -c my_multires.yaml
+```
+
+Add an `import` block to the multires YAML using the same schema as the brain pipeline:
+
+```yaml
+import:
+  write_csv: true
+  annotations:
+    - format: points_csv
+      path: /data/segmentation/arivis_2p5x_points.csv
+      label: arivis_cells
+    - format: mask_tiff
+      path: /data/segmentation/arivis_2p5x_mask.tif
+      label: arivis_mask
+```
+
+Inputs are **1-based ROI voxel indices** (`x,y,z` CSV header) and masks on the ROI native grid. Points outside the ROI grid are dropped before warping; the count that lands inside the overview grid is reported.
+
+### Import outputs
+
+Written under `save_path/annotations_in_overview/`:
+
+| File | Description |
+|------|-------------|
+| `<label>_in_overview.csv` | 1-based overview voxel indices (`x,y,z` + any numeric feature columns) |
+| `<label>_overview_coords.npz` | `overviewptcoords` + original `roiptcoords` |
+| `<label>_in_overview_crop.tif` | Warped mask on the overlap crop (uint8) |
+| `<label>_in_overview.tif` | Warped mask on the full overview grid *(unless `--crop-only`)* |
+| `import_annotations_summary.json` | Per-source counts and output paths |
+
+Masks are warped with **nearest-neighbour** interpolation so labels are not blended. Use `--crop-only` to skip the full-overview canvas when the mask is sparse and the overview is large.
+
+### Handing off to the brain pipeline
+
+The CSV and TIFF are already in LightSuite Sample Space v1 on the overview grid, so they drop straight into the brain config with no conversion:
+
+```yaml
+# brain pipeline YAML — overview is the 'sample' here
+import:
+  annotations:
+    - format: points_csv
+      path: <save_path>/annotations_in_overview/arivis_cells_in_overview.csv
+      label: arivis_cells
+    - format: mask_tiff
+      path: <save_path>/annotations_in_overview/arivis_mask_in_overview.tif
+      label: arivis_mask
+```
+
+```bash
+uv run lightsuite brain import-annotations -c brain.yaml
+uv run lightsuite brain inspect-imports    -c brain.yaml --space sample
+```
+
+Requires `transformix` on `PATH`.
 
 ---
 
@@ -420,13 +507,15 @@ uv run lightsuite multires register            -c examples/config/multiresolutio
 ```bash
 uv sync --extra registration --extra gui
 
-uv run lightsuite multires validate-config    -c examples/config/multiresolution/marianna_multires.yaml
-uv run lightsuite multires inspect-geometry   -c examples/config/multiresolution/marianna_multires.yaml   # lateral_flip [-1, -1]
-uv run lightsuite multires check-geometry      -c examples/config/multiresolution/marianna_multires.yaml
-uv run lightsuite multires register            -c examples/config/multiresolution/marianna_multires.yaml
+uv run lightsuite multires validate-config      -c examples/config/multiresolution/marianna_multires.yaml
+uv run lightsuite multires inspect-geometry     -c examples/config/multiresolution/marianna_multires.yaml   # lateral_flip [-1, -1]
+uv run lightsuite multires check-geometry       -c examples/config/multiresolution/marianna_multires.yaml
+uv run lightsuite multires register             -c examples/config/multiresolution/marianna_multires.yaml
+uv run lightsuite multires inspect-registration -c examples/config/multiresolution/marianna_multires.yaml
+uv run lightsuite multires import-annotations   -c examples/config/multiresolution/marianna_multires.yaml
 ```
 
-Atlas registration for the 0.8× overview: [`marianna_yosi_parity.yaml`](../examples/config/mesoSPIM/marianna_yosi_parity.yaml).
+Atlas registration for the 0.8× overview: [`marianna_yosi_parity.yaml`](../examples/config/mesoSPIM/marianna_yosi_parity.yaml). Point its `import.annotations` at the files written under `annotations_in_overview/` to quantify the 2.5× segmentation by atlas region.
 
 ### SmartSPIM — hybrid (overview ↔ 9× cortex mosaic)
 

@@ -74,8 +74,14 @@ def apply_elastix_transforms(
     transform_paths: list[Path],
     *,
     reference: sitk.Image,
+    nearest: bool = False,
+    output_dtype=None,
 ) -> sitk.Image:
-    """Apply saved elastix transform parameter files to *moving* on *reference* grid."""
+    """Apply saved elastix transform parameter files to *moving* on *reference* grid.
+
+    Set ``nearest`` for label/mask volumes so transformix does not interpolate
+    across label boundaries.
+    """
     import itk
     import numpy as np
 
@@ -96,12 +102,21 @@ def apply_elastix_transforms(
         "Direction",
         [str(float(v)) for v in reference.GetDirection()],
     )
+    if nearest:
+        parameter_object.SetParameter(
+            last,
+            "ResampleInterpolator",
+            "FinalNearestNeighborInterpolator",
+        )
 
     result_itk = itk.transformix_filter(
         sitk_to_itk(moving),
         transform_parameter_object=parameter_object,
     )
-    result_sitk = sitk.GetImageFromArray(itk.GetArrayFromImage(result_itk).astype(np.float32))
+    dtype = output_dtype if output_dtype is not None else np.float32
+    result_sitk = sitk.GetImageFromArray(
+        itk.GetArrayFromImage(result_itk).astype(dtype, copy=False)
+    )
     result_sitk.CopyInformation(reference)
     return result_sitk
 
@@ -166,7 +181,7 @@ def register_roi_to_overview(
 
     channel_prefix = f"{channel}_" if channel else ""
     cropped_overview_path = (
-        output_dir / f"{experiment_slug}_{channel_prefix}{overview_stem}_cropped_overlap.tif"
+        output_dir / f"{experiment_slug}_{channel_prefix}{overview_stem}_overview_crop.tif"
     )
     registered_roi_path = (
         output_dir

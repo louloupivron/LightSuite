@@ -8,6 +8,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from lightsuite.config.models import ImportConfig
 from lightsuite.multires.landmark_session import LandmarkFitMode, default_landmark_session_path
 
 
@@ -209,3 +210,6 @@ class MultiresPipelineConfig(BaseModel):
 
     sample: MultiresSampleConfig
     multires: MultiresConfig
+    import_config: ImportConfig | None = Field(default=None, alias="import")
+
+    model_config = {"populate_by_name": True}

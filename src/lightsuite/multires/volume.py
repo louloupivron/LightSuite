@@ -523,10 +523,13 @@ def write_embedded_crop_canvas(
     crop: sitk.Image,
     crop_start_index: list[int],
     output_path: Path,
+    *,
+    dtype=np.float32,
 ) -> None:
     """Write a full-overview canvas with ``crop`` pasted in, plane-by-plane.
 
-    Avoids allocating a float32 buffer the size of the overview (tens of GB).
+    Avoids allocating a buffer the size of the overview (tens of GB). Pass
+    ``dtype=np.uint8`` for masks to keep the canvas a quarter of the size.
     """
     output_path = output_path.expanduser()
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -534,13 +537,13 @@ def write_embedded_crop_canvas(
     nz, ny, nx = (int(v) for v in overview_spec.shape_zyx)
     cx, cy, cz = (int(v) for v in crop.GetSize())
     ix0, iy0, iz0 = (int(v) for v in crop_start_index)
-    crop_arr = np.asarray(sitk.GetArrayViewFromImage(crop), dtype=np.float32)
+    crop_arr = np.asarray(sitk.GetArrayViewFromImage(crop), dtype=dtype)
     sx, sy, sz = (float(v) for v in overview_spec.spacing_um)
 
     # Multi-page BigTIFF; ImageJ hyperstack metadata is set on the first page.
     with tifffile.TiffWriter(output_path, bigtiff=True) as tif:
         for iz in range(nz):
-            plane = np.zeros((ny, nx), dtype=np.float32)
+            plane = np.zeros((ny, nx), dtype=dtype)
             if iz0 <= iz < iz0 + cz:
                 y1 = min(iy0 + cy, ny)
                 x1 = min(ix0 + cx, nx)
