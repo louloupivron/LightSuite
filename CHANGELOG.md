@@ -9,10 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Canonical copy-paste templates: `examples/brain_lightsheet.yaml`, `examples/spinal_cord.yaml`
-- `examples/README.md` workflow index mapping templates to real sample configs
-- GitHub Actions CI: ruff, pytest, MkDocs strict build
-- `devtools/parity/` for MATLAB/Python parity scratch scripts (moved from repo root)
+- `lightsuite brain|spinal|multires run` with `--from`, `--through`, `--resume`
+- `lightsuite brain|spinal|multires stages` checkpoint status tables
+- `lightsuite multires build-manifest` for mesoSPIM / SmartSPIM pair JSON
+- `lightsuite config init|explain|schema` helpers
+- `lightsuite workflow list` decision guide
+- Combined multires → brain guide (`docs/usage_combined_multires_brain.md`)
+- Actionable `LightsuiteConfigError` messages from config loader
 
 ### Changed
 

@@ -8,6 +8,15 @@ import typer
 
 from lightsuite import __version__
 from lightsuite.cli.doctor import doctor_command
+from lightsuite.cli.config_cmd import config_app
+from lightsuite.cli.manifest_build import build_manifest as multires_build_manifest_cmd
+from lightsuite.cli.pipeline_commands import (
+    register_brain_commands,
+    register_multires_commands,
+    register_spinal_commands,
+)
+from lightsuite.cli.workflows import workflow_app
+from lightsuite.exceptions import LightsuiteConfigError
 
 app = typer.Typer(
     name="lightsuite",
@@ -22,6 +31,12 @@ app.add_typer(brain_app, name="brain")
 app.add_typer(spinal_app, name="spinal")
 app.add_typer(mesospim_app, name="mesospim")
 app.add_typer(multires_app, name="multires")
+app.add_typer(config_app, name="config")
+app.add_typer(workflow_app, name="workflow")
+
+register_brain_commands(brain_app)
+register_spinal_commands(spinal_app)
+register_multires_commands(multires_app)
 
 
 def _version_callback(value: bool) -> None:
@@ -69,7 +84,11 @@ def validate_config(
     """Load and validate a brain pipeline configuration file."""
     from lightsuite.config.loader import load_config
 
-    cfg = load_config(config)
+    try:
+        cfg = load_config(config)
+    except LightsuiteConfigError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
     typer.echo(f"Config valid for sample '{cfg.sample.name}' ({cfg.sample.source.format.value}).")
 
 
@@ -811,6 +830,71 @@ def multires_inspect_registration(
     typer.echo(
         f"overview: {paths.overview_path}\n"
         f"registered ROI channels: {', '.join(sorted(paths.registered_roi_paths))}"
+    )
+
+
+@multires_app.command("build-manifest")
+def multires_build_manifest(
+    vendor: str = typer.Option(
+        ...,
+        "--vendor",
+        help="Acquisition vendor: mesospim or smartspim.",
+    ),
+    sample_name: str = typer.Option(..., "--sample-name", help="Sample identifier."),
+    pair_label: str = typer.Option(..., "--pair-label", help="Unique pair label."),
+    overview: Path | None = typer.Option(
+        None,
+        "--overview",
+        help="Overview volume path (single-channel mesospim/smartspim).",
+    ),
+    roi: Path | None = typer.Option(None, "--roi", help="ROI volume path (single-channel)."),
+    overview_meta: Path | None = typer.Option(
+        None,
+        "--overview-meta",
+        help="mesoSPIM overview meta sidecar (required for stitched overview folders).",
+    ),
+    roi_meta: Path | None = typer.Option(None, "--roi-meta", help="mesoSPIM ROI meta sidecar."),
+    channels_json: str | None = typer.Option(
+        None,
+        "--channels-json",
+        help='Multichannel mesoSPIM paths as JSON, e.g. \'{"488":{"overview":"...","roi":"..."}}\'',
+    ),
+    reference_channel: str | None = typer.Option(
+        None,
+        "--reference-channel",
+        help="Reference channel for multichannel manifests.",
+    ),
+    output: Path = typer.Option(
+        ...,
+        "--output",
+        "-o",
+        help="Output pair manifest JSON path.",
+    ),
+    lateral_flip_overview: str | None = typer.Option(
+        None,
+        "--lateral-flip-overview",
+        help="mesoSPIM overview lateral_flip as '1,-1' (optional).",
+    ),
+    lateral_flip_roi: str | None = typer.Option(
+        None,
+        "--lateral-flip-roi",
+        help="mesoSPIM ROI lateral_flip as '1,-1' (optional).",
+    ),
+) -> None:
+    """Build a multires pair manifest JSON from mesoSPIM or SmartSPIM paths."""
+    multires_build_manifest_cmd(
+        vendor=vendor,
+        sample_name=sample_name,
+        pair_label=pair_label,
+        overview=overview,
+        roi=roi,
+        overview_meta=overview_meta,
+        roi_meta=roi_meta,
+        channels_json=channels_json,
+        reference_channel=reference_channel,
+        output=output,
+        lateral_flip_overview=lateral_flip_overview,
+        lateral_flip_roi=lateral_flip_roi,
     )
 
 

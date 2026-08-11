@@ -7,9 +7,20 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from pydantic import ValidationError
 
 from lightsuite.config.models import BrainPipelineConfig, SpinalCordPipelineConfig
+from lightsuite.exceptions import LightsuiteConfigError, format_validation_error
 from lightsuite.registration.orientation import validate_permvec
+
+
+def _validate_config(model, raw: dict[str, Any], config_path: Path):
+    try:
+        return model.model_validate(raw)
+    except ValidationError as exc:
+        raise LightsuiteConfigError(
+            format_validation_error(exc, config_path=str(config_path))
+        ) from exc
 
 
 def load_mesospim_config(path: str | Path):
@@ -24,7 +35,7 @@ def load_mesospim_config(path: str | Path):
     with config_path.open(encoding="utf-8") as handle:
         raw: dict[str, Any] = yaml.safe_load(handle) or {}
 
-    return MesospimPipelineConfig.model_validate(raw)
+    return _validate_config(MesospimPipelineConfig, raw, config_path)
 
 
 def load_multires_config(path: str | Path):
@@ -39,7 +50,7 @@ def load_multires_config(path: str | Path):
     with config_path.open(encoding="utf-8") as handle:
         raw: dict[str, Any] = yaml.safe_load(handle) or {}
 
-    return MultiresPipelineConfig.model_validate(raw)
+    return _validate_config(MultiresPipelineConfig, raw, config_path)
 
 
 def load_config(path: str | Path) -> BrainPipelineConfig:
@@ -52,7 +63,7 @@ def load_config(path: str | Path) -> BrainPipelineConfig:
     with config_path.open(encoding="utf-8") as handle:
         raw: dict[str, Any] = yaml.safe_load(handle) or {}
 
-    return BrainPipelineConfig.model_validate(raw)
+    return _validate_config(BrainPipelineConfig, raw, config_path)
 
 
 def load_spinal_config(path: str | Path) -> SpinalCordPipelineConfig:
@@ -65,7 +76,7 @@ def load_spinal_config(path: str | Path) -> SpinalCordPipelineConfig:
     with config_path.open(encoding="utf-8") as handle:
         raw: dict[str, Any] = yaml.safe_load(handle) or {}
 
-    return SpinalCordPipelineConfig.model_validate(raw)
+    return _validate_config(SpinalCordPipelineConfig, raw, config_path)
 
 
 def _format_orientation_line(permvec: list[int], indent: str) -> str:

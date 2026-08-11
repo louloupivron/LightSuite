@@ -12,7 +12,7 @@
 cp examples/brain_lightsheet.yaml my_mouse.yaml
 # edit paths, then:
 uv run lightsuite doctor -c my_mouse.yaml
-uv run lightsuite brain preprocess -c my_mouse.yaml
+uv run lightsuite brain run -c my_mouse.yaml --through match-points
 ```
 
 ## Real sample configs (`config/`)

@@ -34,7 +34,9 @@ uv sync --extra dev --extra gui
 # Verify environment
 uv run lightsuite doctor -c examples/brain_lightsheet.yaml
 
-# Run the brain pipeline (one stage at a time)
+# Run the brain pipeline (or orchestrate with run)
+uv run lightsuite brain run -c my_sample.yaml --through match-points
+# Step by step:
 uv run lightsuite brain preprocess           -c my_sample.yaml
 uv run lightsuite brain check-orientation    -c my_sample.yaml
 uv run lightsuite brain init-registration    -c my_sample.yaml

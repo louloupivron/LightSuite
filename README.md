@@ -34,7 +34,9 @@ cp examples/brain_lightsheet.yaml my_sample.yaml
 # Verify environment (Elastix on PATH, atlas paths, scratch disk)
 uv run lightsuite doctor -c my_sample.yaml
 
-# Brain pipeline (one stage at a time; orchestration CLI planned)
+# Brain pipeline (or orchestrate with run)
+uv run lightsuite brain run -c my_sample.yaml --through match-points
+# Step by step:
 uv run lightsuite brain preprocess           -c my_sample.yaml
 uv run lightsuite brain check-orientation    -c my_sample.yaml
 uv run lightsuite brain init-registration    -c my_sample.yaml
@@ -45,7 +47,7 @@ uv run lightsuite brain export               -c my_sample.yaml --save-volume --w
 
 Other workflows: [`examples/spinal_cord.yaml`](examples/spinal_cord.yaml) (`lightsuite spinal`),
 multires configs under [`examples/config/multiresolution/`](examples/config/multiresolution/).
-Index: [`examples/README.md`](examples/README.md).
+Index: [`examples/README.md`](examples/README.md). Orchestration: `lightsuite brain run`, `lightsuite workflow list`.
 
 | Stage | Status |
 |-------|--------|

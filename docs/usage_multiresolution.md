@@ -46,6 +46,8 @@ Supported input layouts today:
 
 The pipeline streams planes from disk. Full overview and ROI stacks are **not** loaded into RAM at once.
 
+Orchestrate automated steps with `lightsuite multires run -c my.yaml` (see `lightsuite multires stages` for checkpoint status).
+
 ---
 
 ## Step 1 — Publish a pair manifest
@@ -60,9 +62,19 @@ Each manifest describes:
 
 ### mesoSPIM (TIFF + `*_meta.txt`)
 
-Use the conversion notebook, the vendor helper, or the sample build script:
+Use the CLI, conversion notebook, the vendor helper, or the sample build script:
 
 ```bash
+# CLI (preferred for new acquisitions):
+lightsuite multires build-manifest \
+  --vendor mesospim \
+  --sample-name OP39M2 \
+  --pair-label spinal_cord_488_561 \
+  --channels-json '{"488":{"overview":"/path/2.5X/ch488","roi":"/path/1.25X/ch488.tif"},...}' \
+  --reference-channel 488 \
+  --overview-meta /path/anchor_tile_meta.txt \
+  -o /path/OP39M2_pair.json
+
 # Notebook: examples/notebooks/convert_mesospim_to_multires.ipynb
 # OP39M2 spinal cord (stitched 2.5X overview + 1.25X ROI, 488 + 561):
 uv run python scripts/build_op39m2_multires_manifest.py

@@ -30,6 +30,7 @@ nav:
   - Usage:
       - Brain lightsheet (Python): usage_lightsheet_brain.md
       - Multiresolution registration: usage_multiresolution.md
+      - Combined multires → brain: usage_combined_multires_brain.md
       - Annotation import: annotation_import.md
       - Registration spaces: registration_spaces.md
       - Spinal cord: usage_spinal_cord.md
