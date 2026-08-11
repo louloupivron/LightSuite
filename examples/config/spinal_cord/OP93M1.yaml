@@ -1,10 +1,5 @@
-# Example spinal cord lightsheet config (Fiederling et al. 2021 atlas).
-# Copy and edit paths before running:
+# Developer sample — machine-specific paths. Template: examples/spinal_cord.yaml
 #   uv run lightsuite doctor -c examples/spinal_cord.yaml
-#   uv run lightsuite spinal validate-config -c examples/spinal_cord.yaml
-#
-# Download atlas from https://data.mendeley.com/datasets/4rrggzv5d5/1
-# and set atlas.atlas_dir to the folder containing Segments.csv.
 
 sample:
   name: example_spinal_cord

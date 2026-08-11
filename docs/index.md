@@ -48,7 +48,7 @@ uv run lightsuite spinal straighten           -c my_spinal.yaml
 uv run lightsuite spinal init-registration    -c my_spinal.yaml
 ```
 
-Copy [`examples/brain_lightsheet.yaml`](../examples/brain_lightsheet.yaml), edit paths and voxel size, then follow the [brain lightsheet guide](usage_lightsheet_brain.md).
+Copy [`examples/brain_lightsheet.yaml`](../examples/brain_lightsheet.yaml) (or [`examples/spinal_cord.yaml`](../examples/spinal_cord.yaml) for spinal cord), edit paths and voxel size, then follow the [brain lightsheet guide](usage_lightsheet_brain.md). See [`examples/README.md`](../examples/README.md) for the full config index.
 
 ## Hardware recommendations
 

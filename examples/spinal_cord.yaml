@@ -1,0 +1,59 @@
+# Canonical spinal cord lightsheet template (Fiederling et al. 2021 atlas).
+#
+#   cp examples/spinal_cord.yaml my_spinal.yaml
+#   uv run lightsuite doctor -c my_spinal.yaml
+#   uv run lightsuite spinal validate-config -c my_spinal.yaml
+#
+# Download atlas: https://data.mendeley.com/datasets/4rrggzv5d5/1
+# Set atlas.atlas_dir to the folder containing Segments.csv and Template.tif.
+#
+# See examples/README.md and docs/usage_spinal_cord.md.
+
+sample:
+  name: example_spinal_cord
+  source:
+    format: tiff_stack
+    # Single-channel:
+    # path: /path/to/stitched/channel_folder
+    # tiff_type: channelperfile
+    # Multi-channel Terastitcher (one folder per channel):
+    tiff_type: planeperfile
+    channels:
+      - /path/to/Ch1
+      - /path/to/Ch2
+  scratch: /path/to/fast_scratch
+  save_path: /path/to/results/example_spinal_cord
+  voxel_um: [1.8, 1.8, 1.8]
+
+atlas:
+  atlas_dir: /path/to/SC_P56_Atlas_10x10x20_v5_2020
+
+registration:
+  resolution_um: 20
+  channel_primary: 2
+  # Optional: skip GUI and set orientation in YAML instead of cord_orientation.txt
+  # longitudinal_direction: caudorostral  # or rostrocaudal
+  control_point_weight: 0.2
+  straightening_lambda_pos: 5000
+  straightening_lambda_ang: 5000
+
+compute:
+  workers: 4
+
+# Optional: import annotations after register (see docs/annotation_import.md)
+# import:
+#   write_csv: true
+#   annotations:
+#     - format: points_csv
+#       path: /path/to/points.csv
+#       label: cells
+
+# Optional: per-sample region statistics after import
+# analysis:
+#   parcellate_intensities: true
+#   intensity_channels: [1]
+#   rollups: [division, structure, horn]
+#   split_hemispheres: true
+#   count_points: true
+#   point_labels:
+#     - cells

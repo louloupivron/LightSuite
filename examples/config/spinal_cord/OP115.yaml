@@ -2,7 +2,6 @@
 # Stitched Terastitcher output under output/channel_488/.
 #
 #   uv run lightsuite doctor -c examples/config/spinal_cord/OP115.yaml
-#   uv run lightsuite spinal validate-config -c examples/config/spinal_cord/OP115.yaml
 
 sample:
   name: OP115

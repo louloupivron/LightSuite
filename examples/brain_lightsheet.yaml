@@ -1,6 +1,10 @@
-# Example brain lightsheet config (mesoSPIM sample).
-# For a copy-paste template use examples/brain_lightsheet.yaml (machine-specific paths below).
-#   uv run lightsuite doctor -c examples/brain_lightsheet.yaml
+# Canonical brain lightsheet template (copy before editing).
+#
+#   cp examples/brain_lightsheet.yaml my_mouse.yaml
+#   uv run lightsuite doctor -c my_mouse.yaml
+#   uv run lightsuite brain validate-config -c my_mouse.yaml
+#
+# See examples/README.md for workflow index and real sample configs.
 
 sample:
   name: example_mouse
@@ -8,14 +12,19 @@ sample:
     format: tiff_stack
     path: /path/to/stitched/tiff/folder
     tiff_type: channelperfile
-  scratch: /fastssd/lightsuite_scratch
+    # Multi-channel Terastitcher (one folder per channel):
+    # tiff_type: planeperfile
+    # channels:
+    #   - /path/to/Ch1
+    #   - /path/to/Ch2
+  scratch: /path/to/fast_scratch
   save_path: /path/to/results/example_mouse
   voxel_um: [5.26, 5.26, 5.0]
 
 atlas:
   provider: allen
   resolution_um: 10
-  atlas_dir: null
+  atlas_dir: /path/to/allen_ccf_10um
 
 registration:
   resolution_um: 20

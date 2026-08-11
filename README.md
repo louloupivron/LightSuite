@@ -11,18 +11,30 @@
 
 ---
 
-## Python pipeline (brain lightsheet)
+## Python pipeline
 
-The Python version runs on branch **`feature/python-migration`** as a CLI with optional Napari GUIs. No MATLAB license required.
+LightSuite Python is a CLI companion to the MATLAB software: brain lightsheet, spinal cord,
+and multiresolution registration with optional Napari GUIs. **No MATLAB license required**
+for those workflows. See [Python vs MATLAB](https://lightsuite.readthedocs.io/en/latest/python_vs_matlab/).
+
+### Getting started
 
 ```bash
-# Install
-uv sync --extra dev --extra gui
+# From a clone (development)
+git clone https://github.com/dimokaramanlis/LightSuite.git
+cd LightSuite
+uv sync --extra dev --extra gui --extra registration
 
-# Verify environment
-uv run lightsuite doctor -c examples/brain_lightsheet.yaml
+# Or after PyPI release:
+# pip install "lightsuite[gui,registration]"
 
-# Brain pipeline
+# Copy a template and edit paths
+cp examples/brain_lightsheet.yaml my_sample.yaml
+
+# Verify environment (Elastix on PATH, atlas paths, scratch disk)
+uv run lightsuite doctor -c my_sample.yaml
+
+# Brain pipeline (one stage at a time; orchestration CLI planned)
 uv run lightsuite brain preprocess           -c my_sample.yaml
 uv run lightsuite brain check-orientation    -c my_sample.yaml
 uv run lightsuite brain init-registration    -c my_sample.yaml
@@ -30,6 +42,10 @@ uv run lightsuite brain match-points         -c my_sample.yaml
 uv run lightsuite brain register             -c my_sample.yaml
 uv run lightsuite brain export               -c my_sample.yaml --save-volume --write-csv
 ```
+
+Other workflows: [`examples/spinal_cord.yaml`](examples/spinal_cord.yaml) (`lightsuite spinal`),
+multires configs under [`examples/config/multiresolution/`](examples/config/multiresolution/).
+Index: [`examples/README.md`](examples/README.md).
 
 | Stage | Status |
 |-------|--------|
@@ -43,7 +59,7 @@ uv run lightsuite brain export               -c my_sample.yaml --save-volume --w
 - [Brain lightsheet usage](https://lightsuite.readthedocs.io/en/latest/usage_lightsheet_brain/)
 - Example config: [`examples/brain_lightsheet.yaml`](examples/brain_lightsheet.yaml)
 
-**Requirements:** Python 3.11+, [uv](https://docs.astral.sh/uv/), [Elastix 5.1.0](https://github.com/SuperElastix/elastix/releases/tag/5.1.0) on `PATH`, Allen or Perens atlas NIfTIs.
+**Requirements:** Python 3.11+, [Elastix 5.1.0](https://github.com/SuperElastix/elastix/releases/tag/5.1.0) on `PATH`, Allen or Perens atlas NIfTIs. [uv](https://docs.astral.sh/uv/) is recommended for development; `pip install` works for end users.
 
 ![Example bspline registration](./images/example_bspline.PNG)
 

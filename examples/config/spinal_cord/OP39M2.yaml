@@ -10,17 +10,17 @@ sample:
     # Multi-channel Terastitcher (one folder per channel) — same as brain:
     tiff_type: planeperfile
     channels:
-      - /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP94F3/All_Channels/Ch0
-      - /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP94F3/All_Channels/Ch1
+      - /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP39M2/2.5X/output/channel_488/RES(12486x2162x1163)
+      - /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP39M2/2.5X/output/channel_561/RES(12486x2162x1163)
     # auto: detect plane-per-file (Terastitcher) vs channel-per-file (default for single path)
     # planeperfile: one 2D TIFF per Z slice (large datasets)
     # channelperfile: one multi-page TIFF per channel
     # multichannel_single: single stack with interleaved channels (Bioformats layout)
     # skip_corrupt_slices: true  # optional: drop unreadable plane TIFFs
   scratch: /media/gbm/NVME2/lightsuite_scratch
-  save_path: /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP94F3/registered
+  save_path: /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP39M2/2.5X/registered
   # Native microscope voxel size in µm (NOT the registration grid).
-  voxel_um: [1.8, 1.8, 1.8]
+  voxel_um: [2.6, 2.6, 3.0]  
 
 atlas:
   atlas_dir: /home/gbm/ALICe-pipelines/LightSuite/atlas/SC_P56_Atlas_10x10x20_v5_2020
@@ -30,9 +30,10 @@ registration:
   channel_primary: 2
   # Optional: skip GUI and set orientation in YAML instead of cord_orientation.txt
   # longitudinal_direction: caudorostral  # or rostrocaudal
-  control_point_weight: 0.2
+  control_point_weight: 0.5
   straightening_lambda_pos: 5000
   straightening_lambda_ang: 5000
 
 compute:
   workers: 4
+

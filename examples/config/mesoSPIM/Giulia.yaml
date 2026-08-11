@@ -1,7 +1,5 @@
-# Example brain lightsheet config (Approach 1 — desktop monolith).
-# Copy and edit paths for your sample before running:
+# Developer sample — machine-specific paths. Template: examples/brain_lightsheet.yaml
 #   uv run lightsuite doctor -c examples/brain_lightsheet.yaml
-#   uv run lightsuite brain validate-config -c examples/brain_lightsheet.yaml
 
 sample:
   name: Giulia

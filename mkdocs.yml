@@ -1,3 +1,9 @@
+validation:
+  links:
+    not_found: ignore
+    unrecognized_links: ignore
+    anchors: ignore
+
 site_name: LightSuite
 site_description: Python pipeline for mouse lightsheet brain atlas registration
 site_url: https://lightsuite.readthedocs.io/

@@ -5,6 +5,29 @@ description = "Python pipeline for mouse lightsheet and histology atlas registra
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
 license = { text = "GPL-3.0-or-later" }
+authors = [
+    { name = "Dimos Karamanlis" },
+]
+keywords = [
+    "lightsheet",
+    "microscopy",
+    "atlas-registration",
+    "neuroscience",
+    "elastix",
+    "brain",
+    "spinal-cord",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Image Processing",
+    "Topic :: Scientific/Engineering :: Medical Science Apps.",
+]
 dependencies = [
     "numpy>=1.26",
     "scipy>=1.11",
@@ -24,6 +47,12 @@ dependencies = [
     "open3d>=0.18",
     "openpyxl>=3.1.5",
 ]
+
+[project.urls]
+Documentation = "https://lightsuite.readthedocs.io/"
+Repository = "https://github.com/dimokaramanlis/LightSuite"
+Issues = "https://github.com/dimokaramanlis/LightSuite/issues"
+Changelog = "https://github.com/dimokaramanlis/LightSuite/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 formats = [
@@ -46,7 +75,7 @@ build-backend = "hatchling.build"
 packages = ["src/lightsuite"]
 
 [tool.hatch.build.targets.sdist]
-only-include = ["src/lightsuite", "examples", "tests"]
+only-include = ["src/lightsuite", "examples", "tests", "CHANGELOG.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
