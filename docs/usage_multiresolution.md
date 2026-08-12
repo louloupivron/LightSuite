@@ -46,7 +46,7 @@ Supported input layouts today:
 
 The pipeline streams planes from disk. Full overview and ROI stacks are **not** loaded into RAM at once.
 
-Orchestrate automated steps with `lightsuite multires run -c my.yaml` (see `lightsuite multires stages` for checkpoint status).
+Orchestrate automated steps with `lightsuite multires run -c my.yaml` (see `lightsuite multires stages` for checkpoint status). Interactive stages (inspect-geometry, match-points, inspect-registration) also appear in the unified GUI: `lightsuite gui -c my.yaml`.
 
 ---
 
@@ -494,7 +494,7 @@ import:
 
 ```bash
 uv run lightsuite brain import-annotations -c brain.yaml
-uv run lightsuite brain inspect-imports    -c brain.yaml --space sample
+uv run lightsuite brain view-registration    -c brain.yaml
 ```
 
 Requires `transformix` on `PATH`.

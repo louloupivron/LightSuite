@@ -14,7 +14,26 @@ def require_napari() -> Any:
     except ImportError as exc:
         msg = "Napari GUI requires: uv sync --extra gui"
         raise RuntimeError(msg) from exc
+    _validate_pint_install()
     return napari
+
+
+def _validate_pint_install() -> None:
+    """Napari layer scales need pint unit definitions shipped with the wheel."""
+    try:
+        import pint
+    except ImportError:
+        return
+    from pathlib import Path
+
+    definitions = Path(pint.__file__).resolve().parent / "default_en.txt"
+    if definitions.is_file():
+        return
+    msg = (
+        "The pint package in this environment is incomplete (missing default_en.txt). "
+        "Repair with: uv sync --extra gui --reinstall-package pint"
+    )
+    raise RuntimeError(msg)
 
 
 def require_magicgui() -> Any:
@@ -68,6 +87,40 @@ def remove_dock_widget(viewer: Any, widget: Any, *, dock_handle: Any = None) -> 
             return
 
 
+def clear_viewer_layers_safely(viewer: Any) -> None:
+    """Remove napari layers without tripping vispy Text draw races on teardown."""
+    layers = list(getattr(viewer, "layers", ()))
+    for layer in layers:
+        text = getattr(layer, "text", None)
+        if text is not None:
+            try:
+                text.visible = False
+            except (AttributeError, RuntimeError, TypeError, ValueError):
+                pass
+        try:
+            layer.visible = False
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            pass
+    try:
+        viewer.layers.clear()
+    except (AttributeError, RuntimeError, TypeError, ValueError):
+        for layer in layers:
+            try:
+                viewer.layers.remove(layer)
+            except (LookupError, AttributeError, RuntimeError, TypeError, ValueError):
+                pass
+
+
+def defer_clear_viewer_layers(viewer: Any) -> None:
+    """Defer layer removal to the next Qt event-loop tick."""
+    try:
+        from qtpy.QtCore import QTimer
+    except ImportError:
+        clear_viewer_layers_safely(viewer)
+        return
+    QTimer.singleShot(0, lambda: clear_viewer_layers_safely(viewer))
+
+
 def close_stage_or_viewer(viewer: Any, *, refresh: bool = True) -> None:
     """Close a standalone stage viewer, or detach the stage inside the unified shell."""
     window = getattr(viewer, "window", None)
@@ -100,6 +153,7 @@ class DockStageController:
     _dock_handles: list[Any] = field(default_factory=list, repr=False)
     _refresh_fn: Callable[[], None] | None = None
     _teardown_fn: Callable[[], None] | None = None
+    open_log_message: str | None = None
     result: Any = None
 
     def mount(self, viewer: Any) -> None:

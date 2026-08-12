@@ -31,7 +31,7 @@ You will need:
 | 6 | `lightsuite brain register` | Automated | `multiobjRegistration.m` |
 | 7 | `lightsuite brain export` | Automated | `generateRegisteredBrainVolumes.m` |
 | 8 | `lightsuite brain import-annotations` | Automated | `transformPointsToAtlas.m` |
-| 9 | `lightsuite brain inspect-imports` | **Manual (GUI)** | *(Napari — atlas- or sample-space import QC)* |
+| 9 | `lightsuite brain view-registration` | **Manual (GUI)** | *(Napari — registration review, divisions, import previews)* |
 
 Built-in cell detection is **not implemented in Python**; set `detection.enabled: false` and use `import-annotations` with external `points.csv` / `mask.tif` exports (see [Annotation import](annotation_import.md)). For other MATLAB-only features, see [Python vs MATLAB](python_vs_matlab.md).
 
@@ -414,11 +414,11 @@ uv run lightsuite brain match-points -c $CONFIG
 uv run lightsuite brain register -c $CONFIG
 uv run lightsuite brain export -c $CONFIG --save-volume --write-csv
 uv run lightsuite brain import-annotations -c $CONFIG
-uv run lightsuite brain inspect-imports -c $CONFIG
-uv run lightsuite brain inspect-imports -c $CONFIG --space sample
+uv run lightsuite brain view-registration -c $CONFIG
+uv run lightsuite brain view-registration -c $CONFIG --space atlas
 ```
 
-`inspect-imports` defaults to **atlas** space (Perens/Allen export grid). Use `--space sample` to overlay imported points/masks on the **20 µm registration grid** (`chan_*_sample_register_*um.tif` from preprocess). Warped atlas **template** and **annotation** labels are shown when present under `volume_registered/sample_space/` — run `lightsuite brain export --space sample` first (or set `export.spaces: [sample]`).
+`view-registration` defaults to **sample** space (20 µm registration grid). Use `--space atlas` for the Perens/Allen export grid. The viewer shows registered channels, fine **annotation labels**, division checkboxes (all divisions on by default), imported points/masks, and **resampled ROI previews** from `import.annotations` before `import-annotations` runs. When a `multires:` block links a completed multires registration, registered **ROI intensity** channels are also shown on the 20 µm grid (no segmentation required). Atlas-space channels are warped on the fly when export TIFFs are missing. Warped atlas **template** and **annotation** labels load from `volume_registered/sample_space/` when present — run `lightsuite brain export --space sample` first (or set `export.spaces: [sample]`).
 
 Atlas-space Napari QC applies the same canonical coronal orientation used in registration plots (Perens coronal is no longer upside-down vs Allen). Annotation volumes render as **label** layers rather than float images so CCF structure ids are fully visible.
 

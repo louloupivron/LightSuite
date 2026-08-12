@@ -2,10 +2,31 @@
 
 from __future__ import annotations
 
+import logging
+from contextlib import contextmanager
+from pathlib import Path
+
 import numpy as np
 import tifffile
-from pathlib import Path
 from skimage.transform import resize
+
+
+@contextmanager
+def _open_tiff_file(path: Path):
+    """Open a TIFF while silencing shaped-series parse noise on legacy canvas files."""
+    log = logging.getLogger("tifffile")
+    previous_level = log.level
+    log.setLevel(logging.CRITICAL)
+    try:
+        with tifffile.TiffFile(path) as tif:
+            yield tif
+    finally:
+        log.setLevel(previous_level)
+
+
+def _all_pages_are_2d(tif: tifffile.TiffFile) -> bool:
+    """True when every IFD is a 2D plane (plane-by-plane overview canvas writer)."""
+    return len(tif.pages) > 1 and all(len(page.shape) == 2 for page in tif.pages)
 
 
 def _stack_tiff_pages(tif: tifffile.TiffFile, path: Path) -> np.ndarray:
@@ -13,6 +34,10 @@ def _stack_tiff_pages(tif: tifffile.TiffFile, path: Path) -> np.ndarray:
     if len(tif.pages) == 0:
         msg = f"No TIFF pages in {path}"
         raise ValueError(msg)
+
+    if _all_pages_are_2d(tif):
+        planes = [np.asarray(page.asarray(), dtype=np.float32) for page in tif.pages]
+        return np.stack(planes, axis=0)
 
     if len(tif.pages) == 1:
         return np.asarray(tif.pages[0].asarray(), dtype=np.float32)
@@ -36,10 +61,33 @@ def _stack_tiff_pages(tif: tifffile.TiffFile, path: Path) -> np.ndarray:
     return np.stack(planes, axis=0)
 
 
+def _tif_is_multipage_2d_stack(tif: tifffile.TiffFile) -> bool:
+    """True when TIFF is one 2D page per Z slice (mesoSPIM canvas writer)."""
+    return _all_pages_are_2d(tif)
+
+
+def load_tiff_volume_zyx(path: Path) -> np.ndarray:
+    """Load a TIFF stack as (Z, Y, X) float32 without shaped-series memmap warnings."""
+    path = path.expanduser()
+    with _open_tiff_file(path) as tif:
+        if _tif_is_multipage_2d_stack(tif):
+            return _stack_tiff_pages(tif, path)
+    log = logging.getLogger("tifffile")
+    previous_level = log.level
+    log.setLevel(logging.CRITICAL)
+    try:
+        return np.asarray(tifffile.memmap(path), dtype=np.float32)
+    except (ValueError, MemoryError, OSError):
+        with _open_tiff_file(path) as tif:
+            return _stack_tiff_pages(tif, path)
+    finally:
+        log.setLevel(previous_level)
+
+
 def load_registration_volume(path: Path) -> np.ndarray:
     """Load a multi-page registration TIFF as (Y, X, Z) float32."""
     path = path.expanduser()
-    with tifffile.TiffFile(path) as tif:
+    with _open_tiff_file(path) as tif:
         stack = _stack_tiff_pages(tif, path)
     if stack.ndim == 2:
         return stack

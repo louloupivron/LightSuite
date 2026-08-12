@@ -40,20 +40,60 @@ def _interpolate_anchor_curve(
     anchors: list[SliceAnchor],
     sample_index: int,
     atlas_axis_size: int,
+    *,
+    confirmed_only: bool = True,
+    allow_extrapolation: bool = True,
 ) -> int | None:
-    confirmed = [anchor for anchor in anchors if anchor.confirmed]
-    if not confirmed:
+    working = [anchor for anchor in anchors if anchor.confirmed] if confirmed_only else list(anchors)
+    if not working:
         return None
-    sample_vals = np.array([anchor.sample_index for anchor in confirmed], dtype=float)
-    atlas_vals = np.array([anchor.atlas_plane for anchor in confirmed], dtype=float)
+    sample_vals = np.array([anchor.sample_index for anchor in working], dtype=float)
+    atlas_vals = np.array([anchor.atlas_plane for anchor in working], dtype=float)
     if sample_vals.size == 1:
+        if not allow_extrapolation and float(sample_index) != sample_vals[0]:
+            return None
         plane = float(atlas_vals[0])
     else:
         order = np.argsort(sample_vals)
         sample_vals = sample_vals[order]
         atlas_vals = atlas_vals[order]
+        if not allow_extrapolation and (
+            float(sample_index) < sample_vals[0] or float(sample_index) > sample_vals[-1]
+        ):
+            return None
         plane = float(np.interp(float(sample_index), sample_vals, atlas_vals))
     return int(np.clip(int(np.round(plane)), 1, atlas_axis_size))
+
+
+def resolve_correspondence_atlas_plane(
+    correspondence: SliceCorrespondence,
+    sample_index: int,
+    cut_axis: int,
+    atlas_axis_size: int,
+) -> int | None:
+    """Atlas plane for match-points from saved align-slices correspondence.
+
+    Interpolates within the confirmed-anchor sample-index range. Outside that
+    range, falls back to the full anchor curve (including auto-estimated
+    unconfirmed anchors) so partial align-slices sessions still cover the volume.
+    """
+    anchors = correspondence.anchors_for_axis(cut_axis)
+    plane = _interpolate_anchor_curve(
+        anchors,
+        sample_index,
+        atlas_axis_size,
+        confirmed_only=True,
+        allow_extrapolation=False,
+    )
+    if plane is not None:
+        return plane
+    return _interpolate_anchor_curve(
+        anchors,
+        sample_index,
+        atlas_axis_size,
+        confirmed_only=False,
+        allow_extrapolation=True,
+    )
 
 
 @dataclass
@@ -165,12 +205,17 @@ class SliceCorrespondence:
         sample_index: int,
         cut_axis: int,
         atlas_axis_size: int,
+        *,
+        confirmed_only: bool = True,
+        allow_extrapolation: bool = True,
     ) -> int | None:
         """Return atlas plane for a sample index along ``cut_axis``; None if no anchors."""
         return _interpolate_anchor_curve(
             self.anchors_for_axis(cut_axis),
             sample_index,
             atlas_axis_size,
+            confirmed_only=confirmed_only,
+            allow_extrapolation=allow_extrapolation,
         )
 
 

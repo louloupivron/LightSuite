@@ -13,6 +13,7 @@ from lightsuite.config.loader import (
     load_multires_config,
     load_spinal_config,
 )
+from lightsuite.config.workflow import is_multires_pipeline_config
 
 config_app = typer.Typer(help="Create and inspect pipeline YAML configs.")
 
@@ -139,7 +140,7 @@ def config_explain(
     """Print a human-readable summary of resolved paths and key settings."""
     path = Path(config).expanduser().resolve()
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    if "multires" in raw:
+    if is_multires_pipeline_config(raw):
         cfg = load_multires_config(path)
         typer.echo(f"Workflow: multires  sample={cfg.sample.name!r}")
         typer.echo(f"  save_path: {cfg.sample.save_path}")

@@ -18,9 +18,7 @@ from lightsuite.analysis.region_stats import (
     parcellation_result_to_tidy,
     write_region_stats_csv,
 )
-from lightsuite.atlas.io import load_atlas_volume
 from lightsuite.atlas.registry import (
-    atlas_display_provider_from_config,
     resolve_brain_atlas_from_config,
     uses_ccf_id_parcellation,
 )
@@ -35,10 +33,6 @@ from lightsuite.export.parcellation import (
 from lightsuite.io.tiff_write import save_registration_volume
 from lightsuite.preprocess.checkpoint import RegOptsCheckpoint
 from lightsuite.registration.brain_register import TransformParamsCheckpoint
-from lightsuite.registration.plots import (
-    boundary_volume_from_annotation,
-    save_registration_stage_previews,
-)
 from lightsuite.registration.volume import load_registration_volume
 
 console = Console()
@@ -146,25 +140,6 @@ def export_registered_brain_volumes(
                 save_registration_volume(registered, out_path)
                 registered_paths[ichan] = out_path
             console.print(f"Channel {ichan}/{n_chans} done in {time.perf_counter() - t0:.1f}s.")
-
-        if save_vol and registered_paths:
-            primary = min(registered_paths)
-            reg_vol = straightvol[:, :, :, primary - 1]
-            av = load_atlas_volume(atlas.annotation_path)
-            if atlas.boundary_path is not None and atlas.boundary_path.is_file():
-                boundary = load_atlas_volume(atlas.boundary_path)
-            else:
-                boundary = boundary_volume_from_annotation(av)
-            hi = float(np.quantile(reg_vol, 0.999))
-            vol_u8 = np.clip(reg_vol / max(hi, 1e-6) * 255.0, 0, 255).astype(np.uint8)
-            save_registration_stage_previews(
-                register_path,
-                config.sample.name,
-                vol_u8,
-                boundary.astype(np.float32),
-                "export_atlas",
-                atlas_provider=atlas_display_provider_from_config(config.atlas),
-            )
     else:
         console.print("[dim]Skipping atlas-space volume warp (export.spaces).[/dim]")
 

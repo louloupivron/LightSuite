@@ -389,6 +389,34 @@ class ImportConfig(BaseModel):
     write_csv: bool = True
 
 
+class BrainMultiresLinkConfig(BaseModel):
+    """Optional link to multires ROI registration for brain view-registration overlays."""
+
+    config: Path | None = Field(
+        default=None,
+        description="Multires YAML config; reads multires_regopts.json from its save_path.",
+    )
+    checkpoint: Path | None = Field(
+        default=None,
+        description="Path to multires_regopts.json (overrides config).",
+    )
+    use_full_overview: bool = Field(
+        default=False,
+        description=(
+            "Discover full-overview registered ROI TIFFs when present. For brain "
+            "view-registration, overlap crops plus crop_start_index are enough and "
+            "much faster to load."
+        ),
+    )
+
+    @field_validator("config", "checkpoint")
+    @classmethod
+    def expand_multires_link_paths(cls, value: Path | None) -> Path | None:
+        if value is None:
+            return None
+        return value.expanduser()
+
+
 class CordTiffLayout(str, Enum):
     """Spinal cord TIFF layout (readSpinalCordSample.m)."""
 
@@ -546,6 +574,7 @@ class BrainPipelineConfig(BaseModel):
     export: ExportConfig = Field(default_factory=ExportConfig)
     analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
     import_config: ImportConfig | None = Field(default=None, alias="import")
+    multires_link: BrainMultiresLinkConfig | None = Field(default=None, alias="multires")
 
     @model_validator(mode="after")
     def perens_atlas_resolution(self) -> BrainPipelineConfig:

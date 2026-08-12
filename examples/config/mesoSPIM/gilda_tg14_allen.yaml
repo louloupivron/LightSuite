@@ -1,0 +1,87 @@
+# Gilda tg14 — brain atlas registration on 1× overview (after multires ROI co-registration)
+#
+# Pair with the multires config:
+#   examples/config/multiresolution/gilda_tg14_multires.yaml
+#
+# Phase 1 — multires (2.5× ROI → 1× overview):
+#   uv run lightsuite multires run -c examples/config/multiresolution/gilda_tg14_multires.yaml --through register
+#   uv run lightsuite multires import-annotations -c examples/config/multiresolution/gilda_tg14_multires.yaml
+#     (after ROI segmentation is available; see import block below)
+#
+# Phase 2 — brain (1× overview → Allen CCF 10 µm):
+#   uv sync --extra registration --extra gui
+#   uv run lightsuite doctor                        -c examples/config/mesoSPIM/gilda_tg14_allen.yaml
+#   uv run lightsuite brain validate-config         -c examples/config/mesoSPIM/gilda_tg14_allen.yaml
+#   uv run lightsuite brain run                     -c examples/config/mesoSPIM/gilda_tg14_allen.yaml --through match-points --resume
+#   uv run lightsuite brain run                     -c examples/config/mesoSPIM/gilda_tg14_allen.yaml --from register --resume --include-optional
+#
+# Channel order (channelperfile, sorted filenames in source.path):
+#   1 = 488 nm autofluorescence
+#   2 = 555 nm Acta2 (large vessels)
+#   3 = 647 nm CD31/Podo (capillaries)
+
+sample:
+  name: tg14
+  source:
+    format: tiff_stack
+    path: /media/gbm/NVME2/ALICe-pipelines-data/Gilda/tg14/no zoom
+    tiff_type: channelperfile
+  scratch: /media/gbm/NVME2/lightsuite_scratch
+  save_path: /media/gbm/NVME2/ALICe-pipelines-data/Gilda/tg14/register_allen
+  voxel_um: [6.55, 6.55, 5.0]
+
+# Registered ROI intensity on the 20 µm grid in view-registration (no segmentation required).
+multires:
+  config: examples/config/multiresolution/gilda_tg14_multires.yaml
+  use_full_overview: false
+
+atlas:
+  provider: allen
+  resolution_um: 10
+  atlas_dir: /home/gbm/ALICe-pipelines/LightSuite/atlas/allen_CCF3_10um
+
+registration:
+  channel_primary: 1
+  channel_secondary: 2
+  dual_channel_mi_weight_autofluor: 0.3
+  dual_channel_mi_weight_signal: 0.7
+  resolution_um: 20
+  bspline_spatial_scale_mm: 0.64
+  control_point_weight: 0.2
+  augment_points: false
+  orientation: [1, -3, 2]
+  bcpd_path: /home/gbm/ALICe-pipelines/LightSuite/softwares/bcpd-master/
+  bspline_bending_weight: 0
+  use_slice_correspondence_affine: false
+  use_slice_correspondence_landmarks: false
+
+detection:
+  enabled: false
+
+compute:
+  use_gpu: false
+  workers: 8
+
+export:
+  spaces: [atlas, sample]
+  save_registered_volume: true
+  save_sample_space_volume: true
+  write_cells_csv: true
+  registered_volume_format: tiff
+  write_pyramid: true
+
+# Uncomment after multires import-annotations (ROI segmentation → 1× overview grid).
+# import:
+#   write_csv: true
+#   annotations:
+#     - format: points_csv
+#       path: /media/gbm/NVME2/ALICe-pipelines-data/Gilda/tg14/multiresolution_results/annotations_in_overview/arivis_cells_in_overview.csv
+#       label: arivis_cells
+#     - format: mask_tiff
+#       path: /media/gbm/NVME2/ALICe-pipelines-data/Gilda/tg14/multiresolution_results/annotations_in_overview/arivis_mask_in_overview.tif
+#       label: arivis_mask
+#
+# analysis:
+#   write_tidy_csv: true
+#   count_points: true
+#   point_labels: [arivis_cells]

@@ -19,7 +19,7 @@ from lightsuite.gui.brain_data import (
     prepare_brain_align_slices_session,
 )
 from lightsuite.gui.match_points_brain import PANEL_GAP_X, _chooselist_slice_label
-from lightsuite.gui.slice_correspondence import VOLUME_AXES
+from lightsuite.gui.slice_correspondence import VOLUME_AXES, SliceAnchor
 from lightsuite.gui.slices import prepare_display_slice, volume_index_to_image
 from lightsuite.gui.stage_controller import (
     DockStageController,
@@ -31,6 +31,29 @@ from lightsuite.gui.stage_controller import (
 console = Console()
 
 _AXIS_NAMES = {1: "Y", 2: "X", 3: "Z"}
+
+
+def resolve_default_atlas_plane(
+    anchors: list[SliceAnchor],
+    slice_idx: int,
+    *,
+    edited_slice_indices: set[int],
+    prefer_previous: bool,
+    estimated_plane: int,
+) -> int:
+    """Choose the atlas plane when opening an anchor slice in align-slices."""
+    anchor = anchors[slice_idx - 1]
+    if anchor.confirmed:
+        return int(anchor.atlas_plane)
+    if slice_idx in edited_slice_indices and anchor.atlas_plane > 0:
+        return int(anchor.atlas_plane)
+    if prefer_previous and slice_idx > 1:
+        previous = anchors[slice_idx - 2]
+        if previous.atlas_plane > 0:
+            return int(previous.atlas_plane)
+    if anchor.atlas_plane > 0:
+        return int(anchor.atlas_plane)
+    return int(estimated_plane)
 
 
 def _align_slices_pair(
@@ -89,6 +112,7 @@ def attach_brain_align_slices(
         "_nav_syncing": False,
         "_view_shape": None,
         "_atlas_plane": None,
+        "_edited_slices": {int(data.axis_order[0]): set()},
     }
 
     def _n_slices() -> int:
@@ -107,17 +131,28 @@ def attach_brain_align_slices(
         row = np.asarray(data.chooselist_for_axis(state["axis"])[state["slice"] - 1], dtype=int)
         return 1, atlas_cut_axis_size(data.atlas_template.shape, row)
 
-    def _default_plane(slice_idx: int) -> int:
+    def _edited_slices_for_axis(axis: int) -> set[int]:
+        edited = state["_edited_slices"]
+        if axis not in edited:
+            edited[axis] = set()
+        return edited[axis]
+
+    def _default_plane(slice_idx: int, *, prefer_previous: bool = False) -> int:
         axis = state["axis"]
-        anchor = _current_anchor(data, axis, slice_idx)
-        if anchor.atlas_plane > 0:
-            return int(anchor.atlas_plane)
         row = np.asarray(data.chooselist_for_axis(axis)[slice_idx - 1], dtype=int)
-        return estimate_atlas_plane_index(
+        estimated = estimate_atlas_plane_index(
             data.sample_volume,
             row,
             data.original_trans,
             data.atlas_template.shape,
+        )
+        anchors = data.correspondence.anchors_for_axis(axis)
+        return resolve_default_atlas_plane(
+            anchors,
+            slice_idx,
+            edited_slice_indices=_edited_slices_for_axis(axis),
+            prefer_previous=prefer_previous,
+            estimated_plane=estimated,
         )
 
     def _current_atlas_plane() -> int:
@@ -130,6 +165,7 @@ def attach_brain_align_slices(
     def _set_atlas_plane(plane: int) -> None:
         plane = int(np.clip(plane, *_atlas_plane_limits()))
         state["_atlas_plane"] = plane
+        _edited_slices_for_axis(state["axis"]).add(int(state["slice"]))
         _sync_anchor_plane(data, state["axis"], state["slice"], plane)
         _refresh()
 
@@ -199,13 +235,16 @@ def attach_brain_align_slices(
         *,
         cut_axis: int | None = None,
         refocus_canvas: bool = False,
+        prefer_previous: bool = False,
     ) -> None:
         if cut_axis is not None:
             state["axis"] = int(cut_axis)
             state["_atlas_plane"] = None
         if slice_index is not None:
             state["slice"] = max(1, min(_n_slices(), int(slice_index)))
-            state["_atlas_plane"] = _default_plane(state["slice"])
+            plane = _default_plane(state["slice"], prefer_previous=prefer_previous)
+            state["_atlas_plane"] = plane
+            _sync_anchor_plane(data, state["axis"], state["slice"], plane)
         if refocus_canvas:
             _refresh()
 
@@ -231,7 +270,7 @@ def attach_brain_align_slices(
             f"sample {anchor.sample_index} ↔ atlas plane {anchor.atlas_plane}"
         )
         if idx < _n_slices():
-            _navigate_to(idx + 1, refocus_canvas=True)
+            _navigate_to(idx + 1, refocus_canvas=True, prefer_previous=True)
         else:
             next_axis = _next_incomplete_axis(axis)
             if next_axis is not None:
@@ -293,7 +332,7 @@ def attach_brain_align_slices(
 
     @magicgui(call_button="Next slice  ▶")
     def next_slice() -> None:
-        _navigate_to(state["slice"] + 1)
+        _navigate_to(state["slice"] + 1, prefer_previous=True)
 
     @magicgui(call_button="Confirm slice (Enter)")
     def confirm_slice() -> None:
@@ -317,7 +356,7 @@ def attach_brain_align_slices(
         _navigate_to(state["slice"] - 1, refocus_canvas=True)
 
     def _next_slice_key(_viewer) -> None:
-        _navigate_to(state["slice"] + 1, refocus_canvas=True)
+        _navigate_to(state["slice"] + 1, refocus_canvas=True, prefer_previous=True)
 
     def _confirm_key(_viewer) -> None:
         _confirm_and_advance()

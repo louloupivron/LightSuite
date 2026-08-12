@@ -89,6 +89,13 @@ def brain_stage_specs(config: BrainPipelineConfig) -> list[StageSpec]:
             manual=True,
         ),
         StageSpec(
+            "align-slices",
+            "Align slices",
+            "slice_correspondence.json",
+            optional=True,
+            manual=True,
+        ),
+        StageSpec(
             "init-registration",
             "Init registration",
             "regopts.json → original_trans",
@@ -97,25 +104,19 @@ def brain_stage_specs(config: BrainPipelineConfig) -> list[StageSpec]:
             "match-points",
             "Match control points",
             "atlas2histology_tform.json",
+            optional=True,
             manual=True,
         ),
         StageSpec("register", "Register", "transform_params.json"),
         StageSpec("export", "Export", "volume_registered/"),
+        StageSpec(
+            "view-registration",
+            "View registration",
+            "registration review (Napari)",
+            optional=True,
+            manual=True,
+        ),
     ]
-    if (
-        config.registration.use_slice_correspondence_affine
-        or config.registration.use_slice_correspondence_landmarks
-    ):
-        stages.insert(
-            2,
-            StageSpec(
-                "align-slices",
-                "Align slices",
-                "slice_correspondence.json",
-                optional=True,
-                manual=True,
-            ),
-        )
     if _has_import_annotations(config):
         stages.append(
             StageSpec(
@@ -160,6 +161,7 @@ def spinal_stage_specs(config: SpinalCordPipelineConfig) -> list[StageSpec]:
                 "match-points",
                 "Match control points",
                 "atlas2histology_tform.json",
+                optional=True,
                 manual=True,
             ),
             StageSpec("register", "Register", "transform_params.json"),
@@ -214,6 +216,13 @@ def multires_stage_specs(config: _Config) -> list[StageSpec]:
         [
             StageSpec("check-geometry", "Check geometry", "geometry/ overlap QA"),
             StageSpec("register", "Register", "multires_regopts.json → transform_paths"),
+            StageSpec(
+                "inspect-registration",
+                "Inspect registration",
+                "registered ROI vs overview (Napari)",
+                optional=True,
+                manual=True,
+            ),
         ]
     )
     if _has_import_annotations(config):
@@ -270,6 +279,12 @@ def _brain_stage_done(stage_id: str, save_path: Path, config: BrainPipelineConfi
             return False, str(vr)
         tiffs = list(vr.glob("*.tif")) + list(vr.glob("*.tiff"))
         return bool(tiffs), f"{len(tiffs)} TIFF(s) in volume_registered/"
+    if stage_id == "view-registration":
+        vr = save_path / "volume_registered"
+        if not vr.is_dir():
+            return False, str(vr)
+        tiffs = list(vr.glob("*.tif")) + list(vr.glob("*.tiff"))
+        return bool(tiffs), "open Napari after export"
     if stage_id == "import-annotations":
         summary = save_path / "volume_registered" / "import_annotations_summary.json"
         if summary.is_file():
@@ -374,6 +389,11 @@ def _multires_stage_done(stage_id: str, save_path: Path, config: Any) -> tuple[b
         if not checkpoint.transform_paths:
             return False, "no transform_paths"
         return True, str(multires_checkpoint_path(save_path))
+    if stage_id == "inspect-registration":
+        if checkpoint is None or not checkpoint.registered_roi_path:
+            return False, "run multires register first"
+        path = Path(checkpoint.registered_roi_path).expanduser()
+        return path.is_file(), str(path)
     if stage_id == "import-annotations":
         out = save_path / "annotations_in_overview"
         if not out.is_dir():
@@ -392,7 +412,13 @@ def evaluate_stage_statuses(
 ) -> list[StageStatus]:
     statuses: list[StageStatus] = []
     for spec in specs:
-        if spec.optional and spec.id in {"align-slices", "match-points", "inspect-geometry"}:
+        if spec.optional and spec.id in {
+            "align-slices",
+            "match-points",
+            "inspect-geometry",
+            "inspect-registration",
+            "view-registration",
+        }:
             done, detail = done_fn(spec.id, save_path, config)
             state = StageState.DONE if done else StageState.OPTIONAL
             statuses.append(StageStatus(spec, state, detail))

@@ -11,19 +11,61 @@ import tifffile
 import yaml
 
 from lightsuite.config.loader import load_config
+from lightsuite.gui.align_slices_brain import resolve_default_atlas_plane
 from lightsuite.gui.brain_data import (
     apply_slice_correspondence_to_session,
     load_brain_match_points_data,
+    merge_slice_correspondence_into_session,
     prepare_brain_align_slices_session,
+    resolve_atlas_plane_index,
+    BrainMatchPointsData,
 )
 from lightsuite.gui.chooselist import (
     default_ap_cut_axis,
     generate_ap_alignment_list,
+    generate_control_point_list,
 )
 from lightsuite.gui.control_points import ControlPointSession
-from lightsuite.gui.slice_correspondence import SliceAnchor, SliceCorrespondence, VOLUME_AXES
+from lightsuite.gui.slice_correspondence import (
+    SliceAnchor,
+    SliceCorrespondence,
+    VOLUME_AXES,
+    resolve_correspondence_atlas_plane,
+)
 from lightsuite.preprocess.brain import preprocess_lightsheet_volume
 from lightsuite.registration.init_brain import initialize_brain_registration
+
+
+def test_resolve_default_atlas_plane_prefers_previous_when_advancing() -> None:
+    anchors = [
+        SliceAnchor(sample_index=10, atlas_plane=80, confirmed=True),
+        SliceAnchor(sample_index=20, atlas_plane=90, confirmed=False),
+        SliceAnchor(sample_index=30, atlas_plane=55, confirmed=False),
+    ]
+    plane = resolve_default_atlas_plane(
+        anchors,
+        3,
+        edited_slice_indices=set(),
+        prefer_previous=True,
+        estimated_plane=55,
+    )
+    assert plane == 90
+
+
+def test_resolve_default_atlas_plane_keeps_edited_anchor() -> None:
+    anchors = [
+        SliceAnchor(sample_index=10, atlas_plane=80, confirmed=False),
+        SliceAnchor(sample_index=20, atlas_plane=90, confirmed=False),
+        SliceAnchor(sample_index=30, atlas_plane=95, confirmed=False),
+    ]
+    plane = resolve_default_atlas_plane(
+        anchors,
+        3,
+        edited_slice_indices={3},
+        prefer_previous=False,
+        estimated_plane=55,
+    )
+    assert plane == 95
 
 
 def test_default_ap_cut_axis_is_longest() -> None:
@@ -83,6 +125,85 @@ def test_multi_axis_correspondence_roundtrip() -> None:
     assert corr.interpolate_atlas_plane(20, 2, 60) == 30
     assert corr.interpolate_atlas_plane(20, 3, 40) == 30
     assert corr.confirmed_axis_count() == 3
+
+
+def test_resolve_correspondence_atlas_plane_avoids_confirmed_extrapolation() -> None:
+    """Partial align-slices (tg14-like): unconfirmed low anchors, confirmed from mid-volume."""
+    anchors = [
+        SliceAnchor(sample_index=20, atlas_plane=49, confirmed=False),
+        SliceAnchor(sample_index=53, atlas_plane=78, confirmed=False),
+        SliceAnchor(sample_index=85, atlas_plane=105, confirmed=False),
+        SliceAnchor(sample_index=248, atlas_plane=255, confirmed=True),
+        SliceAnchor(sample_index=281, atlas_plane=284, confirmed=True),
+    ]
+    corr = SliceCorrespondence.single_axis(1, np.eye(4).tolist(), anchors)
+    low = resolve_correspondence_atlas_plane(corr, 83, 1, 660)
+    assert low is not None
+    assert 95 <= low <= 110
+    mid = resolve_correspondence_atlas_plane(corr, 260, 1, 660)
+    assert mid is not None
+    assert 255 <= mid <= 270
+    assert corr.interpolate_atlas_plane(83, 1, 660, allow_extrapolation=False) is None
+
+
+def test_merge_slice_correspondence_overwrites_stale_axis1_planes() -> None:
+    shape = (100, 120, 80)
+    chooselist = generate_control_point_list(shape)
+    axis1_row = next(i for i, row in enumerate(chooselist) if int(row[1]) == 1)
+
+    align_list = generate_ap_alignment_list(shape, cut_axis=1, n_slices=5)
+    anchors = [
+        SliceAnchor(int(row[0]), 20 + 10 * i, confirmed=True)
+        for i, row in enumerate(align_list)
+    ]
+    corr = SliceCorrespondence.single_axis(1, np.eye(4).tolist(), anchors)
+
+    session = ControlPointSession.empty(np.eye(4), chooselist.shape[0])
+    session.atlas_slice_indices = [99] * chooselist.shape[0]
+
+    merge_slice_correspondence_into_session(session, chooselist, corr, shape)
+
+    sample_index = int(chooselist[axis1_row, 0])
+    expected = resolve_correspondence_atlas_plane(corr, sample_index, 1, shape[0])
+    assert expected is not None
+    assert session.atlas_slice_indices[axis1_row] == expected
+    assert expected != 99
+
+
+def test_resolve_atlas_plane_prefers_correspondence_over_stale_stored() -> None:
+    shape = (100, 120, 80)
+    chooselist = generate_control_point_list(shape)
+    axis1_row = next(i for i, row in enumerate(chooselist) if int(row[1]) == 1)
+
+    align_list = generate_ap_alignment_list(shape, cut_axis=1, n_slices=5)
+    anchors = [
+        SliceAnchor(int(row[0]), 20 + 10 * i, confirmed=True)
+        for i, row in enumerate(align_list)
+    ]
+    corr = SliceCorrespondence.single_axis(1, np.eye(4).tolist(), anchors)
+    session = ControlPointSession.empty(np.eye(4), chooselist.shape[0])
+    session.chooselist = chooselist.tolist()
+    session.atlas_slice_indices = [99] * chooselist.shape[0]
+
+    data = BrainMatchPointsData(
+        sample_volume=np.zeros(shape, dtype=np.float32),
+        atlas_template=np.zeros(shape, dtype=np.float32),
+        atlas_annotation=np.zeros(shape, dtype=np.float32),
+        chooselist=chooselist,
+        session=session,
+        session_path=Path("session.json"),
+        original_trans=np.eye(4),
+        auto_alignment=np.eye(4),
+        permvec=[1, 2, 3],
+        atlas_provider="allen",
+        slice_correspondence=corr,
+    )
+
+    sample_index = int(chooselist[axis1_row, 0])
+    expected = resolve_correspondence_atlas_plane(corr, sample_index, 1, shape[0])
+    plane = resolve_atlas_plane_index(data, axis1_row + 1)
+    assert plane == expected
+    assert plane != 99
 
 
 def test_apply_slice_correspondence_to_session() -> None:

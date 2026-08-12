@@ -102,6 +102,12 @@ def _brain_import_annotations(config: Any, ctx: StageContext) -> Any:
     return run_brain_import_annotations(config)
 
 
+def _brain_view_registration(config: Any, ctx: StageContext) -> Any:
+    from lightsuite.gui.view_registration_brain import run_brain_view_registration
+
+    return run_brain_view_registration(config, space="sample", headless=ctx.headless)
+
+
 def _spinal_check_orientation(config: Any, ctx: StageContext) -> Any:
     from lightsuite.gui.orientation_cord import run_spinal_orientation
 
@@ -190,6 +196,12 @@ def _multires_register(config: Any, ctx: StageContext) -> Any:
     return run_multires_registration(config)
 
 
+def _multires_inspect_registration(config: Any, ctx: StageContext) -> Any:
+    from lightsuite.gui.inspect_registration_multires import run_multires_inspect_registration
+
+    return run_multires_inspect_registration(config, headless=ctx.headless)
+
+
 def _multires_import_annotations(config: Any, ctx: StageContext) -> Any:
     from lightsuite.multires.import_annotations import run_multires_import_annotations
 
@@ -204,6 +216,7 @@ _BRAIN_RUNNERS: dict[str, StageRunner] = {
     "match-points": _brain_match_points,
     "register": _brain_register,
     "export": _brain_export,
+    "view-registration": _brain_view_registration,
     "import-annotations": _brain_import_annotations,
 }
 
@@ -225,6 +238,7 @@ _MULTIRES_RUNNERS: dict[str, StageRunner] = {
     "inspect-geometry": _multires_inspect_geometry,
     "check-geometry": _multires_check_geometry,
     "register": _multires_register,
+    "inspect-registration": _multires_inspect_registration,
     "import-annotations": _multires_import_annotations,
 }
 

@@ -57,6 +57,31 @@ def test_brain_stage_specs_include_slice_stages_by_default(tmp_path: Path) -> No
     assert "refine-auto-points" not in ids
 
 
+def test_brain_stage_specs_include_align_slices_when_correspondence_disabled(
+    tmp_path: Path,
+) -> None:
+    cfg_path = tmp_path / "brain.yaml"
+    _write_brain_config(cfg_path, tmp_path)
+    raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+    raw["registration"]["use_slice_correspondence_affine"] = False
+    raw["registration"]["use_slice_correspondence_landmarks"] = False
+    cfg_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    cfg = load_config(cfg_path)
+    ids = [spec.id for spec in brain_stage_specs(cfg)]
+    align = next(spec for spec in brain_stage_specs(cfg) if spec.id == "align-slices")
+    assert "align-slices" in ids
+    assert align.optional is True
+
+
+def test_brain_match_points_is_optional(tmp_path: Path) -> None:
+    cfg_path = tmp_path / "brain.yaml"
+    _write_brain_config(cfg_path, tmp_path)
+    cfg = load_config(cfg_path)
+    match_points = next(spec for spec in brain_stage_specs(cfg) if spec.id == "match-points")
+    assert match_points.optional is True
+    assert match_points.manual is True
+
+
 def test_brain_preprocess_status_done_with_regopts(tmp_path: Path) -> None:
     cfg_path = tmp_path / "brain.yaml"
     _write_brain_config(cfg_path, tmp_path)

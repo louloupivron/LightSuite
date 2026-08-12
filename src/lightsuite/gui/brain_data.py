@@ -23,6 +23,7 @@ from lightsuite.gui.slice_correspondence import (
     SliceAnchor,
     SliceCorrespondence,
     default_correspondence_path,
+    resolve_correspondence_atlas_plane,
 )
 from lightsuite.gui.slices import (
     match_points_atlas_slice,
@@ -172,6 +173,36 @@ def load_slice_correspondence(save_path: Path) -> SliceCorrespondence | None:
     return SliceCorrespondence.load(path)
 
 
+def merge_slice_correspondence_into_session(
+    session: ControlPointSession,
+    chooselist: np.ndarray,
+    correspondence: SliceCorrespondence,
+    atlas_shape: tuple[int, int, int],
+    *,
+    skip_slices_with_atlas_points: bool = True,
+) -> None:
+    """Apply saved align-slices correspondence to match-points atlas plane indices."""
+    n_slices = int(chooselist.shape[0])
+    if session.atlas_slice_indices is None or len(session.atlas_slice_indices) != n_slices:
+        session.atlas_slice_indices = [0] * n_slices
+    for i, row in enumerate(chooselist):
+        if skip_slices_with_atlas_points and session.atlas_control_points[i]:
+            continue
+        chooserow = np.asarray(row, dtype=int)
+        cut_axis = int(chooserow[1])
+        if not correspondence.has_confirmed_anchors(cut_axis):
+            continue
+        atlas_size = atlas_cut_axis_size(atlas_shape, chooserow)
+        plane = resolve_correspondence_atlas_plane(
+            correspondence,
+            int(chooserow[0]),
+            cut_axis,
+            atlas_size,
+        )
+        if plane is not None:
+            session.atlas_slice_indices[i] = int(plane)
+
+
 def apply_slice_correspondence_to_session(
     session: ControlPointSession,
     chooselist: np.ndarray,
@@ -179,21 +210,13 @@ def apply_slice_correspondence_to_session(
     atlas_shape: tuple[int, int, int],
 ) -> None:
     """Pre-fill atlas_slice_indices from a saved correspondence curve."""
-    n_slices = int(chooselist.shape[0])
-    indices: list[int] = []
-    for row in chooselist:
-        chooserow = np.asarray(row, dtype=int)
-        cut_axis = int(chooserow[1])
-        atlas_size = atlas_cut_axis_size(atlas_shape, chooserow)
-        plane = correspondence.interpolate_atlas_plane(
-            int(chooserow[0]),
-            cut_axis,
-            atlas_size,
-        )
-        if plane is None:
-            plane = 0
-        indices.append(int(plane))
-    session.atlas_slice_indices = indices
+    merge_slice_correspondence_into_session(
+        session,
+        chooselist,
+        correspondence,
+        atlas_shape,
+        skip_slices_with_atlas_points=False,
+    )
 
 
 def _ensure_axis_correspondence(
@@ -296,17 +319,13 @@ def load_brain_match_points_data(config: BrainPipelineConfig) -> BrainMatchPoint
     session.chooselist = chooselist.tolist()
 
     if slice_correspondence is not None and slice_correspondence.has_confirmed_anchors():
-        has_manual_planes = (
-            session.atlas_slice_indices is not None
-            and any(int(v) > 0 for v in session.atlas_slice_indices)
+        merge_slice_correspondence_into_session(
+            session,
+            chooselist,
+            slice_correspondence,
+            tvreg.shape,
+            skip_slices_with_atlas_points=True,
         )
-        if not has_manual_planes:
-            apply_slice_correspondence_to_session(
-                session,
-                chooselist,
-                slice_correspondence,
-                tvreg.shape,
-            )
 
     auto_alignment = np.asarray(session.atlas2histology_tform, dtype=float)
     if np.allclose(auto_alignment, np.eye(4)):
@@ -391,6 +410,20 @@ def resolve_atlas_plane_index(
             )
         )
 
+    cut_axis = int(chooserow[1])
+    if data.slice_correspondence is not None and data.slice_correspondence.has_confirmed_anchors(
+        cut_axis
+    ):
+        atlas_size = atlas_cut_axis_size(data.atlas_template.shape, chooserow)
+        plane = resolve_correspondence_atlas_plane(
+            data.slice_correspondence,
+            int(chooserow[0]),
+            cut_axis,
+            atlas_size,
+        )
+        if plane is not None:
+            return plane
+
     stored = data.session.atlas_slice_indices
     if stored is not None and len(stored) >= slice_idx and int(stored[slice_idx - 1]) > 0:
         return int(
@@ -400,16 +433,6 @@ def resolve_atlas_plane_index(
                 atlas_cut_axis_size(data.atlas_template.shape, chooserow),
             )
         )
-
-    if data.slice_correspondence is not None:
-        atlas_size = atlas_cut_axis_size(data.atlas_template.shape, chooserow)
-        plane = data.slice_correspondence.interpolate_atlas_plane(
-            int(chooserow[0]),
-            int(chooserow[1]),
-            atlas_size,
-        )
-        if plane is not None:
-            return plane
 
     matrix = np.asarray(data.session.atlas2histology_tform, dtype=float)
     return estimate_atlas_plane_index(

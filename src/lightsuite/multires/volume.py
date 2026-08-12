@@ -82,11 +82,9 @@ def _normalize_tiff_array(arr: np.ndarray, path: Path) -> np.ndarray:
 
 
 def _load_tiff_hyperstack(path: Path) -> np.ndarray:
-    path = path.expanduser().resolve()
-    try:
-        return np.asarray(tifffile.memmap(str(path)))
-    except ValueError:
-        return np.asarray(tifffile.imread(str(path)))
+    from lightsuite.registration.volume import load_tiff_volume_zyx
+
+    return np.asarray(load_tiff_volume_zyx(path))
 
 
 _HYPERSTACK_MEMMAP: dict[str, np.ndarray] = {}
@@ -559,10 +557,8 @@ def write_embedded_crop_canvas(
             metadata = None
             if iz == 0:
                 metadata = {
-                    "axes": "ZYX",
                     "spacing": sz,
                     "unit": "um",
-                    "loop": False,
                 }
             tif.write(
                 plane,

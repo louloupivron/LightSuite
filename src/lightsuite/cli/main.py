@@ -390,30 +390,30 @@ def brain_export_matlab_control_points(
     )
 
 
-@brain_app.command("inspect-imports")
-def brain_inspect_imports(
+@brain_app.command("view-registration")
+def brain_view_registration(
     config: str = typer.Option(..., "--config", "-c", help="Pipeline YAML config."),
     space: str = typer.Option(
-        "atlas",
+        "sample",
         "--space",
-        help="Inspect space: atlas (Perens/Allen export grid) or sample (20 µm registration grid).",
+        help="View space: sample (20 µm registration grid) or atlas (Perens/Allen export grid).",
     ),
     headless: bool = typer.Option(
         False,
         "--headless",
-        help="Validate inspect inputs without opening Napari.",
+        help="Validate view inputs without opening Napari.",
     ),
 ) -> None:
-    """Napari QC: registered channels, atlas, and imported points/masks."""
+    """Napari QC: registered channels, atlas overlays, divisions, and import previews."""
     from lightsuite.cli.spaces import parse_view_space_option
     from lightsuite.config.loader import load_config
-    from lightsuite.gui.inspect_brain_imports import run_brain_inspect_imports
+    from lightsuite.gui.view_registration_brain import run_brain_view_registration
 
     cfg = load_config(config)
-    inspect_space = parse_view_space_option(space)
-    paths = run_brain_inspect_imports(
+    view_space = parse_view_space_option(space)
+    paths = run_brain_view_registration(
         cfg,
-        space=inspect_space,  # type: ignore[arg-type]
+        space=view_space,  # type: ignore[arg-type]
         headless=headless,
     )
     if paths.sample_space_dir is not None:

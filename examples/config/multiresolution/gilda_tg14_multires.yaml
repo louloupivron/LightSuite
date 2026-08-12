@@ -10,10 +10,14 @@
 #   uv run lightsuite multires match-points          -c examples/config/multiresolution/gilda_tg14_multires.yaml
 #   uv run lightsuite multires check-geometry        -c examples/config/multiresolution/gilda_tg14_multires.yaml
 #   uv run lightsuite multires register              -c examples/config/multiresolution/gilda_tg14_multires.yaml
+#   uv run lightsuite multires inspect-registration  -c examples/config/multiresolution/gilda_tg14_multires.yaml
+#   uv run lightsuite multires import-annotations    -c examples/config/multiresolution/gilda_tg14_multires.yaml
+#
+# Brain atlas (Allen CCF 10 µm): examples/config/mesoSPIM/gilda_tg14_allen.yaml
 #
 # Pick the co-registration reference channel (488 / 555 / 647) in the GUI shell or
 # inspect-geometry stage, or set multires.registration.reference_channel in this file.
-# Default below uses 647 (capillaries); 555 (Acta2 vessels) is a common alternative.
+# Default below uses 488 (autofluorescence); 555 (Acta2 vessels) is a common alternative.
 
 sample:
   name: tg14
@@ -55,5 +59,5 @@ multires:
     registration_bin: 1
     experiment_name: tg14_488_555_647_hybrid
     elastix_stages: [translation, rigid]
-    write_full_overview_canvas: false
+    write_full_overview_canvas: true
     reference_channel: "488"

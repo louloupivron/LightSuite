@@ -19,7 +19,12 @@ from lightsuite.cli.stages import StageState, StageStatus
 from lightsuite.config.workflow import load_project
 from lightsuite.gui.qt_workers import start_background_task
 from lightsuite.gui.stage_attach import get_stage_attach
-from lightsuite.gui.stage_controller import StageController, require_napari
+from lightsuite.gui.stage_controller import (
+    StageController,
+    clear_viewer_layers_safely,
+    defer_clear_viewer_layers,
+    require_napari,
+)
 from lightsuite.reporter import CallbackReporter, capture_pipeline_output
 
 _STATE_ICONS = {
@@ -29,9 +34,39 @@ _STATE_ICONS = {
     StageState.SKIPPED: "—",
 }
 
+_INTERACTIVE_LOADING_HINTS: dict[str, str] = {
+    "check-orientation": "reading volumes",
+    "align-slices": "reading volumes and slice correspondence",
+    "match-points": "reading volumes and control-point session",
+    "straighten": "reading volumes",
+    "align-longitudinal": "reading volumes and correspondence",
+    "inspect-geometry": "reading multiresolution manifest",
+    "inspect-registration": "reading registered ROI volumes",
+    "view-registration": "reading registered volumes and annotations",
+}
+
+
+def interactive_loading_message(stage_title: str, stage_id: str) -> str:
+    """Log line shown while an interactive stage is opening."""
+    hint = _INTERACTIVE_LOADING_HINTS.get(stage_id)
+    if hint:
+        return f"Loading {stage_title}… ({hint})"
+    return f"Loading {stage_title}…"
+
 
 def _strip_rich_markup(text: str) -> str:
     return re.sub(r"\[/?[^\]]+\]", "", text)
+
+
+def filter_stage_statuses(
+    statuses: list[StageStatus],
+    *,
+    show_optional: bool,
+) -> list[StageStatus]:
+    """Return stage statuses visible in the GUI checklist."""
+    if show_optional:
+        return list(statuses)
+    return [item for item in statuses if not item.stage.optional]
 
 
 @dataclass
@@ -85,8 +120,10 @@ class LightsuiteShell:
         self._QFileDialog = QFileDialog
         self.project: PipelineProject | None = None
         self._statuses: list[StageStatus] = []
+        self._show_optional_stages = True
         self._active_controller: StageController | None = None
         self._active_stage_id: str | None = None
+        self._opening_stage = False
         self._worker = None
 
         self._panel = self._build_panel()
@@ -134,6 +171,11 @@ class LightsuiteShell:
         self._channel_row.setVisible(False)
         layout.addWidget(self._channel_row)
 
+        self._optional_toggle = QPushButton("Hide optional")
+        self._optional_toggle.clicked.connect(self._toggle_optional_stages)
+        self._optional_toggle.setEnabled(False)
+        layout.addWidget(self._optional_toggle)
+
         self._stage_list = QListWidget()
         self._stage_list.itemDoubleClicked.connect(self._on_stage_activated)
         layout.addWidget(self._stage_list, stretch=3)
@@ -154,6 +196,7 @@ class LightsuiteShell:
     def _set_actions_enabled(self, enabled: bool) -> None:
         self._open_button.setEnabled(True)
         self._refresh_button.setEnabled(enabled)
+        self._optional_toggle.setEnabled(enabled)
         self._stage_list.setEnabled(enabled)
         self._action_button.setEnabled(enabled)
         if self._channel_row.isVisible():
@@ -193,7 +236,64 @@ class LightsuiteShell:
         self._action_button.setToolTip("Select a stage from the list")
 
     def _pending_stages(self) -> list[StageStatus]:
-        return [item for item in self._statuses if item.state == StageState.PENDING]
+        visible_ids = {item.stage.id for item in self._visible_statuses()}
+        return [
+            item
+            for item in self._statuses
+            if item.state == StageState.PENDING and item.stage.id in visible_ids
+        ]
+
+    def _visible_statuses(self) -> list[StageStatus]:
+        return filter_stage_statuses(
+            self._statuses,
+            show_optional=self._show_optional_stages,
+        )
+
+    def _status_by_id(self, stage_id: str) -> StageStatus | None:
+        for item in self._statuses:
+            if item.stage.id == stage_id:
+                return item
+        return None
+
+    def _toggle_optional_stages(self) -> None:
+        self._show_optional_stages = not self._show_optional_stages
+        self._update_optional_toggle_label()
+        self._populate_stage_list()
+        self._update_action_button()
+
+    def _update_optional_toggle_label(self) -> None:
+        if self._show_optional_stages:
+            self._optional_toggle.setText("Hide optional")
+            self._optional_toggle.setToolTip("Hide optional pipeline stages in the list")
+        else:
+            self._optional_toggle.setText("Show optional")
+            self._optional_toggle.setToolTip("Show optional pipeline stages in the list")
+
+    def _format_stage_list_label(self, item: StageStatus) -> str:
+        stage = item.stage
+        icon = _STATE_ICONS.get(item.state, "?")
+        label = stage.title
+        if stage.manual:
+            label += " (GUI)"
+        if stage.optional:
+            label += " (optional)"
+        return f"{icon}  {label}"
+
+    def _populate_stage_list(self) -> None:
+        current_id: str | None = None
+        current_item = self._stage_list.currentItem()
+        if current_item is not None:
+            current_id = str(current_item.data(self._Qt.UserRole))
+
+        self._stage_list.clear()
+        for item in self._visible_statuses():
+            stage = item.stage
+            list_item = self._QListWidgetItem(self._format_stage_list_label(item))
+            list_item.setData(self._Qt.UserRole, stage.id)
+            list_item.setToolTip(item.detail or stage.checkpoint_hint)
+            self._stage_list.addItem(list_item)
+            if current_id is not None and stage.id == current_id:
+                self._stage_list.setCurrentItem(list_item)
 
     def _update_channel_selector(self) -> None:
         if self.project is None or self.project.workflow != "multires":
@@ -250,6 +350,28 @@ class LightsuiteShell:
     def log(self, text: str) -> None:
         self._log.append(_strip_rich_markup(text))
 
+    def _flush_ui(self) -> None:
+        """Paint pending log lines before a blocking stage open."""
+        try:
+            from qtpy.QtWidgets import QApplication
+        except ImportError:
+            return
+        app = QApplication.instance()
+        if app is not None:
+            app.processEvents()
+
+    def _is_busy(self) -> bool:
+        return self._worker is not None or self._opening_stage
+
+    def _stage_title(self, stage_id: str) -> str:
+        for item in self._statuses:
+            if item.stage.id == stage_id:
+                return item.stage.title
+        return stage_id
+
+    def _loading_message(self, stage_id: str) -> str:
+        return interactive_loading_message(self._stage_title(stage_id), stage_id)
+
     def load_project(self, config_path: str | Path) -> None:
         """Load a YAML config and populate the stage checklist."""
         try:
@@ -279,29 +401,20 @@ class LightsuiteShell:
         )
         spec = get_workflow(self.project.workflow)
         self._statuses = spec.stage_statuses(self.project.config)
-        self._stage_list.clear()
-        for item in self._statuses:
-            stage = item.stage
-            icon = _STATE_ICONS.get(item.state, "?")
-            label = stage.title
-            if stage.manual:
-                label += " (GUI)"
-            if stage.optional:
-                label += " (optional)"
-            text = f"{icon}  {label}"
-            list_item = self._QListWidgetItem(text)
-            list_item.setData(self._Qt.UserRole, stage.id)
-            list_item.setToolTip(item.detail or stage.checkpoint_hint)
-            self._stage_list.addItem(list_item)
-
+        self._populate_stage_list()
         self._update_action_button()
 
     def _selected_stage(self) -> tuple[str, StageStatus] | None:
-        row = self._stage_list.currentRow()
-        if row < 0 or row >= len(self._statuses):
+        item = self._stage_list.currentItem()
+        if item is None:
             return None
-        status = self._statuses[row]
-        return status.stage.id, status
+        stage_id = item.data(self._Qt.UserRole)
+        if not stage_id:
+            return None
+        status = self._status_by_id(str(stage_id))
+        if status is None:
+            return None
+        return str(stage_id), status
 
     def _stage_context(self) -> StageContext:
         if self.project is None:
@@ -313,56 +426,79 @@ class LightsuiteShell:
             force_preprocess=False,
         )
 
-    def _teardown_active_stage(self) -> None:
+    def _teardown_active_stage(self, *, defer_layer_clear: bool = False) -> None:
         if self._active_controller is not None:
             self._active_controller.teardown(self.viewer)
             self._active_controller = None
         self._active_stage_id = None
-        self.viewer.layers.clear()
+        if defer_layer_clear:
+            defer_clear_viewer_layers(self.viewer)
+        else:
+            clear_viewer_layers_safely(self.viewer)
 
     def finish_interactive_stage(self, *, refresh: bool = True) -> None:
         """Tear down the active GUI stage without closing the shell window."""
         stage_id = self._active_stage_id
-        self._teardown_active_stage()
+        self._teardown_active_stage(defer_layer_clear=True)
         if refresh:
             self.refresh_statuses()
         if stage_id is not None:
             self.log(f"Saved and closed stage: {stage_id}")
 
     def _attach_interactive_stage(self, stage_id: str) -> None:
-        if self.project is None:
+        if self.project is None or self._opening_stage:
             return
         factory = get_stage_attach(self.project.workflow, stage_id)
         if factory is None:
             self.log(f"Stage {stage_id!r} is not interactive.")
             return
         self._teardown_active_stage()
+        self._opening_stage = True
+        self._set_running(True)
+        self.log(self._loading_message(stage_id))
+        self._flush_ui()
+
         ctx = StageContext(
             config_path=self.project.config_path,
             headless=False,
             force_preprocess=False,
         )
-        try:
-            controller = factory(self.viewer, self.project.config, ctx)
-        except (ImportError, RuntimeError) as exc:
-            self.log(f"Failed to open {stage_id}: {exc}")
-            try:
-                from napari.utils.notifications import show_warning
+        config = self.project.config
 
-                show_warning(str(exc))
-            except ImportError:
-                pass
-            return
-        controller.mount(self.viewer)
-        self._active_controller = controller
-        self._active_stage_id = stage_id
-        self.log(f"Opened interactive stage: {stage_id}")
+        def _open_stage() -> None:
+            try:
+                try:
+                    controller = factory(self.viewer, config, ctx)
+                except (ImportError, RuntimeError) as exc:
+                    self.log(f"Failed to open {stage_id}: {exc}")
+                    try:
+                        from napari.utils.notifications import show_warning
+
+                        show_warning(str(exc))
+                    except ImportError:
+                        pass
+                    return
+                controller.mount(self.viewer)
+                self._active_controller = controller
+                self._active_stage_id = stage_id
+                open_log = getattr(controller, "open_log_message", None)
+                if open_log:
+                    self.log(open_log)
+                elif stage_id != "view-registration":
+                    self.log(f"Opened interactive stage: {stage_id}")
+            finally:
+                self._opening_stage = False
+                self._set_running(False)
+
+        from qtpy.QtCore import QTimer
+
+        QTimer.singleShot(0, _open_stage)
 
     def _emit_log(self, text: str) -> None:
         self._log_emitter.message.emit(text)
 
     def _run_auto_stage(self, stage_id: str) -> None:
-        if self.project is None or self._worker is not None:
+        if self.project is None or self._is_busy():
             return
 
         ctx = self._stage_context()
@@ -393,6 +529,8 @@ class LightsuiteShell:
         self._action_button.setEnabled(enabled)
         self._open_button.setEnabled(not running)
         self._refresh_button.setEnabled(enabled)
+        self._optional_toggle.setEnabled(enabled)
+        self._stage_list.setEnabled(enabled)
         if not running:
             self._update_action_button()
 
@@ -436,7 +574,7 @@ class LightsuiteShell:
             self._run_auto_stage(stage_id)
 
     def _on_action(self) -> None:
-        if self.project is None or self._worker is not None:
+        if self.project is None or self._is_busy():
             return
         selected = self._selected_stage()
         if selected is not None:
@@ -450,7 +588,7 @@ class LightsuiteShell:
         self._run_next_pending_stage()
 
     def _run_next_pending_stage(self) -> None:
-        if self.project is None or self._worker is not None:
+        if self.project is None or self._is_busy():
             return
         pending = self._pending_stages()
         if not pending:

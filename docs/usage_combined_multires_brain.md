@@ -68,6 +68,10 @@ Create a brain YAML (copy `examples/brain_lightsheet.yaml`) with:
 
 - `sample.source` pointing at the **overview** stitched volume (same grid as multires overview)
 - `import.annotations` pointing at `annotations_in_overview/` outputs from step 1
+- Optional `multires.config` (or `multires.checkpoint`) on the brain YAML to overlay
+  registered ROI intensity on the **20 µm sample grid** in `view-registration`
+  (no segmentation required — reads `registered_roi_full_overview_path` from
+  `multires_regopts.json`)
 - Atlas provider/resolution matching your project (Perens 20 µm in `marianna_yosi_parity.yaml`)
 
 ```bash

@@ -2474,6 +2474,7 @@ formats = [
 gui = [
     { name = "magicgui" },
     { name = "napari", extra = ["all"] },
+    { name = "pint" },
     { name = "qtpy" },
 ]
 registration = [
@@ -2507,6 +2508,7 @@ requires-dist = [
     { name = "open3d", marker = "extra == 'registration'", specifier = ">=0.18" },
     { name = "openpyxl", specifier = ">=3.1.5" },
     { name = "pandas", specifier = ">=2.0" },
+    { name = "pint", marker = "extra == 'gui'", specifier = ">=0.24" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pydantic-settings", specifier = ">=2.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },

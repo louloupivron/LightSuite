@@ -172,3 +172,12 @@ def test_write_embedded_crop_canvas_plane_by_plane(tmp_path: Path) -> None:
     assert canvas.shape == (5, 6, 7)
     assert canvas[0].sum() == 0
     np.testing.assert_array_equal(canvas[1:3, 2:5, 1:5], crop_arr)
+
+    from lightsuite.gui.brain_multires_link import load_overview_native_volume_yxz
+    from lightsuite.registration.volume import load_tiff_volume_zyx
+
+    np.testing.assert_array_equal(load_tiff_volume_zyx(out), canvas.astype(np.float32))
+    np.testing.assert_array_equal(
+        load_overview_native_volume_yxz(out),
+        np.moveaxis(canvas, 0, -1).astype(np.float32),
+    )

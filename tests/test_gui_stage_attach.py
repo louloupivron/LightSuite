@@ -12,6 +12,7 @@ from lightsuite.config.loader import load_config
 from lightsuite.gui.stage_attach import STAGE_ATTACH, attach_stage, get_stage_attach
 from lightsuite.gui.stage_controller import (
     DockStageController,
+    clear_viewer_layers_safely,
     close_stage_or_viewer,
     mount_dock_widgets,
     remove_dock_widget,
@@ -32,6 +33,10 @@ def test_stage_attach_covers_manual_brain_stages(tmp_path) -> None:
 
 def test_stage_attach_covers_multires_inspect_geometry() -> None:
     assert get_stage_attach("multires", "inspect-geometry") is not None
+
+
+def test_stage_attach_covers_multires_inspect_registration() -> None:
+    assert get_stage_attach("multires", "inspect-registration") is not None
 
 
 def test_multires_stage_specs_include_inspect_geometry(tmp_path) -> None:
@@ -56,6 +61,31 @@ def test_multires_stage_specs_include_inspect_geometry(tmp_path) -> None:
     ids = [spec.id for spec in multires_stage_specs(cfg)]
     assert "inspect-geometry" in ids
     assert ids.index("inspect-geometry") < ids.index("check-geometry")
+    assert "inspect-registration" in ids
+    assert ids.index("register") < ids.index("inspect-registration")
+
+
+def test_multires_manual_stages_have_attach(tmp_path) -> None:
+    from lightsuite.multires.config_models import MultiresPipelineConfig
+
+    manifest = tmp_path / "pair.json"
+    manifest.write_text("{}", encoding="utf-8")
+    raw = {
+        "sample": {
+            "name": "test",
+            "save_path": str(tmp_path / "results"),
+            "scratch": str(tmp_path / "scratch"),
+        },
+        "multires": {
+            "pair_label": "pair1",
+            "pair_manifest": str(manifest),
+        },
+    }
+    (tmp_path / "results").mkdir()
+    cfg = MultiresPipelineConfig.model_validate(raw)
+    manual_ids = {spec.id for spec in multires_stage_specs(cfg) if spec.manual}
+    missing = manual_ids - {stage_id for wf, stage_id in STAGE_ATTACH if wf == "multires"}
+    assert not missing, f"Missing attach functions for: {missing}"
 
 
 def test_get_stage_attach_unknown_returns_none() -> None:
@@ -68,6 +98,19 @@ def test_attach_stage_unknown_raises() -> None:
     ctx = StageContext(config_path="cfg.yaml")
     with pytest.raises(ValueError, match="No attach function"):
         attach_stage("brain", "preprocess", viewer, MagicMock(), ctx)
+
+
+def test_clear_viewer_layers_safely_hides_text_before_clear() -> None:
+    viewer = MagicMock()
+    layer = MagicMock()
+    layer.text = MagicMock()
+    layers = MagicMock()
+    layers.__iter__.return_value = iter([layer])
+    viewer.layers = layers
+    clear_viewer_layers_safely(viewer)
+    assert layer.text.visible is False
+    assert layer.visible is False
+    layers.clear.assert_called_once()
 
 
 def test_dock_stage_controller_mount_calls_refresh() -> None:

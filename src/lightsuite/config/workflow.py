@@ -11,9 +11,17 @@ from lightsuite.config.loader import load_config, load_multires_config, load_spi
 from lightsuite.exceptions import LightsuiteConfigError
 
 
+def is_multires_pipeline_config(raw: dict[str, Any]) -> bool:
+    """True when ``multires`` is a full multires workflow block (not a brain link)."""
+    multires = raw.get("multires")
+    if not isinstance(multires, dict):
+        return False
+    return bool(multires.get("pair_manifest") or multires.get("channels"))
+
+
 def detect_workflow(raw: dict[str, Any]) -> str:
     """Infer workflow name from parsed YAML (brain, spinal, or multires)."""
-    if "multires" in raw:
+    if is_multires_pipeline_config(raw):
         return "multires"
     atlas = raw.get("atlas") or {}
     if isinstance(atlas, dict) and atlas.get("atlas_dir") and "provider" not in atlas:

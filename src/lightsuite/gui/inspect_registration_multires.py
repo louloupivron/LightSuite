@@ -101,12 +101,9 @@ def discover_multires_registration_inspect_paths(
 
 def load_inspect_volume(path: Path) -> np.ndarray:
     """Load a registration TIFF lazily where possible (canvases can be tens of GB)."""
-    import tifffile
+    from lightsuite.registration.volume import load_tiff_volume_zyx
 
-    try:
-        return tifffile.memmap(path)
-    except (ValueError, MemoryError, OSError):
-        return tifffile.imread(path)
+    return load_tiff_volume_zyx(path)
 
 
 def contrast_limits(volume: np.ndarray, *, max_sample: int = 4_000_000) -> tuple[float, float]:

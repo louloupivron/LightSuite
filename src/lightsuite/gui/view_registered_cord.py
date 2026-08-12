@@ -19,9 +19,9 @@ from lightsuite.export.cord_sample_space import (
     load_cord_sample_space_volumes,
 )
 from lightsuite.gui.cord_napari_display import align_sample_space_for_atlas_qc, load_cord_tofliprc
-from lightsuite.gui.inspect_brain_imports import (
-    _contrast_limits,
+from lightsuite.gui.brain_view_data import (
     atlas_points_to_napari_zyx,
+    contrast_limits,
     volume_yxz_to_napari_zyx,
 )
 from lightsuite.gui.stage_controller import DockStageController, run_attached_stage
@@ -41,7 +41,7 @@ def _add_channel_layers(viewer, channels: dict[int, np.ndarray], *, name_suffix:
             colormap=cmap,
             blending="additive" if len(channels) > 1 else "opaque",
             opacity=opacity,
-            contrast_limits=_contrast_limits(vol),
+            contrast_limits=contrast_limits(vol),
         )
 
 
@@ -76,7 +76,7 @@ def attach_spinal_registered_atlas_view(
         colormap="green",
         blending="additive",
         opacity=0.35,
-        contrast_limits=_contrast_limits(template),
+        contrast_limits=contrast_limits(template),
     )
 
     _add_channel_layers(viewer, volumes.registered_channels, name_suffix="registered")
@@ -120,7 +120,7 @@ def attach_spinal_registered_sample_view(
         colormap="green",
         blending="additive",
         opacity=0.35,
-        contrast_limits=_contrast_limits(template),
+        contrast_limits=contrast_limits(template),
     )
 
     _add_channel_layers(viewer, channels, name_suffix="straightened")

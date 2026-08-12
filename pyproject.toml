@@ -60,7 +60,7 @@ formats = [
 ]
 atlas = ["brainglobe-atlasapi>=2.3"]
 viz = ["brainglobe-atlasapi>=2.3", "brainglobe-heatmap", "brainrender>=2.1"]
-gui = ["napari[all]>=0.5", "qtpy", "magicgui"]
+gui = ["napari[all]>=0.5", "pint>=0.24", "qtpy", "magicgui"]
 registration = ["itk-elastix>=0.25", "simpleitk>=2.5", "open3d>=0.18"]
 dev = ["pytest>=8.0", "pytest-regressions>=2.0", "ruff>=0.4", "mypy>=1.8"]
 

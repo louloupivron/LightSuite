@@ -20,7 +20,6 @@ from lightsuite.analysis.region_stats import (
 )
 from lightsuite.atlas.io import load_atlas_volume
 from lightsuite.atlas.registry import (
-    atlas_display_provider_from_config,
     resolve_brain_atlas_from_config,
     uses_ccf_id_parcellation,
 )
@@ -33,10 +32,7 @@ from lightsuite.export.sample_space import transform_atlas_volume_to_sample
 from lightsuite.io.tiff_write import save_registration_volume
 from lightsuite.preprocess.checkpoint import RegOptsCheckpoint
 from lightsuite.registration.brain_register import TransformParamsCheckpoint
-from lightsuite.registration.plots import (
-    boundary_volume_from_annotation,
-    save_registration_stage_previews,
-)
+from lightsuite.registration.plots import boundary_volume_from_annotation
 from lightsuite.registration.volume import (
     load_permuted_registration_volume,
     load_registration_volume,
@@ -228,23 +224,6 @@ def export_brain_sample_space(
             combined = out_dir / "region_stats_sample.csv"
             write_region_stats_csv(combined, concat_tidy(tidy_frames))
 
-    if save_volume and channel_paths:
-        primary = min(channel_paths)
-        vol = load_permuted_registration_volume(
-            channel_paths[primary],
-            transform_params.permute_sample_to_atlas,
-        )
-        hi = float(np.quantile(vol, 0.999))
-        vol_u8 = np.clip(vol / max(hi, 1e-6) * 255.0, 0, 255).astype(np.uint8)
-        save_registration_stage_previews(
-            out_dir,
-            config.sample.name,
-            vol_u8,
-            np.rint(annotation_sample),
-            "export_sample",
-            atlas_provider=atlas_display_provider_from_config(config.atlas),
-        )
-
     console.print(
         f"Sample-space export done in {time.perf_counter() - t0:.1f}s under {out_dir}"
     )
@@ -345,11 +324,11 @@ def load_brain_sample_space_inspect_volumes(
     config: BrainPipelineConfig,
     *,
     paths: BrainSampleSpaceInspectPaths | None = None,
-) -> "BrainImportInspectVolumes":
+) -> "BrainViewVolumes":
     """Load registration-grid channels, warped atlas overlays, and sample imports."""
     from lightsuite.analysis.counts import SAMPLE_POINTS_KEY, load_atlas_points
     from lightsuite.export.brain_export import _load_transform_params
-    from lightsuite.gui.inspect_brain_imports import BrainImportInspectVolumes
+    from lightsuite.gui.brain_view_data import BrainViewVolumes
 
     paths = paths or discover_brain_sample_space_inspect_paths(config)
     save_path = config.sample.save_path.expanduser()
@@ -407,9 +386,12 @@ def load_brain_sample_space_inspect_volumes(
     for label, npz_path in paths.point_npz_paths.items():
         point_layers[label] = load_atlas_points(npz_path, key=SAMPLE_POINTS_KEY)
 
-    return BrainImportInspectVolumes(
+    return BrainViewVolumes(
         template=template,
         annotation=annotation,
+        boundary=None,
+        division_labels=None,
+        division_legend=None,
         registered_channels=registered_channels,
         point_layers=point_layers,
         mask_layers=mask_layers,

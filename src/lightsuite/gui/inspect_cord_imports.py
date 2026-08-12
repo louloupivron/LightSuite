@@ -24,11 +24,11 @@ from lightsuite.export.cord_sample_space import (
     load_cord_sample_space_volumes,
 )
 from lightsuite.gui.cord_napari_display import align_sample_space_for_atlas_qc, load_cord_tofliprc
-from lightsuite.gui.inspect_brain_imports import (
-    _contrast_limits,
-    _label_from_stem,
-    _load_points_csv,
-    _load_points_npz,
+from lightsuite.gui.brain_view_data import (
+    label_from_stem,
+    load_points_csv,
+    load_points_npz,
+    contrast_limits,
     volume_yxz_to_napari_zyx,
 )
 from lightsuite.gui.stage_controller import DockStageController, run_attached_stage
@@ -91,7 +91,7 @@ def _discover_cord_import_inspect_paths_atlas(
 
     point_npz_paths: dict[str, Path] = {}
     for path in sorted(vr.glob("*_atlas_coords.npz")):
-        label = _label_from_stem(path.stem, "_atlas_coords")
+        label = label_from_stem(path.stem, "_atlas_coords")
         point_npz_paths[label] = path.resolve()
 
     if not registered.registered_channels and not point_npz_paths:
@@ -125,7 +125,7 @@ def _discover_cord_import_inspect_paths_sample(
     point_npz_paths: dict[str, Path] = {}
     if vr.is_dir():
         for path in sorted(vr.glob("*_sample_coords.npz")):
-            label = _label_from_stem(path.stem, "_sample_coords")
+            label = label_from_stem(path.stem, "_sample_coords")
             point_npz_paths[label] = path.resolve()
 
     if not sample_paths.channel_paths and not point_npz_paths:
@@ -196,12 +196,12 @@ def _load_cord_import_inspect_volumes_atlas(
 
     point_layers: dict[str, np.ndarray] = {}
     for label, npz_path in paths.point_npz_paths.items():
-        point_layers[label] = _load_points_npz(npz_path)
+        point_layers[label] = load_points_npz(npz_path)
     for path in sorted(paths.volume_registered_dir.glob("*_atlas_coords.csv")):
-        label = _label_from_stem(path.stem, "_atlas_coords")
+        label = label_from_stem(path.stem, "_atlas_coords")
         if label in point_layers:
             continue
-        point_layers[label] = _load_points_csv(path)
+        point_layers[label] = load_points_csv(path)
 
     return CordImportInspectVolumes(
         template=template,
@@ -270,7 +270,7 @@ def attach_cord_inspect_imports(
         colormap="green",
         blending="additive",
         opacity=0.35,
-        contrast_limits=_contrast_limits(volumes.template),
+        contrast_limits=contrast_limits(volumes.template),
     )
 
     _add_channel_layers(viewer, volumes.registered_channels, name_suffix=channel_suffix)

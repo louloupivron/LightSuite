@@ -11,6 +11,20 @@ from typing import Any, TypeVar
 
 T = TypeVar("T")
 
+# Keep worker QObject alive until its QThread finishes (prevents premature GC).
+_ACTIVE_WORKERS: list[Any] = []
+
+
+def wait_background_workers(workers: list[Any], *, timeout_ms: int = 60_000) -> None:
+    """Block until background workers finish (e.g. when tearing down a stage)."""
+    for worker in workers:
+        thread = getattr(worker, "_lightsuite_thread", None)
+        if thread is None:
+            continue
+        if thread.isRunning():
+            thread.quit()
+            thread.wait(timeout_ms)
+
 
 def start_background_task(
     func: Callable[[], T],
@@ -38,9 +52,16 @@ def start_background_task(
     thread = QThread()
     worker = _Worker(func)
     worker.moveToThread(thread)
+    worker._lightsuite_thread = thread
 
     def _finish() -> None:
         thread.quit()
+
+    def _release_worker() -> None:
+        try:
+            _ACTIVE_WORKERS.remove(worker)
+        except ValueError:
+            pass
 
     worker.returned.connect(on_success)
     worker.errored.connect(on_failure)
@@ -48,8 +69,9 @@ def start_background_task(
     worker.errored.connect(_finish)
     thread.finished.connect(worker.deleteLater)
     thread.finished.connect(thread.deleteLater)
+    thread.finished.connect(_release_worker)
 
     thread.started.connect(worker.run)
+    _ACTIVE_WORKERS.append(worker)
     thread.start()
-    worker._lightsuite_thread = thread  # keep thread alive until finished
     return worker

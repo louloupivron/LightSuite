@@ -1,4 +1,4 @@
-"""Tests for brain import Napari inspect path resolution."""
+"""Tests for brain registration review path resolution and loading."""
 
 from __future__ import annotations
 
@@ -9,10 +9,11 @@ import nibabel as nib
 import numpy as np
 import yaml
 
-from lightsuite.gui.inspect_brain_imports import (
+from lightsuite.gui.brain_view_data import (
     atlas_points_to_napari_zyx,
     discover_brain_import_inspect_paths,
     load_brain_import_inspect_volumes,
+    load_resampled_config_annotations,
 )
 from lightsuite.io.tiff_write import save_registration_volume
 from lightsuite.registration.brain_register import TransformParamsCheckpoint
@@ -40,7 +41,7 @@ def _write_transform_params(save_path: Path, *, shape_yxz: tuple[int, int, int])
     checkpoint.save(save_path / "transform_params.json")
 
 
-def test_discover_brain_import_inspect_paths(tmp_path: Path) -> None:
+def test_discover_brain_view_paths_atlas(tmp_path: Path) -> None:
     atlas_dir = tmp_path / "atlas"
     atlas_dir.mkdir()
     shape = (4, 5, 6)
@@ -86,12 +87,13 @@ def test_discover_brain_import_inspect_paths(tmp_path: Path) -> None:
     from lightsuite.config.loader import load_config
 
     cfg = load_config(config_path)
-    paths = discover_brain_import_inspect_paths(cfg)
+    paths = discover_brain_import_inspect_paths(cfg, space="atlas")
     assert paths.registered_channels[1].name == "chan_01_registered_atlas.tif"
     assert "cells" in paths.point_npz_paths
     assert "cells" in paths.mask_paths
 
-    volumes = load_brain_import_inspect_volumes(cfg, paths=paths)
+    volumes = load_brain_import_inspect_volumes(cfg, paths=paths, space="atlas")
+    assert volumes.template is not None
     assert volumes.template.shape == shape
     assert volumes.registered_channels[1].shape == shape
     assert volumes.mask_layers["cells"].shape == shape
@@ -104,8 +106,27 @@ def test_atlas_points_to_napari_zyx() -> None:
     assert napari_pts[0].tolist() == [2.0, 1.0, 0.0]
     assert napari_pts[1].tolist() == [29.0, 19.0, 9.0]
 
+def _write_regopts(save_path: Path, *, shape_yxz: tuple[int, int, int], chan_path: Path) -> None:
+    y, x, z = shape_yxz
+    regopts = {
+        "sample_name": "test",
+        "ny": y,
+        "nx": x,
+        "nz": z,
+        "nchans": 1,
+        "voxel_um": [1.0, 1.0, 1.0],
+        "registres_um": 20,
+        "regvolpath": str(chan_path),
+        "regvolpath_secondary": None,
+        "regvolpaths": {"1": str(chan_path)},
+        "tiff_type": "channelperfile",
+        "channel_primary": 1,
+        "channel_secondary": None,
+    }
+    (save_path / "regopts.json").write_text(json.dumps(regopts), encoding="utf-8")
 
-def test_discover_brain_import_inspect_paths_sample(tmp_path: Path) -> None:
+
+def test_discover_brain_view_paths_sample(tmp_path: Path) -> None:
     save_path = tmp_path / "results"
     vr = save_path / "volume_registered"
     vr.mkdir(parents=True)
@@ -113,7 +134,8 @@ def test_discover_brain_import_inspect_paths_sample(tmp_path: Path) -> None:
     shape = (4, 5, 6)
     chan = np.zeros(shape, dtype=np.uint16)
     chan[1, 2, 3] = 999
-    save_registration_volume(chan, save_path / "chan_1_sample_register_20um.tif")
+    chan_path = save_path / "chan_1_sample_register_20um.tif"
+    save_registration_volume(chan, chan_path)
     mask = np.zeros(shape, dtype=np.uint8)
     mask[1, 2, 3] = 1
     save_registration_volume(mask.astype(np.uint16), vr / "cells_in_sample_20um.tif")
@@ -123,11 +145,7 @@ def test_discover_brain_import_inspect_paths_sample(tmp_path: Path) -> None:
         sampleptcoords=np.array([[10.0, 11.0, 12.0]], dtype=np.float32),
     )
 
-    regopts = {
-        "regvolpaths": {"1": str(save_path / "chan_1_sample_register_20um.tif")},
-        "registres": 20,
-    }
-    (save_path / "regopts.json").write_text(json.dumps(regopts), encoding="utf-8")
+    _write_regopts(save_path, shape_yxz=shape, chan_path=chan_path)
     _write_transform_params(save_path, shape_yxz=shape)
 
     config_path = tmp_path / "brain.yaml"
@@ -178,17 +196,16 @@ def test_sample_space_inspect_permutes_legacy_atlas_volumes(tmp_path: Path) -> N
     perm = [2, 1, 3]
     marker = np.zeros(shape, dtype=np.uint16)
     marker[2, 3, 1] = 999
-    save_registration_volume(marker, save_path / "chan_1_sample_register_20um.tif")
+    chan_path = save_path / "chan_1_sample_register_20um.tif"
+    save_registration_volume(marker, chan_path)
     save_registration_volume(marker, ss / "annotation_in_sample_20um.tif")
 
-    (save_path / "regopts.json").write_text(
-        json.dumps({"regvolpaths": {"1": str(save_path / "chan_1_sample_register_20um.tif")}, "registres": 20}),
-        encoding="utf-8",
-    )
+    _write_regopts(save_path, shape_yxz=shape, chan_path=chan_path)
     _write_transform_params(save_path, shape_yxz=shape)
     tp_path = save_path / "transform_params.json"
     tp = json.loads(tp_path.read_text(encoding="utf-8"))
     tp["permute_sample_to_atlas"] = perm
+    tp["regvolsize"] = list(permute_brain_volume(np.zeros(shape, dtype=np.float32), perm).shape)
     tp_path.write_text(json.dumps(tp), encoding="utf-8")
 
     config_path = tmp_path / "brain.yaml"
@@ -232,19 +249,18 @@ def test_sample_space_inspect_applies_orientation_permute(tmp_path: Path) -> Non
     shape = (6, 5, 4)
     chan = np.zeros(shape, dtype=np.uint16)
     chan[2, 3, 1] = 777
-    save_registration_volume(chan, save_path / "chan_1_sample_register_20um.tif")
+    chan_path = save_path / "chan_1_sample_register_20um.tif"
+    save_registration_volume(chan, chan_path)
 
     permuted_marker = permute_brain_volume(chan.astype(np.float32), [2, 1, 3])
     assert float(permuted_marker[3, 2, 1]) == 777.0
 
-    (save_path / "regopts.json").write_text(
-        json.dumps({"regvolpaths": {"1": str(save_path / "chan_1_sample_register_20um.tif")}, "registres": 20}),
-        encoding="utf-8",
-    )
+    _write_regopts(save_path, shape_yxz=shape, chan_path=chan_path)
     _write_transform_params(save_path, shape_yxz=shape)
     tp_path = save_path / "transform_params.json"
     tp = json.loads(tp_path.read_text(encoding="utf-8"))
     tp["permute_sample_to_atlas"] = [2, 1, 3]
+    tp["regvolsize"] = list(permute_brain_volume(np.zeros(shape, dtype=np.float32), [2, 1, 3]).shape)
     tp_path.write_text(json.dumps(tp), encoding="utf-8")
 
     config_path = tmp_path / "brain.yaml"
@@ -271,3 +287,74 @@ def test_sample_space_inspect_applies_orientation_permute(tmp_path: Path) -> Non
     cfg = load_config(config_path)
     volumes = load_brain_sample_space_inspect_volumes(cfg)
     assert float(volumes.registered_channels[1][3, 2, 1]) == 777.0
+
+
+def test_load_resampled_config_annotations_mask(tmp_path: Path) -> None:
+    save_path = tmp_path / "results"
+    vr = save_path / "volume_registered"
+    vr.mkdir(parents=True)
+    shape = (4, 5, 6)
+    mask_path = tmp_path / "roi_mask.tif"
+    mask = np.zeros(shape, dtype=np.uint8)
+    mask[1, 2, 3] = 1
+    save_registration_volume(mask.astype(np.uint16), mask_path)
+
+    chan_path = save_path / "chan_1_sample_register_20um.tif"
+    save_registration_volume(np.zeros(shape, dtype=np.uint16), chan_path)
+
+    _write_regopts(save_path, shape_yxz=shape, chan_path=chan_path)
+    _write_transform_params(save_path, shape_yxz=shape)
+
+    from lightsuite.import_.sample_reference import write_sample_reference
+
+    write_sample_reference(
+        save_path,
+        sample_name="test",
+        ny=shape[0],
+        nx=shape[1],
+        nz=shape[2],
+        voxel_um=[20.0, 20.0, 20.0],
+    )
+    regopts = json.loads((save_path / "regopts.json").read_text(encoding="utf-8"))
+    regopts["voxel_um"] = [20.0, 20.0, 20.0]
+    (save_path / "regopts.json").write_text(json.dumps(regopts), encoding="utf-8")
+
+    config_path = tmp_path / "brain.yaml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "sample": {
+                    "name": "test",
+                    "source": {"path": str(tmp_path / "data")},
+                    "scratch": str(tmp_path / "scratch"),
+                    "save_path": str(save_path),
+                    "voxel_um": [1.0, 1.0, 1.0],
+                },
+                "atlas": {"provider": "allen", "atlas_dir": str(tmp_path / "atlas")},
+                "import": {
+                    "annotations": [
+                        {
+                            "format": "mask_tiff",
+                            "path": str(mask_path),
+                            "label": "cells",
+                        }
+                    ]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "data").mkdir()
+
+    from lightsuite.config.loader import load_config
+
+    cfg = load_config(config_path)
+    masks, points = load_resampled_config_annotations(
+        cfg,
+        expected_shape=shape,
+        output_dir=vr,
+    )
+    assert "ROI: cells" in masks
+    assert masks["ROI: cells"].shape == shape
+    assert float(masks["ROI: cells"][1, 2, 3]) == 1.0
+    assert not points
