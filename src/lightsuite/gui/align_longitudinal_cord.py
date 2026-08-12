@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from rich.console import Console
@@ -10,8 +11,15 @@ from rich.console import Console
 from lightsuite.config.models import SpinalCordPipelineConfig
 from lightsuite.gui.cord_align_data import (
     align_longitudinal_pair,
+    estimate_cord_atlas_plane,
     load_cord_align_longitudinal_data,
     prepare_cord_align_longitudinal_session,
+)
+from lightsuite.gui.stage_controller import (
+    DockStageController,
+    close_stage_or_viewer,
+    require_magicgui,
+    run_attached_stage,
 )
 from lightsuite.registration.cord_longitudinal import CORD_LONGITUDINAL_AXIS
 
@@ -24,24 +32,15 @@ def _anchor_label(chooselist: np.ndarray, slice_idx: int) -> str:
     return f"sample z={row[0]} / axis {row[1]} cut"
 
 
-def run_spinal_align_longitudinal(
+def attach_spinal_align_longitudinal(
+    viewer: Any,
     config: SpinalCordPipelineConfig,
-    *,
-    headless: bool = False,
-) -> Path:
-    """Launch Napari longitudinal alignment tool; returns correspondence JSON path."""
-    if headless:
-        return prepare_cord_align_longitudinal_session(config)
+) -> DockStageController:
+    """Attach cord longitudinal alignment controls to an existing napari viewer."""
+    from napari.utils.notifications import show_info
+    from qtpy.QtCore import QTimer
 
-    try:
-        import napari
-        from magicgui import magicgui
-        from napari.utils.notifications import show_info
-        from qtpy.QtCore import QTimer
-    except ImportError as exc:
-        msg = "Napari GUI requires: uv sync --extra gui"
-        raise RuntimeError(msg) from exc
-
+    magicgui = require_magicgui()
     data = load_cord_align_longitudinal_data(config)
     state = {
         "slice": 1,
@@ -53,7 +52,6 @@ def run_spinal_align_longitudinal(
     def _n_slices() -> int:
         return int(data.chooselist.shape[0])
 
-    viewer = napari.Viewer(title=f"LightSuite align-longitudinal — {config.sample.name}")
     viewer.dims.ndisplay = 2
     sample_layer = viewer.add_image(np.zeros((10, 10)), name="sample", colormap="gray")
     atlas_layer = viewer.add_image(np.zeros((10, 10)), name="atlas", colormap="gray")
@@ -225,7 +223,7 @@ def run_spinal_align_longitudinal(
         data.correspondence.source = "manual"
         data.correspondence.save(data.correspondence_path)
         show_info(f"Saved {data.correspondence_path}")
-        QTimer.singleShot(0, viewer.close)
+        QTimer.singleShot(0, lambda: close_stage_or_viewer(viewer))
 
     def _previous_slice_key(_viewer) -> None:
         _navigate_to(state["slice"] - 1, refocus_canvas=True)
@@ -271,18 +269,45 @@ def run_spinal_align_longitudinal(
         _atlas_plane_step(step)
         _sync_navigation_widget()
 
-    viewer.window.add_dock_widget(navigation, area="right", name="Navigation")
-    viewer.window.add_dock_widget(previous_slice, area="right", name="Previous anchor")
-    viewer.window.add_dock_widget(next_slice, area="right", name="Next anchor")
-    viewer.window.add_dock_widget(confirm_slice, area="right", name="Confirm")
-    viewer.window.add_dock_widget(save_controls, area="right", name="Save")
-    _refresh()
-    _sync_navigation_widget()
+    def _initial_refresh() -> None:
+        _refresh()
+        _sync_navigation_widget()
 
-    console.print(
-        "[bold]Napari align-longitudinal GUI[/bold] — straightened sample (left), atlas (right). "
-        "Confirm ~20 rostrocaudal anchors: scroll atlas z with PgUp/PgDn or wheel over the atlas "
-        "panel, then [bold]Enter[/bold] or Confirm. Save before running init-registration."
+    return DockStageController(
+        dock_widgets=[
+            (navigation, "Navigation"),
+            (previous_slice, "Previous anchor"),
+            (next_slice, "Next anchor"),
+            (confirm_slice, "Confirm"),
+            (save_controls, "Save"),
+        ],
+        _refresh_fn=_initial_refresh,
+        result=data.correspondence_path,
     )
-    napari.run()
+
+
+def run_spinal_align_longitudinal(
+    config: SpinalCordPipelineConfig,
+    *,
+    headless: bool = False,
+) -> Path:
+    """Launch Napari longitudinal alignment tool; returns correspondence JSON path."""
+    if headless:
+        return prepare_cord_align_longitudinal_session(config)
+
+    title = f"LightSuite align-longitudinal — {config.sample.name}"
+
+    def _attach(viewer: Any) -> DockStageController:
+        return attach_spinal_align_longitudinal(viewer, config)
+
+    run_attached_stage(
+        title,
+        _attach,
+        before_run=lambda: console.print(
+            "[bold]Napari align-longitudinal GUI[/bold] — straightened sample (left), atlas (right). "
+            "Confirm ~20 rostrocaudal anchors: scroll atlas z with PgUp/PgDn or wheel over the atlas "
+            "panel, then [bold]Enter[/bold] or Confirm. Save before running init-registration."
+        ),
+    )
+    data = load_cord_align_longitudinal_data(config)
     return data.correspondence_path

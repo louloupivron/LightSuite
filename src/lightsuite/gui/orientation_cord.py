@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import tifffile
@@ -12,6 +13,12 @@ from skimage.transform import resize
 
 from lightsuite.atlas.fiederling import load_fiederling_atlas_volumes, resize_fiederling_atlas
 from lightsuite.config.models import SpinalCordPipelineConfig
+from lightsuite.gui.stage_controller import (
+    DockStageController,
+    close_stage_or_viewer,
+    require_magicgui,
+    run_attached_stage,
+)
 from lightsuite.io.cord_registration_cache import load_or_cache_cord_registration
 from lightsuite.preprocess.cord_checkpoint import CordRegOptsCheckpoint
 from lightsuite.registration.cord_orientation import (
@@ -120,44 +127,26 @@ def load_cord_orientation_check_data(config: SpinalCordPipelineConfig) -> CordOr
     )
 
 
-def run_spinal_orientation(
+def attach_spinal_orientation(
+    viewer: Any,
     config: SpinalCordPipelineConfig,
     *,
-    headless: bool = False,
-) -> Path:
-    """Open Napari to pick the rostral end; write cord_orientation.txt."""
+    data: CordOrientationData | None = None,
+) -> DockStageController:
+    """Attach cord orientation controls to an existing napari viewer."""
+    from napari.utils.notifications import show_info
+    from qtpy.QtCore import QTimer
+
+    magicgui = require_magicgui()
     save_path = cord_save_path(config)
-    if headless:
-        stored = load_cord_orientation(save_path)
-        if stored is None and config.registration.longitudinal_direction is not None:
-            stored = config.registration.longitudinal_direction
-        direction = stored if stored in _VALID_DIRECTIONS else ROSTROCAUDAL
-        return save_cord_orientation(save_path, direction, source="headless")
-
-    data = load_cord_orientation_check_data(config)
-
-    try:
-        import napari
-        from magicgui import magicgui
-        from napari.utils.notifications import show_info
-        from qtpy.QtCore import QTimer
-    except ImportError as exc:
-        msg = "Napari GUI requires: uv sync --extra gui"
-        raise RuntimeError(msg) from exc
-
-    state = {"direction": data.direction}
+    if data is None:
+        data = load_cord_orientation_check_data(config)
 
     def _sample_projection(direction: str) -> np.ndarray:
         if direction == CAUDOROSTRAL:
             return np.flip(data.sample_longitudinal, axis=0)
         return data.sample_longitudinal
 
-    def _layout_panels() -> None:
-        _h, w = atlas_layer.data.shape
-        atlas_layer.translate = (0.0, 0.0)
-        sample_layer.translate = (0.0, float(w + PANEL_GAP_X))
-
-    viewer = napari.Viewer(title=f"LightSuite cord orientation — {config.sample.name}")
     viewer.dims.ndisplay = 2
     atlas_layer = viewer.add_image(
         data.atlas_longitudinal,
@@ -169,10 +158,14 @@ def run_spinal_orientation(
         name="sample",
         colormap="gray",
     )
-    _layout_panels()
+
+    def _layout_panels() -> None:
+        _h, w = atlas_layer.data.shape
+        atlas_layer.translate = (0.0, 0.0)
+        sample_layer.translate = (0.0, float(w + PANEL_GAP_X))
 
     def _set_direction(direction: str) -> None:
-        state["direction"] = direction
+        data.direction = direction
         sample_layer.data = _sample_projection(direction)
         sample_layer.name = f"sample ({direction}; rostral at top)"
         _layout_panels()
@@ -191,20 +184,49 @@ def run_spinal_orientation(
 
     @magicgui(call_button="Save orientation && close")
     def save_controls() -> None:
-        path = save_cord_orientation(save_path, state["direction"], source="manual")
-        show_info(f"Saved {path} (direction={state['direction']})")
-        QTimer.singleShot(0, viewer.close)
+        path = save_cord_orientation(save_path, data.direction, source="manual")
+        show_info(f"Saved {path} (direction={data.direction})")
+        QTimer.singleShot(0, lambda: close_stage_or_viewer(viewer))
 
-    viewer.window.add_dock_widget(rostrocaudal_button, area="right", name="Rostrocaudal")
-    viewer.window.add_dock_widget(caudorostral_button, area="right", name="Caudorostral")
-    viewer.window.add_dock_widget(save_controls, area="right", name="Save")
-    _set_direction(data.direction)
-
-    console.print(
-        "[bold]Cord orientation[/bold] — atlas template (left) and sample (right) longitudinal "
-        "max projections, aligned side by side. Click Rostrocaudal or Caudorostral to flip the "
-        "sample until rostral anatomy matches the atlas, then Save. "
-        f"Writes cord_orientation.txt in {save_path}."
+    return DockStageController(
+        dock_widgets=[
+            (rostrocaudal_button, "Rostrocaudal"),
+            (caudorostral_button, "Caudorostral"),
+            (save_controls, "Save"),
+        ],
+        _refresh_fn=lambda: _set_direction(data.direction),
+        result=save_path,
     )
-    napari.run()
-    return save_cord_orientation(save_path, state["direction"], source="manual")
+
+
+def run_spinal_orientation(
+    config: SpinalCordPipelineConfig,
+    *,
+    headless: bool = False,
+) -> Path:
+    """Open Napari to pick the rostral end; write cord_orientation.txt."""
+    save_path = cord_save_path(config)
+    if headless:
+        stored = load_cord_orientation(save_path)
+        if stored is None and config.registration.longitudinal_direction is not None:
+            stored = config.registration.longitudinal_direction
+        direction = stored if stored in _VALID_DIRECTIONS else ROSTROCAUDAL
+        return save_cord_orientation(save_path, direction, source="headless")
+
+    data = load_cord_orientation_check_data(config)
+    title = f"LightSuite cord orientation — {config.sample.name}"
+
+    def _attach(viewer: Any) -> DockStageController:
+        return attach_spinal_orientation(viewer, config, data=data)
+
+    run_attached_stage(
+        title,
+        _attach,
+        before_run=lambda: console.print(
+            "[bold]Cord orientation[/bold] — atlas template (left) and sample (right) longitudinal "
+            "max projections, aligned side by side. Click Rostrocaudal or Caudorostral to flip the "
+            "sample until rostral anatomy matches the atlas, then Save. "
+            f"Writes cord_orientation.txt in {save_path}."
+        ),
+    )
+    return save_cord_orientation(save_path, data.direction, source="manual")

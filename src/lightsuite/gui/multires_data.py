@@ -228,6 +228,24 @@ class MultiresMatchPointsData:
         return self.roi.volume_shape_zyx
 
 
+def _initial_z_indices_from_session(
+    session: MultiresLandmarkSession,
+    overview: MultiresSliceSource,
+    roi: MultiresSliceSource,
+    *,
+    fallback_overview_z: int,
+    fallback_roi_z: int,
+) -> tuple[int, int]:
+    """Use the latest annotated Z on each side when resuming a landmark session."""
+    overview_z = fallback_overview_z
+    roi_z = fallback_roi_z
+    if session.overview_points_zyx:
+        overview_z = overview.clip_z(int(round(float(session.overview_points_zyx[-1][0]))))
+    if session.roi_points_zyx:
+        roi_z = roi.clip_z(int(round(float(session.roi_points_zyx[-1][0]))))
+    return overview_z, roi_z
+
+
 def _default_z_indices(
     overview_spec: ManifestVolumeSpec,
     roi_spec: ManifestVolumeSpec,
@@ -370,6 +388,14 @@ def load_multires_match_points_data(
         roi = MultiresSliceSource.from_spec(manifest.roi, manifest_dir=manifest_dir)
         crop_mode = False
         overview_z, roi_z = _default_z_indices(manifest.overview, manifest.roi)
+
+    overview_z, roi_z = _initial_z_indices_from_session(
+        session,
+        overview,
+        roi,
+        fallback_overview_z=overview_z,
+        fallback_roi_z=roi_z,
+    )
 
     return MultiresMatchPointsData(
         overview=overview,

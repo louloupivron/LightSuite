@@ -21,7 +21,10 @@ flowchart LR
 | Step | Config | CLI namespace |
 |------|--------|---------------|
 | 1. Overview ↔ ROI | `examples/config/multiresolution/marianna_multires.yaml` | `lightsuite multires` |
-| 2. Brain atlas | `examples/config/mesoSPIM/marianna_yosi_parity.yaml` | `lightsuite brain` |
+| 2. Brain atlas | `examples/config/mesoSPIM/marianna_perens.yaml` | `lightsuite brain` |
+
+> **MATLAB parity only:** `examples/config/mesoSPIM/marianna_yosi_parity.yaml` uses pre-warped
+> `*_0p8x.*` segmentation files instead of `multires import-annotations` outputs.
 
 ---
 

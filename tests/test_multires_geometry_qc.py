@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import numpy as np
@@ -117,6 +118,48 @@ def test_compute_geometry_qc_slice_matching_geometry(tmp_path: Path) -> None:
     assert good.has_overlap
     assert good.physical_ncc > 0.5
     assert good.physical_ncc >= bad.physical_ncc
+
+
+def test_compute_geometry_qc_slice_unlinked_z_keeps_roi_visible(tmp_path: Path) -> None:
+    overview = tmp_path / "overview.tif"
+    roi = tmp_path / "roi.tif"
+    _write_stack(overview, (5, 16, 16), seed=1)
+    _write_stack(roi, (5, 16, 16), seed=1)
+    _write_meta(meta_path_for_tiff(overview))
+    _write_meta(meta_path_for_tiff(roi))
+
+    cfg = load_multires_config(_write_channels_config(tmp_path, overview, roi))
+    overview_spec, roi_spec, manifest_dir = build_reference_specs_with_geometry(cfg, (-1, 1))
+    linked = compute_geometry_qc_slice(
+        overview_spec,
+        roi_spec,
+        manifest_dir=manifest_dir,
+        lateral_flip=(-1, 1),
+        link_z=True,
+    )
+    unlinked = compute_geometry_qc_slice(
+        overview_spec,
+        roi_spec,
+        manifest_dir=manifest_dir,
+        overview_z=linked.overview_z,
+        roi_z=linked.roi_z + 1,
+        lateral_flip=(-1, 1),
+        link_z=False,
+    )
+    blanked = compute_geometry_qc_slice(
+        overview_spec,
+        roi_spec,
+        manifest_dir=manifest_dir,
+        overview_z=linked.overview_z,
+        roi_z=linked.roi_z + 1,
+        lateral_flip=(-1, 1),
+        link_z=True,
+    )
+
+    assert linked.physical_ncc > 0.5
+    assert unlinked.roi_resampled_display.max() > 0.0
+    assert math.isnan(unlinked.physical_ncc)
+    assert blanked.roi_resampled_display.max() == 0.0
 
 
 def test_run_multires_inspect_geometry_headless(tmp_path: Path) -> None:

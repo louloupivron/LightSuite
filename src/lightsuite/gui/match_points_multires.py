@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from rich.console import Console
@@ -11,21 +12,28 @@ from lightsuite.gui.match_points_shared import (
     PANEL_GAP_X,
     apply_layer_points,
     configure_point_text,
+    configure_z_index_spinbox,
     pair_status,
+    read_spinbox_int,
+    sync_z_index_spinboxes,
 )
-from lightsuite.gui.multires_data import (
-    load_multires_match_points_data,
-    prepare_multires_match_points_session,
+from lightsuite.gui.stage_controller import (
+    DockStageController,
+    close_stage_or_viewer,
+    require_magicgui,
+    run_attached_stage,
 )
 from lightsuite.multires.config_models import MultiresPipelineConfig
+
+if TYPE_CHECKING:
+    from lightsuite.gui.multires_data import MultiresMatchPointsData
 
 console = Console()
 
 _SITK_HINT = "uv sync --extra gui --extra registration"
 
 
-def run_multires_match_points(cfg: MultiresPipelineConfig, *, headless: bool = False) -> Path:
-    """Launch Napari landmark matcher; returns saved session path."""
+def _require_sitk() -> None:
     try:
         import SimpleITK as sitk  # noqa: F401
     except ImportError as exc:
@@ -35,41 +43,37 @@ def run_multires_match_points(cfg: MultiresPipelineConfig, *, headless: bool = F
         )
         raise RuntimeError(msg) from exc
 
-    if headless:
-        return prepare_multires_match_points_session(cfg)
 
-    try:
-        import napari
-        from magicgui import magicgui
-        from magicgui.widgets import Label
-        from napari.utils.notifications import show_info
-        from qtpy.QtCore import QTimer
-    except ImportError as exc:
-        msg = f"Napari GUI requires: {_SITK_HINT}"
-        raise RuntimeError(msg) from exc
+def attach_multires_match_points(
+    viewer: Any,
+    cfg: MultiresPipelineConfig,
+    *,
+    data: MultiresMatchPointsData | None = None,
+) -> DockStageController:
+    """Attach multires landmark-matching controls to an existing napari viewer."""
+    _require_sitk()
+    from lightsuite.gui.multires_data import load_multires_match_points_data
+
+    from magicgui.widgets import Container, Label
+    from napari.utils.notifications import show_info
+    from qtpy.QtCore import QTimer
 
     from lightsuite.multires.landmarks import fit_landmark_transform, update_landmark_session_fit
     from lightsuite.multires.spec_geometry import sitk_geometry_from_spec
 
-    data = load_multires_match_points_data(cfg)
+    magicgui = require_magicgui()
+
+    if data is None:
+        data = load_multires_match_points_data(cfg)
+
     state = {
         "overview_z": data.initial_overview_z,
         "roi_z": data.initial_roi_z,
         "link_z": True if data.crop_mode else False,
         "_nav_syncing": False,
         "_view_shape": None,
-        "_pending_overview_z": None,
-        "_pending_roi_z": None,
     }
 
-    z_nav_timer = QTimer()
-    z_nav_timer.setSingleShot(True)
-    z_nav_timer.setInterval(32)
-
-    mode_label = "hybrid crop" if data.crop_mode else "full volume"
-    viewer = napari.Viewer(
-        title=f"LightSuite multires — {cfg.sample.name} ({mode_label})"
-    )
     viewer.dims.ndisplay = 2
 
     overview_layer = viewer.add_image(np.zeros((10, 10)), name="overview_crop", colormap="gray")
@@ -96,14 +100,6 @@ def run_multires_match_points(cfg: MultiresPipelineConfig, *, headless: bool = F
         value="Total points: 0 matched pairs (0 overview, 0 ROI)",
     )
     fit_summary = Label(label="Fit preview", value="Add landmark pairs to preview the transform.")
-    crop_summary = Label(
-        label="Display",
-        value=(
-            f"Metadata overlap crop (±{data.margin_um:.0f} µm)"
-            if data.crop_mode
-            else "Full volumes (no metadata overlap — fallback)"
-        ),
-    )
 
     def _layout_panels() -> None:
         _h, w = overview_layer.data.shape
@@ -220,13 +216,16 @@ def run_multires_match_points(cfg: MultiresPipelineConfig, *, headless: bool = F
         _on_panel_points_changed("roi")
 
     def _sync_navigation_widget() -> None:
-        state["_nav_syncing"] = True
-        try:
-            navigation.overview_z.value = int(state["overview_z"])
-            navigation.roi_z.value = int(state["roi_z"])
-            navigation.link_z.value = bool(state["link_z"])
-        finally:
-            state["_nav_syncing"] = False
+        keep_focus = sync_z_index_spinboxes(
+            navigation.overview_z,
+            navigation.roi_z,
+            overview_z=int(state["overview_z"]),
+            roi_z=int(state["roi_z"]),
+            link_z=navigation.link_z,
+            link_value=bool(state["link_z"]),
+        )
+        if keep_focus is not None:
+            keep_focus.setFocus()
 
     def _set_z(
         *,
@@ -234,42 +233,26 @@ def run_multires_match_points(cfg: MultiresPipelineConfig, *, headless: bool = F
         roi_z: int | None = None,
         refocus_canvas: bool = False,
     ) -> None:
-        if overview_z is not None:
-            state["overview_z"] = data.overview.clip_z(overview_z)
-        if roi_z is not None:
-            state["roi_z"] = data.roi.clip_z(roi_z)
-        if state["link_z"] and overview_z is not None and roi_z is None:
-            state["roi_z"] = data.roi.z_index_from_physical_z(
-                data.overview.physical_z_um(state["overview_z"])
-            )
-        elif state["link_z"] and roi_z is not None and overview_z is None:
-            state["overview_z"] = data.overview.z_index_from_physical_z(
-                data.roi.physical_z_um(state["roi_z"])
-            )
-        _refresh(fit_preview=False)
-        _sync_navigation_widget()
+        state["_nav_syncing"] = True
+        try:
+            if overview_z is not None:
+                state["overview_z"] = data.overview.clip_z(overview_z)
+            if roi_z is not None:
+                state["roi_z"] = data.roi.clip_z(roi_z)
+            if state["link_z"] and overview_z is not None and roi_z is None:
+                state["roi_z"] = data.roi.z_index_from_physical_z(
+                    data.overview.physical_z_um(state["overview_z"])
+                )
+            elif state["link_z"] and roi_z is not None and overview_z is None:
+                state["overview_z"] = data.overview.z_index_from_physical_z(
+                    data.roi.physical_z_um(state["roi_z"])
+                )
+            _refresh(fit_preview=False)
+            _sync_navigation_widget()
+        finally:
+            state["_nav_syncing"] = False
         if refocus_canvas:
             QTimer.singleShot(0, _refocus_canvas)
-
-    def _schedule_z_from_widget(
-        *,
-        overview_z: int | None = None,
-        roi_z: int | None = None,
-    ) -> None:
-        if overview_z is not None:
-            state["_pending_overview_z"] = int(overview_z)
-        if roi_z is not None:
-            state["_pending_roi_z"] = int(roi_z)
-        z_nav_timer.start()
-
-    @z_nav_timer.timeout.connect
-    def _apply_pending_z_from_widget() -> None:
-        overview_z = state.pop("_pending_overview_z", None)
-        roi_z = state.pop("_pending_roi_z", None)
-        _set_z(
-            overview_z=overview_z,
-            roi_z=roi_z,
-        )
 
     def _refocus_canvas() -> None:
         try:
@@ -308,25 +291,42 @@ def run_multires_match_points(cfg: MultiresPipelineConfig, *, headless: bool = F
         link_z: bool = _init_link,
     ) -> None:
         state["link_z"] = bool(link_z)
-        _set_z(overview_z=overview_z, roi_z=roi_z)
+        oz = read_spinbox_int(navigation.overview_z, fallback=int(state["overview_z"]))
+        rz = read_spinbox_int(navigation.roi_z, fallback=int(state["roi_z"]))
+        if state["link_z"]:
+            _set_z(overview_z=oz)
+        else:
+            _set_z(overview_z=oz, roi_z=rz)
 
-    @navigation.overview_z.changed.connect
-    def _overview_z_changed() -> None:
-        if state["_nav_syncing"]:
-            return
-        _schedule_z_from_widget(overview_z=navigation.overview_z.value)
-
-    @navigation.roi_z.changed.connect
-    def _roi_z_changed() -> None:
-        if state["_nav_syncing"]:
-            return
-        _schedule_z_from_widget(roi_z=navigation.roi_z.value)
+    configure_z_index_spinbox(
+        navigation.overview_z,
+        lambda: _set_z(
+            overview_z=read_spinbox_int(
+                navigation.overview_z,
+                fallback=int(state["overview_z"]),
+            )
+        ),
+        blocked=lambda: state["_nav_syncing"],
+    )
+    configure_z_index_spinbox(
+        navigation.roi_z,
+        lambda: _set_z(
+            roi_z=read_spinbox_int(
+                navigation.roi_z,
+                fallback=int(state["roi_z"]),
+            )
+        ),
+        blocked=lambda: state["_nav_syncing"],
+    )
 
     @navigation.link_z.changed.connect
     def _link_z_changed() -> None:
         if state["_nav_syncing"]:
             return
-        state["link_z"] = bool(navigation.link_z.value)
+        new_link = bool(navigation.link_z.value)
+        if new_link == state["link_z"]:
+            return
+        state["link_z"] = new_link
         if state["link_z"]:
             _set_z(overview_z=state["overview_z"])
 
@@ -359,7 +359,7 @@ def run_multires_match_points(cfg: MultiresPipelineConfig, *, headless: bool = F
             )
         data.session.save(data.session_path)
         show_info(f"Saved {data.session_path}")
-        QTimer.singleShot(0, viewer.close)
+        QTimer.singleShot(0, lambda: close_stage_or_viewer(viewer))
 
     @magicgui(call_button="Clear current-slice points")
     def clear_current_slice() -> None:
@@ -375,6 +375,16 @@ def run_multires_match_points(cfg: MultiresPipelineConfig, *, headless: bool = F
         ]
         _refresh(fit_preview=False)
 
+    @magicgui(call_button="Delete all points")
+    def delete_all_points() -> None:
+        data.session.overview_points_zyx = []
+        data.session.roi_points_zyx = []
+        data.session.roi_to_overview_tform = None
+        data.session.rms_error_um = None
+        data.session.fit_point_errors_um = None
+        _refresh(fit_preview=False)
+        show_info("Cleared all landmark points")
+
     @magicgui(call_button="Delete last point")
     def delete_last_point() -> None:
         n_o = len(data.session.overview_points_zyx)
@@ -389,6 +399,10 @@ def run_multires_match_points(cfg: MultiresPipelineConfig, *, headless: bool = F
         fit_preview = n_overview == n_roi and matched >= data.min_pairs
         _refresh(fit_preview=fit_preview)
 
+    edit_controls = Container(
+        widgets=[clear_current_slice, delete_all_points, delete_last_point],
+    )
+
     def _overview_z_step(delta: int) -> None:
         _set_z(overview_z=state["overview_z"] + delta, refocus_canvas=True)
 
@@ -401,27 +415,56 @@ def run_multires_match_points(cfg: MultiresPipelineConfig, *, headless: bool = F
     viewer.bind_key("PageDown", lambda _v: _roi_z_step(-1), overwrite=True)
     viewer.bind_key("Backspace", lambda _v: delete_last_point(), overwrite=True)
 
-    viewer.window.add_dock_widget(crop_summary, area="right", name="Crop mode")
-    viewer.window.add_dock_widget(points_summary, area="right", name="Point counts")
-    viewer.window.add_dock_widget(fit_summary, area="right", name="Fit preview")
-    viewer.window.add_dock_widget(navigation, area="right", name="Navigation")
-    viewer.window.add_dock_widget(save_controls, area="right", name="Save")
-    viewer.window.add_dock_widget(clear_current_slice, area="right", name="Edit")
-    viewer.window.add_dock_widget(delete_last_point, area="right", name="Undo")
-
     matched, _n_o, _n_r = data.session.point_counts()
-    _refresh(fit_preview=matched >= data.min_pairs)
-    _sync_navigation_widget()
+    fit_preview = matched >= data.min_pairs
 
-    console.print(
-        "[bold]Napari multires landmark GUI[/bold] — "
-        f"{'metadata overlap crop' if data.crop_mode else 'full volumes'} "
-        "(overview left, ROI right). "
-        "Landmarks are stored as full-volume [Z, Y, X] indices. "
-        "After saving, set [bold]geometry_mode: hybrid[/bold] then "
-        "run check-geometry / register. "
-        "Shortcuts: [bold]←[/bold]/[bold]→[/bold] overview Z, "
-        "[bold]PgUp[/bold]/[bold]PgDn[/bold] ROI Z, [bold]Backspace[/bold] undo last point."
+    def _initial_refresh() -> None:
+        _refresh(fit_preview=fit_preview)
+        _sync_navigation_widget()
+
+    return DockStageController(
+        dock_widgets=[
+            (points_summary, "Point counts"),
+            (fit_summary, "Fit preview"),
+            (navigation, "Navigation"),
+            (save_controls, "Save"),
+            (edit_controls, "Edit"),
+        ],
+        _refresh_fn=_initial_refresh,
+        result=data.session_path,
     )
-    napari.run()
-    return data.session_path
+
+
+def run_multires_match_points(cfg: MultiresPipelineConfig, *, headless: bool = False) -> Path:
+    """Launch Napari landmark matcher; returns saved session path."""
+    _require_sitk()
+    from lightsuite.gui.multires_data import (
+        load_multires_match_points_data,
+        prepare_multires_match_points_session,
+    )
+
+    if headless:
+        return prepare_multires_match_points_session(cfg)
+
+    data = load_multires_match_points_data(cfg)
+    mode_label = "hybrid crop" if data.crop_mode else "full volume"
+    title = f"LightSuite multires — {cfg.sample.name} ({mode_label})"
+
+    def _attach(viewer: Any) -> DockStageController:
+        return attach_multires_match_points(viewer, cfg, data=data)
+
+    final = run_attached_stage(
+        title,
+        _attach,
+        before_run=lambda: console.print(
+            "[bold]Napari multires landmark GUI[/bold] — "
+            f"{'metadata overlap crop' if data.crop_mode else 'full volumes'} "
+            "(overview left, ROI right). "
+            "Landmarks are stored as full-volume [Z, Y, X] indices. "
+            "After saving, set [bold]geometry_mode: hybrid[/bold] then "
+            "run check-geometry / register. "
+            "Shortcuts: [bold]←[/bold]/[bold]→[/bold] overview Z, "
+            "[bold]PgUp[/bold]/[bold]PgDn[/bold] ROI Z, [bold]Backspace[/bold] undo last point."
+        ),
+    )
+    return final if final is not None else data.session_path

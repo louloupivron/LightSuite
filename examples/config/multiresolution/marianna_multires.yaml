@@ -10,7 +10,8 @@
 #   uv run lightsuite multires import-annotations   -c examples/config/multiresolution/marianna_multires.yaml
 #
 # See docs/usage_multiresolution.md — mesoSPIM lateral_flip (Marianna needs [-1, -1]).
-# Atlas registration: examples/config/mesoSPIM/marianna_yosi_parity.yaml (Perens, register_Yosi_test_python).
+# Brain atlas (Perens 20 µm): examples/config/mesoSPIM/marianna_perens.yaml
+#   (MATLAB parity only: examples/config/mesoSPIM/marianna_yosi_parity.yaml)
 
 sample:
   name: Marianna

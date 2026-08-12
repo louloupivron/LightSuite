@@ -7,7 +7,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import numpy as np
 
@@ -24,6 +24,7 @@ from lightsuite.atlas.display import (
 from lightsuite.config.models import BrainPipelineConfig
 from lightsuite.export.brain_export import _load_transform_params
 from lightsuite.registration.volume import load_registration_volume
+from lightsuite.gui.stage_controller import DockStageController, run_attached_stage
 
 ViewSpace = Literal["atlas", "sample"]
 
@@ -413,26 +414,19 @@ def _load_brain_import_inspect_volumes_atlas(
     )
 
 
-def run_brain_inspect_imports(
+def attach_brain_inspect_imports(
+    viewer: Any,
     config: BrainPipelineConfig,
     *,
     space: ViewSpace = "atlas",
-    headless: bool = False,
-) -> BrainImportInspectPaths:
-    """Open Napari to QC registered channels and imported annotations."""
-    paths = discover_brain_import_inspect_paths(config, space=space)
-    if headless:
-        load_brain_import_inspect_volumes(config, paths=paths, space=space)
-        return paths
+    paths: BrainImportInspectPaths | None = None,
+    volumes: BrainImportInspectVolumes | None = None,
+) -> DockStageController:
+    """Attach brain import QC layers to an existing napari viewer."""
+    from napari.utils.notifications import show_info
 
-    try:
-        import napari
-        from napari.utils.notifications import show_info
-    except ImportError as exc:
-        msg = "Napari GUI requires: uv sync --extra gui"
-        raise RuntimeError(msg) from exc
-
-    volumes = load_brain_import_inspect_volumes(config, paths=paths, space=space)
+    paths = paths or discover_brain_import_inspect_paths(config, space=space)
+    volumes = volumes or load_brain_import_inspect_volumes(config, paths=paths, space=space)
     atlas_provider = atlas_display_provider_from_config(config.atlas)
     permute_sample_to_atlas: list[int] | None = None
     if space == "sample":
@@ -447,17 +441,13 @@ def run_brain_inspect_imports(
     )
 
     if space == "sample":
-        title = f"LightSuite brain import QC — {config.sample.name} (sample, 20 µm registration grid)"
         template_name = "atlas template (warped)"
         annotation_name = "atlas annotation (warped)"
         channel_suffix = "(sample warped)"
     else:
-        title = f"LightSuite brain import QC — {config.sample.name} (atlas)"
         template_name = "atlas template"
         annotation_name = "atlas annotation"
         channel_suffix = "(sample warped)"
-
-    viewer = napari.Viewer(title=title)
 
     if volumes.template is not None:
         viewer.add_image(
@@ -557,5 +547,36 @@ def run_brain_inspect_imports(
         show_info(f"{channel_info} Summary: {summary_path.name}")
     else:
         show_info(channel_info)
-    napari.run()
+
+    return DockStageController(result=paths)
+
+
+def run_brain_inspect_imports(
+    config: BrainPipelineConfig,
+    *,
+    space: ViewSpace = "atlas",
+    headless: bool = False,
+) -> BrainImportInspectPaths:
+    """Open Napari to QC registered channels and imported annotations."""
+    paths = discover_brain_import_inspect_paths(config, space=space)
+    if headless:
+        load_brain_import_inspect_volumes(config, paths=paths, space=space)
+        return paths
+
+    volumes = load_brain_import_inspect_volumes(config, paths=paths, space=space)
+    if space == "sample":
+        title = f"LightSuite brain import QC — {config.sample.name} (sample, 20 µm registration grid)"
+    else:
+        title = f"LightSuite brain import QC — {config.sample.name} (atlas)"
+
+    def _attach(viewer: Any) -> DockStageController:
+        return attach_brain_inspect_imports(
+            viewer,
+            config,
+            space=space,
+            paths=paths,
+            volumes=volumes,
+        )
+
+    run_attached_stage(title, _attach)
     return paths

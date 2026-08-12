@@ -14,7 +14,11 @@ from lightsuite.mesospim.meta import meta_path_for_tiff, parse_mesospim_meta
 from lightsuite.multires.config_models import MultiresPipelineConfig
 from lightsuite.multires.geometry import resample_to_reference_grid
 from lightsuite.multires.models import ManifestVolumeSpec
-from lightsuite.multires.plots import _normalize_panel, normalized_cross_correlation
+from lightsuite.multires.plots import (
+    _normalize_panel,
+    _resample_to_shape,
+    normalized_cross_correlation,
+)
 from lightsuite.multires.resolve import _merge_mesospim_geometry, resolve_pair_manifest
 from lightsuite.multires.spec_geometry import (
     crop_index_range_from_physical_box,
@@ -81,19 +85,27 @@ def _geometry_for_lateral_flip(
 
 def _reference_volume_paths(
     cfg: MultiresPipelineConfig,
+    *,
+    channel: str | None = None,
 ) -> tuple[Path, Path, Path | None, Path | None]:
     meso = cfg.multires
     if meso.channels:
-        ref = meso.registration.reference_channel
+        ref = channel or meso.registration.reference_channel
         if ref is None:
             msg = "registration.reference_channel is required"
             raise ValueError(msg)
-        channel = meso.channels[ref]
+        if ref not in meso.channels:
+            msg = (
+                f"channel {ref!r} missing from multires.channels "
+                f"(available: {sorted(meso.channels)})"
+            )
+            raise ValueError(msg)
+        channel_paths = meso.channels[ref]
         return (
-            channel.overview,
-            channel.roi,
-            channel.overview_meta_path or meso.overview_meta_path,
-            channel.roi_meta_path,
+            channel_paths.overview,
+            channel_paths.roi,
+            channel_paths.overview_meta_path or meso.overview_meta_path,
+            channel_paths.roi_meta_path,
         )
 
     manifest, _manifest_path = resolve_pair_manifest(cfg, rebuild=False)
@@ -119,9 +131,14 @@ def _reference_volume_paths(
 def build_reference_specs_with_geometry(
     cfg: MultiresPipelineConfig,
     lateral_flip: tuple[int, int],
+    *,
+    channel: str | None = None,
 ) -> tuple[ManifestVolumeSpec, ManifestVolumeSpec, Path]:
     """Rebuild overview / ROI manifest specs for one shared lateral_flip."""
-    overview_path, roi_path, overview_meta_path, roi_meta_path = _reference_volume_paths(cfg)
+    overview_path, roi_path, overview_meta_path, roi_meta_path = _reference_volume_paths(
+        cfg,
+        channel=channel,
+    )
     geometry = _geometry_for_lateral_flip(cfg, lateral_flip)
 
     overview_meta_path = _resolve_overview_meta_path(overview_path, overview_meta_path)
@@ -162,8 +179,14 @@ def compute_geometry_qc_slice(
     overview_z: int | None = None,
     roi_z: int | None = None,
     lateral_flip: tuple[int, int] = (1, -1),
+    link_z: bool = True,
 ) -> GeometryQcSlice:
-    """Load one overlap slice; resample ROI onto overview in physical space."""
+    """Load one overlap slice; resample ROI onto overview in physical space.
+
+    When ``link_z`` is False, each panel shows its native Z slice cropped to the
+    shared XY overlap (2D resize only). Physical NCC is not meaningful in that
+    mode and is returned as NaN.
+    """
     from lightsuite.multires.volume import load_manifest_xyz_crop
 
     try:
@@ -209,12 +232,21 @@ def compute_geometry_qc_slice(
         crop_size_xyz=[roi_size[0], roi_size[1], 1],
         manifest_dir=manifest_dir,
     )
-    resampled = resample_to_reference_grid(roi_mov, overview_ref)
     sl_overview = np.asarray(sitk.GetArrayFromImage(overview_ref)[0], dtype=np.float32)
-    sl_roi = np.asarray(sitk.GetArrayFromImage(resampled)[0], dtype=np.float32)
+    if link_z:
+        resampled = resample_to_reference_grid(roi_mov, overview_ref)
+        sl_roi = np.asarray(sitk.GetArrayFromImage(resampled)[0], dtype=np.float32)
+    else:
+        sl_roi = np.asarray(sitk.GetArrayFromImage(roi_mov)[0], dtype=np.float32)
+        if sl_roi.shape != sl_overview.shape:
+            sl_roi = _resample_to_shape(sl_roi, sl_overview.shape)
     overview_norm = _normalize_panel(sl_overview)
     roi_norm = _normalize_panel(sl_roi)
-    ncc = normalized_cross_correlation(overview_norm, roi_norm)
+    ncc = (
+        normalized_cross_correlation(overview_norm, roi_norm)
+        if link_z
+        else float("nan")
+    )
 
     return GeometryQcSlice(
         overview_display=overview_norm,
@@ -233,6 +265,7 @@ def evaluate_geometry_qc(
     lateral_flip: tuple[int, int] | None = None,
     overview_z: int | None = None,
     roi_z: int | None = None,
+    link_z: bool = True,
 ) -> GeometryQcSlice:
     """Convenience wrapper: rebuild specs from config and score one overlap slice."""
     flip = lateral_flip or lateral_flip_from_config(cfg)
@@ -244,6 +277,7 @@ def evaluate_geometry_qc(
         overview_z=overview_z,
         roi_z=roi_z,
         lateral_flip=flip,
+        link_z=link_z,
     )
 
 

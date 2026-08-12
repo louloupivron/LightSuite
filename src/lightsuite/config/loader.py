@@ -358,3 +358,150 @@ def save_mesospim_lateral_flip_to_multires_config(
     load_multires_config(path)
     return path
 
+
+def _format_yaml_string_list(values: list[str]) -> str:
+    inner = ", ".join(f'"{value}"' for value in values)
+    return f"[{inner}]"
+
+
+def _set_registration_field(
+    lines: list[str],
+    reg_idx: int,
+    reg_end: int,
+    key: str,
+    value: str,
+) -> None:
+    field_re = re.compile(rf"^(\s*){re.escape(key)}:\s*.+$")
+    for index in range(reg_idx + 1, reg_end):
+        match = field_re.match(lines[index].rstrip("\n\r"))
+        if match is None:
+            continue
+        newline = "\n" if lines[index].endswith("\n") else ""
+        lines[index] = f"{match.group(1)}{key}: {value}" + newline
+        return
+    field_indent = _line_indent(lines[reg_idx]) + 2
+    lines.insert(reg_idx + 1, f"{' ' * field_indent}{key}: {value}\n")
+
+
+def _remove_registration_field_block(
+    lines: list[str],
+    reg_idx: int,
+    reg_end: int,
+    key: str,
+) -> int:
+    """Remove a scalar or block-list registration field; return updated reg_end."""
+    key_line_re = re.compile(rf"^(\s*){re.escape(key)}:\s*(.*)$")
+    list_item_re = re.compile(r"^\s+-\s+")
+    index = reg_idx + 1
+    while index < reg_end:
+        match = key_line_re.match(lines[index].rstrip("\n\r"))
+        if match is None:
+            index += 1
+            continue
+        key_indent = len(match.group(1))
+        inline_value = match.group(2).strip()
+        del lines[index]
+        reg_end -= 1
+        if inline_value:
+            return reg_end
+        while index < reg_end:
+            stripped = lines[index].rstrip("\n\r")
+            if stripped == "" or stripped.lstrip().startswith("#"):
+                index += 1
+                continue
+            if list_item_re.match(stripped) and _line_indent(lines[index]) >= key_indent:
+                del lines[index]
+                reg_end -= 1
+                continue
+            break
+        return reg_end
+    return reg_end
+
+
+def _set_registration_string_list_field(
+    lines: list[str],
+    reg_idx: int,
+    reg_end: int,
+    key: str,
+    values: list[str],
+) -> None:
+    reg_end = _remove_registration_field_block(lines, reg_idx, reg_end, key)
+    field_indent = _line_indent(lines[reg_idx]) + 2
+    lines.insert(reg_idx + 1, f"{' ' * field_indent}{key}: {_format_yaml_string_list(values)}\n")
+
+
+def save_reference_channel_to_multires_config(
+    config_path: str | Path,
+    reference_channel: str,
+    *,
+    apply_transform_to: list[str] | None = None,
+) -> Path:
+    """Update ``multires.registration.reference_channel`` and ``apply_transform_to``."""
+    path = Path(config_path).expanduser().resolve()
+    if not path.is_file():
+        msg = f"Config file not found: {path}"
+        raise FileNotFoundError(msg)
+
+    cfg = load_multires_config(path)
+    channels = cfg.multires.channels
+    if not channels:
+        msg = "multires.channels is required to set reference_channel"
+        raise ValueError(msg)
+    if reference_channel not in channels:
+        available = ", ".join(sorted(channels))
+        msg = (
+            f"reference_channel {reference_channel!r} missing from multires.channels "
+            f"(available: {available})"
+        )
+        raise ValueError(msg)
+
+    targets = (
+        apply_transform_to
+        if apply_transform_to is not None
+        else [name for name in sorted(channels) if name != reference_channel]
+    )
+    invalid = [name for name in targets if name not in channels or name == reference_channel]
+    if invalid:
+        msg = f"apply_transform_to contains invalid channels: {invalid}"
+        raise ValueError(msg)
+
+    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    multires_idx = _find_section_line(lines, "multires")
+    if multires_idx is None:
+        msg = f"No multires: section in {path}"
+        raise ValueError(msg)
+
+    multires_end = _section_content_end(lines, multires_idx)
+    child_indent = _line_indent(lines[multires_idx]) + 2
+    reg_idx = _find_child_section(
+        lines,
+        multires_idx + 1,
+        multires_end,
+        "registration",
+        indent=child_indent,
+    )
+    if reg_idx is None:
+        msg = f"No multires.registration section in {path}"
+        raise ValueError(msg)
+
+    reg_end = _section_content_end(lines, reg_idx)
+    _set_registration_field(
+        lines,
+        reg_idx,
+        reg_end,
+        "reference_channel",
+        f'"{reference_channel}"',
+    )
+    reg_end = _section_content_end(lines, reg_idx)
+    _set_registration_string_list_field(
+        lines,
+        reg_idx,
+        reg_end,
+        "apply_transform_to",
+        targets,
+    )
+
+    path.write_text("".join(lines), encoding="utf-8")
+    load_multires_config(path)
+    return path
+

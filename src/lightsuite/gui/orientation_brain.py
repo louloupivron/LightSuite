@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from rich.console import Console
@@ -24,9 +25,16 @@ from lightsuite.registration.orientation import (
     permvec_from_indices,
     validate_permvec,
 )
+from lightsuite.registration.volume import load_registration_volume, resize_atlas_volume
 from skimage.transform import resize
 
-from lightsuite.registration.volume import load_registration_volume, resize_atlas_volume
+from lightsuite.gui.stage_controller import (
+    DockStageController,
+    close_stage_or_viewer,
+    require_magicgui,
+    require_napari,
+    run_attached_stage,
+)
 
 console = Console()
 
@@ -143,31 +151,24 @@ def prepare_orientation_session(config: BrainPipelineConfig, config_path: Path) 
     return save_orientation_to_config(config_path, data.permvec)
 
 
-def run_brain_orientation_check(
+def attach_brain_orientation_check(
+    viewer: Any,
     config: BrainPipelineConfig,
     config_path: Path,
     *,
-    headless: bool = False,
-) -> Path:
-    """Open Napari orientation checker or update config YAML in headless mode."""
-    data = load_orientation_check_data(config)
-    config_path = config_path.expanduser().resolve()
-    if headless:
-        return save_orientation_to_config(config_path, data.permvec)
+    data: OrientationCheckData | None = None,
+) -> DockStageController:
+    """Attach brain orientation controls to an existing napari viewer."""
+    from napari.utils.notifications import show_info
+    from qtpy.QtCore import QTimer
 
-    try:
-        import napari
-        from magicgui import magicgui
-        from napari.utils.notifications import show_info
-        from qtpy.QtCore import QTimer
-    except ImportError as exc:
-        msg = "Napari GUI requires: uv sync --extra gui"
-        raise RuntimeError(msg) from exc
+    magicgui = require_magicgui()
+    if data is None:
+        data = load_orientation_check_data(config)
+    config_path = config_path.expanduser().resolve()
 
     option_labels = [label for _value, label in PERMUTATION_OPTIONS]
     idx0, idx1, idx2 = indices_from_permvec(data.permvec)
-
-    viewer = napari.Viewer(title=f"LightSuite orientation — {config.sample.name}")
 
     atlas_layer = viewer.add_image(
         np.zeros((10, 10, 10), dtype=np.float32),
@@ -231,20 +232,46 @@ def run_brain_orientation_check(
             return
         path = save_orientation_to_config(config_path, data.permvec)
         show_info(f"Saved orientation to {path}")
-        # Defer close so magicgui can re-enable its call button before widgets are destroyed.
-        QTimer.singleShot(0, viewer.close)
+        QTimer.singleShot(0, lambda: close_stage_or_viewer(viewer))
 
-    viewer.window.add_dock_widget(controls, area="right", name="Orientation")
-    viewer.window.add_dock_widget(save_controls, area="right", name="Save")
     controls.atlas_dim_1.value = option_labels[idx0]
     controls.atlas_dim_2.value = option_labels[idx1]
     controls.atlas_dim_3.value = option_labels[idx2]
-    _update_preview(data.permvec)
 
-    console.print(
-        "[bold]Orientation checker[/bold] — atlas on the left, permuted sample on the right. "
-        "Scroll through slices and use Napari's axis-order control (Ctrl+E) to inspect projections. "
-        "Adjust dropdowns and click Update preview."
+    return DockStageController(
+        dock_widgets=[
+            (controls, "Orientation"),
+            (save_controls, "Save"),
+        ],
+        _refresh_fn=lambda: _update_preview(data.permvec),
+        result=config_path,
     )
-    napari.run()
+
+
+def run_brain_orientation_check(
+    config: BrainPipelineConfig,
+    config_path: Path,
+    *,
+    headless: bool = False,
+) -> Path:
+    """Open Napari orientation checker or update config YAML in headless mode."""
+    data = load_orientation_check_data(config)
+    config_path = config_path.expanduser().resolve()
+    if headless:
+        return save_orientation_to_config(config_path, data.permvec)
+
+    title = f"LightSuite orientation — {config.sample.name}"
+
+    def _attach(viewer: Any) -> DockStageController:
+        return attach_brain_orientation_check(viewer, config, config_path, data=data)
+
+    run_attached_stage(
+        title,
+        _attach,
+        before_run=lambda: console.print(
+            "[bold]Orientation checker[/bold] — atlas on the left, permuted sample on the right. "
+            "Scroll through slices and use Napari's axis-order control (Ctrl+E) to inspect projections. "
+            "Adjust dropdowns and click Update preview."
+        ),
+    )
     return config_path

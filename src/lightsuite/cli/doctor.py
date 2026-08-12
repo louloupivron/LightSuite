@@ -317,6 +317,7 @@ def run_doctor(
     config: BrainPipelineConfig | None = None,
     strict: bool = False,
     spinal_config: SpinalCordPipelineConfig | None = None,
+    multires_config: object | None = None,
 ) -> DoctorReport:
     report = DoctorReport()
     report.add(_check_python())
@@ -327,12 +328,23 @@ def run_doctor(
     if spinal_config is not None:
         report.add(_check_fiederling_atlas(spinal_config))
         report.add(_check_spinal_sample_resolution(spinal_config))
+    elif multires_config is not None:
+        pair_label = multires_config.multires.resolved_pair_label(multires_config.sample.name)
+        report.add(
+            CheckResult(
+                "Multires config",
+                True,
+                f"pair_label={pair_label}, save_path={multires_config.sample.save_path}",
+                required=False,
+            )
+        )
     else:
         report.results.extend(_check_brain_atlas(config, strict))
         report.add(_check_spinal_cord_atlas())
 
-    active = config or spinal_config
-    request_gpu = active.compute.use_gpu if active else True
+    active = config or spinal_config or multires_config
+    compute = getattr(active, "compute", None) if active else None
+    request_gpu = compute.use_gpu if compute is not None else True
     report.add(_check_gpu(request_gpu))
 
     scratch = active.sample.scratch if active else None
@@ -352,17 +364,27 @@ def run_doctor(
 def doctor_command(config_path: str | None = None, strict: bool = False) -> None:
     config: BrainPipelineConfig | None = None
     spinal_config: SpinalCordPipelineConfig | None = None
+    multires_config: object | None = None
     if config_path:
-        from lightsuite.config.loader import load_spinal_config
+        from lightsuite.config.loader import load_config, load_multires_config, load_spinal_config
 
         try:
             config = load_config(config_path)
             console.print(f"[bold]Validating brain config:[/bold] {config_path}")
         except Exception:
-            spinal_config = load_spinal_config(config_path)
-            console.print(f"[bold]Validating spinal cord config:[/bold] {config_path}")
+            try:
+                spinal_config = load_spinal_config(config_path)
+                console.print(f"[bold]Validating spinal cord config:[/bold] {config_path}")
+            except Exception:
+                multires_config = load_multires_config(config_path)
+                console.print(f"[bold]Validating multires config:[/bold] {config_path}")
 
-    report = run_doctor(config, strict=strict, spinal_config=spinal_config)
+    report = run_doctor(
+        config,
+        strict=strict,
+        spinal_config=spinal_config,
+        multires_config=multires_config,
+    )
 
     table = Table(title="LightSuite doctor")
     table.add_column("Check")

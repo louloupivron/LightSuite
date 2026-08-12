@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from rich.console import Console
@@ -20,6 +21,12 @@ from lightsuite.gui.brain_data import (
 from lightsuite.gui.match_points_brain import PANEL_GAP_X, _chooselist_slice_label
 from lightsuite.gui.slice_correspondence import VOLUME_AXES
 from lightsuite.gui.slices import prepare_display_slice, volume_index_to_image
+from lightsuite.gui.stage_controller import (
+    DockStageController,
+    close_stage_or_viewer,
+    require_magicgui,
+    run_attached_stage,
+)
 
 console = Console()
 
@@ -62,21 +69,20 @@ def _sync_anchor_plane(data: BrainAlignSlicesData, cut_axis: int, slice_idx: int
     anchor.atlas_plane = int(plane)
 
 
-def run_brain_align_slices(config: BrainPipelineConfig, *, headless: bool = False) -> Path:
-    """Launch napari slice-alignment tool; returns path to slice_correspondence.json."""
-    if headless:
-        return prepare_brain_align_slices_session(config)
+def attach_brain_align_slices(
+    viewer: Any,
+    config: BrainPipelineConfig,
+    *,
+    data: BrainAlignSlicesData | None = None,
+) -> DockStageController:
+    """Attach slice-alignment controls to an existing napari viewer."""
+    from napari.utils.notifications import show_info
+    from qtpy.QtCore import QTimer
 
-    try:
-        import napari
-        from magicgui import magicgui
-        from napari.utils.notifications import show_info
-        from qtpy.QtCore import QTimer
-    except ImportError as exc:
-        msg = "Napari GUI requires: uv sync --extra gui"
-        raise RuntimeError(msg) from exc
+    magicgui = require_magicgui()
+    if data is None:
+        data = load_brain_align_slices_data(config)
 
-    data = load_brain_align_slices_data(config)
     state = {
         "axis": int(data.axis_order[0]),
         "slice": 1,
@@ -88,7 +94,6 @@ def run_brain_align_slices(config: BrainPipelineConfig, *, headless: bool = Fals
     def _n_slices() -> int:
         return int(data.chooselist_for_axis(state["axis"]).shape[0])
 
-    viewer = napari.Viewer(title=f"LightSuite align-slices — {config.sample.name}")
     viewer.dims.ndisplay = 2
     sample_layer = viewer.add_image(np.zeros((10, 10)), name="sample", colormap="gray")
     atlas_layer = viewer.add_image(np.zeros((10, 10)), name="atlas", colormap="gray")
@@ -306,7 +311,7 @@ def run_brain_align_slices(config: BrainPipelineConfig, *, headless: bool = Fals
         data.correspondence.source = "manual"
         data.correspondence.save(data.correspondence_path)
         show_info(f"Saved {data.correspondence_path}")
-        QTimer.singleShot(0, viewer.close)
+        QTimer.singleShot(0, lambda: close_stage_or_viewer(viewer))
 
     def _previous_slice_key(_viewer) -> None:
         _navigate_to(state["slice"] - 1, refocus_canvas=True)
@@ -353,22 +358,45 @@ def run_brain_align_slices(config: BrainPipelineConfig, *, headless: bool = Fals
         _atlas_plane_step(step)
         _sync_navigation_widget()
 
-    viewer.window.add_dock_widget(navigation, area="right", name="Navigation")
-    viewer.window.add_dock_widget(previous_slice, area="right", name="Previous slice")
-    viewer.window.add_dock_widget(next_slice, area="right", name="Next slice")
-    viewer.window.add_dock_widget(confirm_slice, area="right", name="Confirm")
-    viewer.window.add_dock_widget(next_axis, area="right", name="Next axis")
-    viewer.window.add_dock_widget(save_controls, area="right", name="Save")
-    _refresh()
-    _sync_navigation_widget()
+    def _refresh_all() -> None:
+        _refresh()
+        _sync_navigation_widget()
 
-    console.print(
-        "[bold]Napari align-slices GUI[/bold] — sample (left), atlas (right). "
-        "Align all three volume axes (Y, X, Z): ~20 anchors per axis. "
-        "Use the [bold]Volume axis[/bold] control to switch axes. "
-        "Scroll the atlas plane (PgUp/PgDn or wheel over atlas), then "
-        "[bold]Enter[/bold] or Confirm. After the last slice on an axis, "
-        "you are prompted to continue on the next axis."
+    return DockStageController(
+        dock_widgets=[
+            (navigation, "Navigation"),
+            (previous_slice, "Previous slice"),
+            (next_slice, "Next slice"),
+            (confirm_slice, "Confirm"),
+            (next_axis, "Next axis"),
+            (save_controls, "Save"),
+        ],
+        _refresh_fn=_refresh_all,
+        result=data.correspondence_path,
     )
-    napari.run()
+
+
+def run_brain_align_slices(config: BrainPipelineConfig, *, headless: bool = False) -> Path:
+    """Launch napari slice-alignment tool; returns path to slice_correspondence.json."""
+    if headless:
+        return prepare_brain_align_slices_session(config)
+
+    data = load_brain_align_slices_data(config)
+    title = f"LightSuite align-slices — {config.sample.name}"
+
+    def _attach(viewer: Any) -> DockStageController:
+        return attach_brain_align_slices(viewer, config, data=data)
+
+    run_attached_stage(
+        title,
+        _attach,
+        before_run=lambda: console.print(
+            "[bold]Napari align-slices GUI[/bold] — sample (left), atlas (right). "
+            "Align all three volume axes (Y, X, Z): ~20 anchors per axis. "
+            "Use the [bold]Volume axis[/bold] control to switch axes. "
+            "Scroll the atlas plane (PgUp/PgDn or wheel over atlas), then "
+            "[bold]Enter[/bold] or Confirm. After the last slice on an axis, "
+            "you are prompted to continue on the next axis."
+        ),
+    )
     return data.correspondence_path

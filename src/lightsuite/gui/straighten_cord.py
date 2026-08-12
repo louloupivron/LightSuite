@@ -5,12 +5,18 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import tifffile
 from rich.console import Console
 
 from lightsuite.config.models import SpinalCordPipelineConfig
+from lightsuite.gui.stage_controller import (
+    DockStageController,
+    require_napari,
+    run_attached_stage,
+)
 from lightsuite.preprocess.cord_checkpoint import CordRegOptsCheckpoint, SpinalAlignmentCheckpoint
 from lightsuite.registration.straightening_optimizer import run_straightening_optimizer
 
@@ -198,37 +204,31 @@ def _headless_default_alignment(data: StraightenCordData) -> StraightenCordData:
     return data
 
 
-def run_spinal_straighten(
+def attach_spinal_straighten(
+    viewer: Any,
     config: SpinalCordPipelineConfig,
     *,
-    headless: bool = False,
-) -> Path:
-    """Interactive or headless straightening GUI."""
+    data: StraightenCordData | None = None,
+) -> DockStageController:
+    """Attach spinal cord straightening controls to an existing napari viewer."""
+    from napari.utils.notifications import show_info
+    from qtpy.QtCore import Qt
+    from qtpy.QtGui import QFont, QKeySequence, QShortcut
+    from qtpy.QtWidgets import (
+        QHBoxLayout,
+        QLabel,
+        QPushButton,
+        QSlider,
+        QSpinBox,
+        QVBoxLayout,
+        QWidget,
+    )
+
+    require_napari()
     save_path = config.sample.save_path.expanduser()
-    data = load_straighten_data(config)
-    if headless:
-        data = _headless_default_alignment(data)
-        return save_alignment_checkpoint(data, save_path)
+    if data is None:
+        data = load_straighten_data(config)
 
-    try:
-        import napari
-        from napari.utils.notifications import show_info
-        from qtpy.QtCore import Qt
-        from qtpy.QtGui import QFont, QKeySequence, QShortcut
-        from qtpy.QtWidgets import (
-            QHBoxLayout,
-            QLabel,
-            QPushButton,
-            QSlider,
-            QSpinBox,
-            QVBoxLayout,
-            QWidget,
-        )
-    except ImportError as exc:
-        msg = "Napari GUI requires: uv sync --extra gui"
-        raise RuntimeError(msg) from exc
-
-    viewer = napari.Viewer(title="Spinal cord straightening")
     viewer.dims.ndisplay = 2
     state = {"slice": 0, "_syncing_layers": False, "show_pred": True, "edit_history": []}
 
@@ -532,7 +532,6 @@ def run_spinal_straighten(
     status_label.setWordWrap(True)
     layout.addWidget(status_label)
     controls.setLayout(layout)
-    viewer.window.add_dock_widget(controls, area="right", name="Controls")
 
     cen_layer.events.data.connect(lambda _event=None: _store_from_layer(cen_layer, data.user_cen))
     ant_layer.events.data.connect(lambda _event=None: _store_from_layer(ant_layer, data.user_ant))
@@ -568,8 +567,31 @@ def run_spinal_straighten(
         step = 1 if dy < 0 else -1
         show_slice(state["slice"] + step)
 
-    show_slice(0)
-    napari.run()
+    out = save_path / "spinal_alignment_opt.json"
+
+    return DockStageController(
+        dock_widgets=[(controls, "Controls")],
+        _refresh_fn=lambda: show_slice(0),
+        result=out,
+    )
+
+
+def run_spinal_straighten(
+    config: SpinalCordPipelineConfig,
+    *,
+    headless: bool = False,
+) -> Path:
+    """Interactive or headless straightening GUI."""
+    save_path = config.sample.save_path.expanduser()
+    data = load_straighten_data(config)
+    if headless:
+        data = _headless_default_alignment(data)
+        return save_alignment_checkpoint(data, save_path)
+
+    def _attach(viewer: Any) -> DockStageController:
+        return attach_spinal_straighten(viewer, config, data=data)
+
+    run_attached_stage("Spinal cord straightening", _attach)
     out = save_path / "spinal_alignment_opt.json"
     if not out.is_file():
         msg = f"Straightening closed without saving; expected {out}"

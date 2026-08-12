@@ -188,15 +188,11 @@ def spinal_stage_specs(config: SpinalCordPipelineConfig) -> list[StageSpec]:
 
 
 def multires_stage_specs(config: _Config) -> list[StageSpec]:
-    stages = [
-        StageSpec("check-geometry", "Check geometry", "geometry/ overlap QA"),
-        StageSpec("register", "Register", "multires_regopts.json → transform_paths"),
-    ]
+    stages: list[StageSpec] = []
     multires = getattr(config, "multires", None)
     landmarks = getattr(multires, "landmarks", None) if multires else None
     if landmarks is not None and getattr(landmarks, "session_path", None) is not False:
-        stages.insert(
-            0,
+        stages.append(
             StageSpec(
                 "match-points",
                 "Match points",
@@ -205,6 +201,21 @@ def multires_stage_specs(config: _Config) -> list[StageSpec]:
                 manual=True,
             ),
         )
+    stages.append(
+        StageSpec(
+            "inspect-geometry",
+            "Inspect geometry",
+            "multires.mesospim_geometry lateral_flip",
+            optional=True,
+            manual=True,
+        ),
+    )
+    stages.extend(
+        [
+            StageSpec("check-geometry", "Check geometry", "geometry/ overlap QA"),
+            StageSpec("register", "Register", "multires_regopts.json → transform_paths"),
+        ]
+    )
     if _has_import_annotations(config):
         stages.append(
             StageSpec(
@@ -327,8 +338,24 @@ def _spinal_stage_done(
     return False, "unknown stage"
 
 
+def _multires_geometry_configured(config: Any) -> tuple[bool, str]:
+    multires = config.multires
+    geometry = multires.mesospim_geometry
+    if geometry is None:
+        return False, "multires.mesospim_geometry not set"
+    overview = geometry.overview
+    roi = geometry.roi
+    if overview is None or roi is None:
+        return False, "mesospim_geometry overview/roi incomplete"
+    if overview.lateral_flip is None or roi.lateral_flip is None:
+        return False, "lateral_flip not configured"
+    return True, f"lateral_flip overview={list(overview.lateral_flip)} roi={list(roi.lateral_flip)}"
+
+
 def _multires_stage_done(stage_id: str, save_path: Path, config: Any) -> tuple[bool, str]:
     checkpoint = _load_multires_checkpoint(save_path)
+    if stage_id == "inspect-geometry":
+        return _multires_geometry_configured(config)
     if stage_id == "match-points":
         multires = config.multires
         if multires.landmarks and multires.landmarks.session_path:
@@ -365,7 +392,7 @@ def evaluate_stage_statuses(
 ) -> list[StageStatus]:
     statuses: list[StageStatus] = []
     for spec in specs:
-        if spec.optional and spec.id in {"align-slices", "match-points"}:
+        if spec.optional and spec.id in {"align-slices", "match-points", "inspect-geometry"}:
             done, detail = done_fn(spec.id, save_path, config)
             state = StageState.DONE if done else StageState.OPTIONAL
             statuses.append(StageStatus(spec, state, detail))

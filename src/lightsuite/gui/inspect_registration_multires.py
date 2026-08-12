@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from rich.console import Console
 
+from lightsuite.gui.stage_controller import DockStageController, run_attached_stage
 from lightsuite.multires.checkpoint import MultiresRegOptsCheckpoint, multires_checkpoint_path
 from lightsuite.multires.config_models import MultiresPipelineConfig
 
@@ -122,33 +124,15 @@ def contrast_limits(volume: np.ndarray, *, max_sample: int = 4_000_000) -> tuple
     return float(lo), float(hi)
 
 
-def run_multires_inspect_registration(
+def attach_multires_inspect_registration(
+    viewer: Any,
     config: MultiresPipelineConfig,
-    *,
-    full_overview: bool = False,
-    headless: bool = False,
-) -> MultiresRegistrationInspectPaths:
-    """Open Napari with the overview and every registered ROI channel overlaid."""
-    paths = discover_multires_registration_inspect_paths(config, full_overview=full_overview)
-    if headless:
-        load_inspect_volume(paths.overview_path)
-        for path in paths.registered_roi_paths.values():
-            load_inspect_volume(path)
-        return paths
-
-    try:
-        import napari
-        from napari.utils.notifications import show_info
-    except ImportError as exc:
-        msg = f"Napari GUI requires: {_GUI_HINT}"
-        raise RuntimeError(msg) from exc
+    paths: MultiresRegistrationInspectPaths,
+) -> DockStageController:
+    """Attach registered ROI vs overview layers to an existing napari viewer."""
+    from napari.utils.notifications import show_info
 
     grid = "full overview" if paths.full_overview else "overlap crop"
-    title = (
-        f"LightSuite multires registration QC — "
-        f"{config.sample.name} / {paths.pair_label} ({grid})"
-    )
-    viewer = napari.Viewer(title=title)
 
     overview = load_inspect_volume(paths.overview_path)
     viewer.add_image(
@@ -176,12 +160,44 @@ def run_multires_inspect_registration(
             contrast_limits=contrast_limits(vol),
         )
 
-    show_info(
-        f"Loaded overview + {len(paths.registered_roi_paths)} registered ROI channel(s) "
-        f"on the {grid} grid."
+    def _notify() -> None:
+        show_info(
+            f"Loaded overview + {len(paths.registered_roi_paths)} registered ROI channel(s) "
+            f"on the {grid} grid."
+        )
+
+    return DockStageController(
+        dock_widgets=[],
+        _refresh_fn=_notify,
+        result=paths,
     )
-    napari.run()
-    return paths
+
+
+def run_multires_inspect_registration(
+    config: MultiresPipelineConfig,
+    *,
+    full_overview: bool = False,
+    headless: bool = False,
+) -> MultiresRegistrationInspectPaths:
+    """Open Napari with the overview and every registered ROI channel overlaid."""
+    paths = discover_multires_registration_inspect_paths(config, full_overview=full_overview)
+    if headless:
+        load_inspect_volume(paths.overview_path)
+        for path in paths.registered_roi_paths.values():
+            load_inspect_volume(path)
+        return paths
+
+    grid = "full overview" if paths.full_overview else "overlap crop"
+    title = (
+        f"LightSuite multires registration QC — "
+        f"{config.sample.name} / {paths.pair_label} ({grid})"
+    )
+
+    def _attach(viewer: Any) -> DockStageController:
+        return attach_multires_inspect_registration(viewer, config, paths)
+
+    final = run_attached_stage(title, _attach)
+    return final if final is not None else paths
 
 
 __all__ = [

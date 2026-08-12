@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from rich.console import Console
@@ -28,6 +29,12 @@ from lightsuite.gui.slices import (
     prepare_display_slice,
     slice_pixels_from_layer_xy,
     volume_index_to_image,
+)
+from lightsuite.gui.stage_controller import (
+    DockStageController,
+    close_stage_or_viewer,
+    require_magicgui,
+    run_attached_stage,
 )
 
 console = Console()
@@ -195,22 +202,21 @@ def _chooselist_slice_label(chooselist: np.ndarray, slice_idx: int) -> str:
     return f"volume index {row[0]}, cut along axis {axis}"
 
 
-def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = False) -> Path:
-    """Launch napari control-point matcher; returns saved session path."""
-    if headless:
-        return prepare_brain_match_points_session(config)
+def attach_brain_match_points(
+    viewer: Any,
+    config: BrainPipelineConfig,
+    *,
+    data: BrainMatchPointsData | None = None,
+) -> DockStageController:
+    """Attach control-point matching controls to an existing napari viewer."""
+    from magicgui.widgets import Label
+    from napari.utils.notifications import show_info
+    from qtpy.QtCore import QTimer
 
-    try:
-        import napari
-        from magicgui import magicgui
-        from magicgui.widgets import Label
-        from napari.utils.notifications import show_info
-        from qtpy.QtCore import QTimer
-    except ImportError as exc:
-        msg = "Napari GUI requires: uv sync --extra gui"
-        raise RuntimeError(msg) from exc
+    magicgui = require_magicgui()
+    if data is None:
+        data = load_brain_match_points_data(config)
 
-    data = load_brain_match_points_data(config)
     n_slices = int(data.chooselist.shape[0])
     state = {
         "slice": 1,
@@ -221,7 +227,6 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
         "_warped_annotation": None,
     }
 
-    viewer = napari.Viewer(title=f"LightSuite — {config.sample.name}")
     viewer.dims.ndisplay = 2
     sample_layer = viewer.add_image(np.zeros((10, 10)), name="sample", colormap="gray")
     atlas_layer = viewer.add_image(np.zeros((10, 10)), name="atlas", colormap="gray")
@@ -544,7 +549,7 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
         mark_session_saved_from_napari(data.session)
         data.session.save(data.session_path)
         show_info(f"Saved {data.session_path}")
-        QTimer.singleShot(0, viewer.close)
+        QTimer.singleShot(0, lambda: close_stage_or_viewer(viewer))
 
     @magicgui(call_button="Clear slice points")
     def clear_slice() -> None:
@@ -620,28 +625,50 @@ def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = Fals
         _atlas_plane_step(step)
         _sync_navigation_widget()
 
-    viewer.window.add_dock_widget(points_summary, area="right", name="Point counts")
-    viewer.window.add_dock_widget(navigation, area="right", name="Navigation")
-    viewer.window.add_dock_widget(previous_slice, area="right", name="Previous slice")
-    viewer.window.add_dock_widget(next_slice, area="right", name="Next slice")
-    viewer.window.add_dock_widget(save_controls, area="right", name="Save")
-    viewer.window.add_dock_widget(clear_slice, area="right", name="Edit")
-    _refresh()
-    _sync_navigation_widget()
+    def _refresh_all() -> None:
+        _refresh()
+        _sync_navigation_widget()
 
-    if data.slice_correspondence is not None and data.slice_correspondence.has_confirmed_anchors():
-        n_axes = data.slice_correspondence.confirmed_axis_count()
-        n_conf = len(data.slice_correspondence.confirmed_anchors())
-        console.print(
-            f"[green]Loaded slice correspondence[/green] ({n_conf} anchors on {n_axes}/3 axes). "
-            "Atlas planes are pre-filled per cut axis; scroll to override per slice if needed."
-        )
-    console.print(
-        "[bold]Napari control-point GUI[/bold] — sample (left), atlas (right). "
-        "Numbered markers are matched pairs (1↔1, 2↔2, …). "
-        "Scroll the wheel over the atlas (or PgUp/PgDn) to adjust the atlas plane along the cut axis. "
-        "Shortcuts: [bold]←[/bold]/[bold]→[/bold] chooselist slices, [bold]O[/bold] overlay, "
-        "[bold]Backspace[/bold] undo last point."
+    return DockStageController(
+        dock_widgets=[
+            (points_summary, "Point counts"),
+            (navigation, "Navigation"),
+            (previous_slice, "Previous slice"),
+            (next_slice, "Next slice"),
+            (save_controls, "Save"),
+            (clear_slice, "Edit"),
+        ],
+        _refresh_fn=_refresh_all,
+        result=data.session_path,
     )
-    napari.run()
+
+
+def run_brain_match_points(config: BrainPipelineConfig, *, headless: bool = False) -> Path:
+    """Launch napari control-point matcher; returns saved session path."""
+    if headless:
+        return prepare_brain_match_points_session(config)
+
+    data = load_brain_match_points_data(config)
+    title = f"LightSuite — {config.sample.name}"
+
+    def _attach(viewer: Any) -> DockStageController:
+        return attach_brain_match_points(viewer, config, data=data)
+
+    def _before_run() -> None:
+        if data.slice_correspondence is not None and data.slice_correspondence.has_confirmed_anchors():
+            n_axes = data.slice_correspondence.confirmed_axis_count()
+            n_conf = len(data.slice_correspondence.confirmed_anchors())
+            console.print(
+                f"[green]Loaded slice correspondence[/green] ({n_conf} anchors on {n_axes}/3 axes). "
+                "Atlas planes are pre-filled per cut axis; scroll to override per slice if needed."
+            )
+        console.print(
+            "[bold]Napari control-point GUI[/bold] — sample (left), atlas (right). "
+            "Numbered markers are matched pairs (1↔1, 2↔2, …). "
+            "Scroll the wheel over the atlas (or PgUp/PgDn) to adjust the atlas plane along the cut axis. "
+            "Shortcuts: [bold]←[/bold]/[bold]→[/bold] chooselist slices, [bold]O[/bold] overlay, "
+            "[bold]Backspace[/bold] undo last point."
+        )
+
+    run_attached_stage(title, _attach, before_run=_before_run)
     return data.session_path

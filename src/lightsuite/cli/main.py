@@ -9,6 +9,7 @@ import typer
 from lightsuite import __version__
 from lightsuite.cli.doctor import doctor_command
 from lightsuite.cli.config_cmd import config_app
+from lightsuite.cli.gui_cmd import register_gui_command
 from lightsuite.cli.manifest_build import build_manifest as multires_build_manifest_cmd
 from lightsuite.cli.pipeline_commands import (
     register_brain_commands,
@@ -35,6 +36,7 @@ app.add_typer(workflow_app, name="workflow")
 register_brain_commands(brain_app)
 register_spinal_commands(spinal_app)
 register_multires_commands(multires_app)
+register_gui_command(app)
 
 
 def _version_callback(value: bool) -> None:

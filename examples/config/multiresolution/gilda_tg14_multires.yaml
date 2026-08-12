@@ -1,0 +1,59 @@
+# Multiresolution registration — Gilda tg14 mesoSPIM (1× overview ↔ 2.5× ROI)
+#
+# Channels: 488 (autofluo), 555 (Acta2 vessels), 647 (CD31/Podo capillaries).
+# Motor stage coordinates (x_pos, y_pos, z_start, z_end, z_stepsize) are identical
+# across all three channels within each magnification — one registration applies to all.
+#
+#   uv sync --extra registration --extra gui
+#   uv run lightsuite multires validate-config       -c examples/config/multiresolution/gilda_tg14_multires.yaml
+#   uv run lightsuite multires inspect-geometry      -c examples/config/multiresolution/gilda_tg14_multires.yaml
+#   uv run lightsuite multires match-points          -c examples/config/multiresolution/gilda_tg14_multires.yaml
+#   uv run lightsuite multires check-geometry        -c examples/config/multiresolution/gilda_tg14_multires.yaml
+#   uv run lightsuite multires register              -c examples/config/multiresolution/gilda_tg14_multires.yaml
+#
+# Pick the co-registration reference channel (488 / 555 / 647) in the GUI shell or
+# inspect-geometry stage, or set multires.registration.reference_channel in this file.
+# Default below uses 647 (capillaries); 555 (Acta2 vessels) is a common alternative.
+
+sample:
+  name: tg14
+  save_path: /media/gbm/NVME2/ALICe-pipelines-data/Gilda/tg14/multiresolution_results
+  scratch: /media/gbm/NVME2/lightsuite_scratch
+
+multires:
+  pair_label: tg14_488_555_647
+  pair_manifest: /media/gbm/NVME2/ALICe-pipelines-data/Gilda/tg14/multiresolution_results/converted/tg14_488_555_647_pair.json
+
+  channels:
+    "488":
+      overview: /media/gbm/NVME2/ALICe-pipelines-data/Gilda/tg14/no zoom/2025.06.11_tg14_acta2 555_cd31Podo 647_1X_488.tif
+      roi: /media/gbm/NVME2/ALICe-pipelines-data/Gilda/tg14/zoom 2.5/2025.06.11_tg14_acta2 555_cd31Podo 647_2.5X_488.tif
+    "555":
+      overview: /media/gbm/NVME2/ALICe-pipelines-data/Gilda/tg14/no zoom/2025.06.11_tg14_acta2 555_cd31Podo 647_1X_555.tif
+      roi: /media/gbm/NVME2/ALICe-pipelines-data/Gilda/tg14/zoom 2.5/2025.06.11_tg14_acta2 555_cd31Podo 647_2.5X_555.tif
+    "647":
+      overview: /media/gbm/NVME2/ALICe-pipelines-data/Gilda/tg14/no zoom/2025.06.11_tg14_acta2 555_cd31Podo 647_1X_647.tif
+      roi: /media/gbm/NVME2/ALICe-pipelines-data/Gilda/tg14/zoom 2.5/2025.06.11_tg14_acta2 555_cd31Podo 647_2.5X_647.tif
+
+  geometry_mode: hybrid
+
+  landmarks:
+    session_path: null
+    fit_mode: similarity
+    min_pairs: 4
+
+  # Confirm signs in inspect-geometry before registration (Marianna CMU used [-1, -1]).
+  mesospim_geometry:
+    overview:
+      lateral_flip: [1, -1]
+    roi:
+      lateral_flip: [1, -1]
+
+  registration:
+    apply_transform_to: ["555", "647"]
+    overlap_margin_um: 0.0
+    registration_bin: 1
+    experiment_name: tg14_488_555_647_hybrid
+    elastix_stages: [translation, rigid]
+    write_full_overview_canvas: false
+    reference_channel: "488"

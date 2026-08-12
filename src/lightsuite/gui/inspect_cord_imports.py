@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import numpy as np
 
@@ -31,6 +31,7 @@ from lightsuite.gui.inspect_brain_imports import (
     _load_points_npz,
     volume_yxz_to_napari_zyx,
 )
+from lightsuite.gui.stage_controller import DockStageController, run_attached_stage
 from lightsuite.gui.view_registered_cord import _add_channel_layers, _add_point_layers
 
 ViewSpace = Literal["atlas", "sample"]
@@ -243,50 +244,25 @@ def _load_cord_import_inspect_volumes_sample(
     )
 
 
-def run_cord_inspect_imports(
+def attach_cord_inspect_imports(
+    viewer: Any,
     config: SpinalCordPipelineConfig,
     *,
+    paths: CordImportInspectPaths,
+    volumes: CordImportInspectVolumes,
     space: ViewSpace = "atlas",
-    headless: bool = False,
-    recompute_annotation: bool = False,
-) -> CordImportInspectPaths:
-    """Open Napari to QC registered channels and imported annotations."""
-    paths = discover_cord_import_inspect_paths(config, space=space)
-    if headless:
-        load_cord_import_inspect_volumes(
-            config,
-            paths=paths,
-            space=space,
-            recompute_annotation=recompute_annotation,
-        )
-        return paths
-
-    try:
-        import napari
-        from napari.utils.notifications import show_info
-    except ImportError as exc:
-        msg = "Napari GUI requires: uv sync --extra gui"
-        raise RuntimeError(msg) from exc
-
-    volumes = load_cord_import_inspect_volumes(
-        config,
-        paths=paths,
-        space=space,
-        recompute_annotation=recompute_annotation,
-    )
+) -> DockStageController:
+    """Attach spinal import QC layers to an existing napari viewer."""
+    from napari.utils.notifications import show_info
 
     if space == "sample":
-        title = f"LightSuite spinal import QC — {config.sample.name} (sample, 20 µm straightened)"
         template_name = "atlas template (warped)"
         annotation_name = "atlas annotation (warped)"
         channel_suffix = "straightened"
     else:
-        title = f"LightSuite spinal import QC — {config.sample.name} (atlas)"
         template_name = "atlas template"
         annotation_name = "atlas annotation"
         channel_suffix = "registered"
-
-    viewer = napari.Viewer(title=title)
 
     viewer.add_image(
         volume_yxz_to_napari_zyx(volumes.template),
@@ -318,21 +294,70 @@ def run_cord_inspect_imports(
 
     summary_path = paths.volume_registered_dir / "import_annotations_summary.json"
     space_note = "sample-space " if space == "sample" else ""
-    if summary_path.is_file():
-        show_info(
-            f"Loaded {len(volumes.registered_channels)} {space_note}channel(s) and "
-            f"{len(volumes.point_layers)} point layer(s). "
-            f"Summary: {summary_path.name}"
-            + (
-                " Sample Z flipped to match atlas rostrocaudal orientation (tofliprc)."
-                if space == "sample" and load_cord_tofliprc(config.sample.save_path)
-                else ""
+
+    def _notify() -> None:
+        if summary_path.is_file():
+            show_info(
+                f"Loaded {len(volumes.registered_channels)} {space_note}channel(s) and "
+                f"{len(volumes.point_layers)} point layer(s). "
+                f"Summary: {summary_path.name}"
+                + (
+                    " Sample Z flipped to match atlas rostrocaudal orientation (tofliprc)."
+                    if space == "sample" and load_cord_tofliprc(config.sample.save_path)
+                    else ""
+                )
             )
+        else:
+            show_info(
+                f"Loaded {len(volumes.registered_channels)} {space_note}channel(s) and "
+                f"{len(volumes.point_layers)} point layer(s)."
+            )
+
+    return DockStageController(
+        dock_widgets=[],
+        _refresh_fn=_notify,
+        result=paths,
+    )
+
+
+def run_cord_inspect_imports(
+    config: SpinalCordPipelineConfig,
+    *,
+    space: ViewSpace = "atlas",
+    headless: bool = False,
+    recompute_annotation: bool = False,
+) -> CordImportInspectPaths:
+    """Open Napari to QC registered channels and imported annotations."""
+    paths = discover_cord_import_inspect_paths(config, space=space)
+    if headless:
+        load_cord_import_inspect_volumes(
+            config,
+            paths=paths,
+            space=space,
+            recompute_annotation=recompute_annotation,
         )
+        return paths
+
+    volumes = load_cord_import_inspect_volumes(
+        config,
+        paths=paths,
+        space=space,
+        recompute_annotation=recompute_annotation,
+    )
+
+    if space == "sample":
+        title = f"LightSuite spinal import QC — {config.sample.name} (sample, 20 µm straightened)"
     else:
-        show_info(
-            f"Loaded {len(volumes.registered_channels)} {space_note}channel(s) and "
-            f"{len(volumes.point_layers)} point layer(s)."
+        title = f"LightSuite spinal import QC — {config.sample.name} (atlas)"
+
+    def _attach(viewer: Any) -> DockStageController:
+        return attach_cord_inspect_imports(
+            viewer,
+            config,
+            paths=paths,
+            volumes=volumes,
+            space=space,
         )
-    napari.run()
-    return paths
+
+    final = run_attached_stage(title, _attach)
+    return final if final is not None else paths

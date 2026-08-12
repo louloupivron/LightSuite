@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
+
+import numpy as np
 
 from lightsuite.config.models import SpinalCordPipelineConfig
 from lightsuite.export.cord_registered import (
@@ -22,6 +24,7 @@ from lightsuite.gui.inspect_brain_imports import (
     atlas_points_to_napari_zyx,
     volume_yxz_to_napari_zyx,
 )
+from lightsuite.gui.stage_controller import DockStageController, run_attached_stage
 
 ViewSpace = Literal["atlas", "sample"]
 
@@ -56,6 +59,99 @@ def _add_point_layers(viewer, point_layers: dict[str, np.ndarray]) -> None:
         )
 
 
+def attach_spinal_registered_atlas_view(
+    viewer: Any,
+    config: SpinalCordPipelineConfig,
+    *,
+    paths: CordRegisteredInspectPaths,
+    volumes,
+) -> DockStageController:
+    """Attach atlas-space registered cord layers to an existing napari viewer."""
+    from napari.utils.notifications import show_info
+
+    template = load_native_template_export_layout(config)
+    viewer.add_image(
+        volume_yxz_to_napari_zyx(template),
+        name="atlas template",
+        colormap="green",
+        blending="additive",
+        opacity=0.35,
+        contrast_limits=_contrast_limits(template),
+    )
+
+    _add_channel_layers(viewer, volumes.registered_channels, name_suffix="registered")
+
+    viewer.add_labels(
+        volume_yxz_to_napari_zyx(volumes.annotation),
+        name="atlas annotation",
+        opacity=0.45,
+    )
+
+    def _notify() -> None:
+        show_info(
+            f"Loaded {len(volumes.registered_channels)} registered channel(s) "
+            f"and annotation labels from {paths.volume_registered_dir.name}/."
+        )
+
+    return DockStageController(
+        dock_widgets=[],
+        _refresh_fn=_notify,
+        result=paths,
+    )
+
+
+def attach_spinal_registered_sample_view(
+    viewer: Any,
+    config: SpinalCordPipelineConfig,
+    *,
+    paths: CordSampleSpaceInspectPaths,
+    template: np.ndarray,
+    annotation: np.ndarray,
+    channels: dict[int, np.ndarray],
+    point_layers: dict[str, np.ndarray],
+    tofliprc: bool,
+) -> DockStageController:
+    """Attach sample-space registered cord layers to an existing napari viewer."""
+    from napari.utils.notifications import show_info
+
+    viewer.add_image(
+        volume_yxz_to_napari_zyx(template),
+        name="atlas template (warped)",
+        colormap="green",
+        blending="additive",
+        opacity=0.35,
+        contrast_limits=_contrast_limits(template),
+    )
+
+    _add_channel_layers(viewer, channels, name_suffix="straightened")
+
+    viewer.add_labels(
+        volume_yxz_to_napari_zyx(annotation),
+        name="atlas annotation (warped)",
+        opacity=0.45,
+    )
+
+    if point_layers:
+        _add_point_layers(viewer, point_layers)
+
+    def _notify() -> None:
+        summary = (
+            f"Loaded {len(channels)} straightened channel(s) and warped annotation "
+            f"from {paths.sample_space_dir.name}/ on the 20 µm registration grid."
+        )
+        if point_layers:
+            summary += f" Point layers: {len(point_layers)}."
+        if tofliprc:
+            summary += " Sample Z flipped for atlas-aligned rostrocaudal QC."
+        show_info(summary)
+
+    return DockStageController(
+        dock_widgets=[],
+        _refresh_fn=_notify,
+        result=paths,
+    )
+
+
 def run_spinal_registered_view(
     config: SpinalCordPipelineConfig,
     *,
@@ -88,44 +184,23 @@ def _run_spinal_atlas_space_view(
         )
         return paths
 
-    try:
-        import napari
-        from napari.utils.notifications import show_info
-    except ImportError as exc:
-        msg = "Napari GUI requires: uv sync --extra gui"
-        raise RuntimeError(msg) from exc
-
     volumes = load_registered_cord_volumes(
         config,
         paths=paths,
         recompute_annotation=recompute_annotation,
     )
-    viewer = napari.Viewer(title=f"LightSuite spinal registration — {config.sample.name} (atlas)")
+    title = f"LightSuite spinal registration — {config.sample.name} (atlas)"
 
-    template = load_native_template_export_layout(config)
-    viewer.add_image(
-        volume_yxz_to_napari_zyx(template),
-        name="atlas template",
-        colormap="green",
-        blending="additive",
-        opacity=0.35,
-        contrast_limits=_contrast_limits(template),
-    )
+    def _attach(viewer: Any) -> DockStageController:
+        return attach_spinal_registered_atlas_view(
+            viewer,
+            config,
+            paths=paths,
+            volumes=volumes,
+        )
 
-    _add_channel_layers(viewer, volumes.registered_channels, name_suffix="registered")
-
-    viewer.add_labels(
-        volume_yxz_to_napari_zyx(volumes.annotation),
-        name="atlas annotation",
-        opacity=0.45,
-    )
-
-    show_info(
-        f"Loaded {len(volumes.registered_channels)} registered channel(s) "
-        f"and annotation labels from {paths.volume_registered_dir.name}/."
-    )
-    napari.run()
-    return paths
+    final = run_attached_stage(title, _attach)
+    return final if final is not None else paths
 
 
 def _run_spinal_sample_space_view(
@@ -138,13 +213,6 @@ def _run_spinal_sample_space_view(
         load_cord_sample_space_volumes(config, paths=paths)
         return paths
 
-    try:
-        import napari
-        from napari.utils.notifications import show_info
-    except ImportError as exc:
-        msg = "Napari GUI requires: uv sync --extra gui"
-        raise RuntimeError(msg) from exc
-
     volumes = load_cord_sample_space_volumes(config, paths=paths)
     tofliprc = load_cord_tofliprc(config.sample.save_path)
     template, annotation, channels, point_layers, _hemisphere = align_sample_space_for_atlas_qc(
@@ -155,38 +223,21 @@ def _run_spinal_sample_space_view(
         hemisphere=volumes.hemisphere,
         tofliprc=tofliprc,
     )
-    viewer = napari.Viewer(
-        title=f"LightSuite spinal registration — {config.sample.name} (sample, 20 µm straightened)"
+    title = (
+        f"LightSuite spinal registration — {config.sample.name} (sample, 20 µm straightened)"
     )
 
-    viewer.add_image(
-        volume_yxz_to_napari_zyx(template),
-        name="atlas template (warped)",
-        colormap="green",
-        blending="additive",
-        opacity=0.35,
-        contrast_limits=_contrast_limits(template),
-    )
+    def _attach(viewer: Any) -> DockStageController:
+        return attach_spinal_registered_sample_view(
+            viewer,
+            config,
+            paths=paths,
+            template=template,
+            annotation=annotation,
+            channels=channels,
+            point_layers=point_layers,
+            tofliprc=tofliprc,
+        )
 
-    _add_channel_layers(viewer, channels, name_suffix="straightened")
-
-    viewer.add_labels(
-        volume_yxz_to_napari_zyx(annotation),
-        name="atlas annotation (warped)",
-        opacity=0.45,
-    )
-
-    if point_layers:
-        _add_point_layers(viewer, point_layers)
-
-    summary = (
-        f"Loaded {len(channels)} straightened channel(s) and warped annotation "
-        f"from {paths.sample_space_dir.name}/ on the 20 µm registration grid."
-    )
-    if point_layers:
-        summary += f" Point layers: {len(point_layers)}."
-    if tofliprc:
-        summary += " Sample Z flipped for atlas-aligned rostrocaudal QC."
-    show_info(summary)
-    napari.run()
-    return paths
+    final = run_attached_stage(title, _attach)
+    return final if final is not None else paths

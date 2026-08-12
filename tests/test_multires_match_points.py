@@ -15,7 +15,7 @@ from lightsuite.gui.multires_data import (
     load_multires_match_points_data,
     prepare_multires_match_points_session,
 )
-from lightsuite.multires.landmark_session import default_landmark_session_path
+from lightsuite.multires.landmark_session import MultiresLandmarkSession, default_landmark_session_path
 from lightsuite.multires.manifest import save_pair_manifest
 from lightsuite.multires.models import MANIFEST_FORMAT, ManifestVolumeSpec, MultiresPairManifest
 from lightsuite.multires.volume import load_manifest_xy_plane_at_z_index
@@ -131,6 +131,28 @@ def test_default_z_indices_use_overlap_center(tmp_path: Path) -> None:
     oz, rz = _default_z_indices(overview, roi)
     assert oz == 5
     assert rz == 2
+
+
+def test_match_points_resumes_at_latest_annotated_slices(tmp_path: Path) -> None:
+    overview = np.zeros((10, 20, 20), dtype=np.uint16)
+    roi = np.zeros((8, 12, 12), dtype=np.uint16)
+    config_path = _write_pair_config(tmp_path, overview, roi)
+    cfg = load_multires_config(config_path)
+    from lightsuite.multires.resolve import resolve_pair_manifest
+
+    manifest, _ = resolve_pair_manifest(cfg)
+    session_path = cfg.multires.resolved_landmark_session_path(cfg.sample.save_path, manifest)
+    session_path.parent.mkdir(parents=True, exist_ok=True)
+    MultiresLandmarkSession(
+        overview_points_zyx=[[7.0, 10.0, 11.0], [8.0, 12.0, 13.0]],
+        roi_points_zyx=[[5.0, 4.0, 5.0], [6.0, 6.0, 7.0]],
+    ).save(session_path)
+
+    data = load_multires_match_points_data(cfg)
+    default_oz, default_rz = _default_z_indices(data.overview_spec, data.roi_spec)
+    assert (default_oz, default_rz) != (8, 6)
+    assert data.initial_overview_z == 8
+    assert data.initial_roi_z == 6
 
 
 def test_match_points_hybrid_uses_metadata_overlap_crop(tmp_path: Path) -> None:

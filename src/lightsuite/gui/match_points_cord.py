@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from rich.console import Console
@@ -23,6 +24,12 @@ from lightsuite.gui.slices import (
     layer_xy_from_slice_pixels,
     slice_pixels_from_layer_xy,
     volume_index_to_image,
+)
+from lightsuite.gui.stage_controller import (
+    DockStageController,
+    close_stage_or_viewer,
+    require_magicgui,
+    run_attached_stage,
 )
 from lightsuite.registration.warp import warp_volume_affine
 
@@ -179,26 +186,20 @@ def _chooselist_slice_label(chooselist: np.ndarray, slice_idx: int) -> str:
     return f"sample plane {row[0]} / {row[1]}-axis cut"
 
 
-def run_spinal_match_points(
+def attach_spinal_match_points(
+    viewer: Any,
     config: SpinalCordPipelineConfig,
     *,
-    headless: bool = False,
-) -> Path:
-    """Launch Napari control-point matcher; returns saved session path."""
-    if headless:
-        return prepare_cord_match_points_session(config)
+    data: Any | None = None,
+) -> DockStageController:
+    """Attach spinal cord control-point matching controls to an existing napari viewer."""
+    from magicgui.widgets import Label
+    from napari.utils.notifications import show_info
+    from qtpy.QtCore import QTimer
 
-    try:
-        import napari
-        from magicgui import magicgui
-        from magicgui.widgets import Label
-        from napari.utils.notifications import show_info
-        from qtpy.QtCore import QTimer
-    except ImportError as exc:
-        msg = "Napari GUI requires: uv sync --extra gui"
-        raise RuntimeError(msg) from exc
-
-    data = load_cord_match_points_data(config)
+    magicgui = require_magicgui()
+    if data is None:
+        data = load_cord_match_points_data(config)
     n_slices = int(data.chooselist.shape[0])
     state = {
         "slice": 1,
@@ -209,7 +210,6 @@ def run_spinal_match_points(
         "_warped_annotation": None,
     }
 
-    viewer = napari.Viewer(title=f"LightSuite spinal — {config.sample.name}")
     viewer.dims.ndisplay = 2
     sample_layer = viewer.add_image(np.zeros((10, 10)), name="sample", colormap="gray")
     atlas_layer = viewer.add_image(np.zeros((10, 10)), name="atlas", colormap="gray")
@@ -514,7 +514,7 @@ def run_spinal_match_points(
         mark_session_saved_from_napari(data.session)
         data.session.save(data.session_path)
         show_info(f"Saved {data.session_path}")
-        QTimer.singleShot(0, viewer.close)
+        QTimer.singleShot(0, lambda: close_stage_or_viewer(viewer))
 
     @magicgui(call_button="Clear slice points")
     def clear_slice() -> None:
@@ -587,29 +587,55 @@ def run_spinal_match_points(
         _atlas_plane_step(step)
         _sync_navigation_widget()
 
-    viewer.window.add_dock_widget(points_summary, area="right", name="Point counts")
-    viewer.window.add_dock_widget(navigation, area="right", name="Navigation")
-    viewer.window.add_dock_widget(previous_slice, area="right", name="Previous slice")
-    viewer.window.add_dock_widget(next_slice, area="right", name="Next slice")
-    viewer.window.add_dock_widget(save_controls, area="right", name="Save")
-    viewer.window.add_dock_widget(clear_slice, area="right", name="Edit")
-    if data.session.point_counts()[0] >= MIN_AFFINE_PAIRS:
-        data.session.update_manual_alignment(
-            min_pairs=MIN_AFFINE_PAIRS,
-            constrain_cut_axis=CORD_CUT_AXIS,
-        )
+    def _initial_refresh() -> None:
+        if data.session.point_counts()[0] >= MIN_AFFINE_PAIRS:
+            data.session.update_manual_alignment(
+                min_pairs=MIN_AFFINE_PAIRS,
+                constrain_cut_axis=CORD_CUT_AXIS,
+            )
+        _refresh()
+        _sync_navigation_widget()
 
-    _refresh()
-    _sync_navigation_widget()
-
-    console.print(
-        "[bold]Napari spinal control-point GUI[/bold] — sample (left), atlas (right). "
-        "Numbered markers are matched pairs (1↔1, 2↔2, …). "
-        "Scroll the wheel over the atlas (or PgUp/PgDn) to adjust the atlas plane. "
-        "Shortcuts: [bold]←[/bold]/[bold]→[/bold] chooselist slices, [bold]O[/bold] overlay, "
-        "[bold]Backspace[/bold] undo last point."
+    return DockStageController(
+        dock_widgets=[
+            (points_summary, "Point counts"),
+            (navigation, "Navigation"),
+            (previous_slice, "Previous slice"),
+            (next_slice, "Next slice"),
+            (save_controls, "Save"),
+            (clear_slice, "Edit"),
+        ],
+        _refresh_fn=_initial_refresh,
+        result=data.session_path,
     )
-    napari.run()
+
+
+def run_spinal_match_points(
+    config: SpinalCordPipelineConfig,
+    *,
+    headless: bool = False,
+) -> Path:
+    """Launch Napari control-point matcher; returns saved session path."""
+    if headless:
+        return prepare_cord_match_points_session(config)
+
+    data = load_cord_match_points_data(config)
+    title = f"LightSuite spinal — {config.sample.name}"
+
+    def _attach(viewer: Any) -> DockStageController:
+        return attach_spinal_match_points(viewer, config, data=data)
+
+    run_attached_stage(
+        title,
+        _attach,
+        before_run=lambda: console.print(
+            "[bold]Napari spinal control-point GUI[/bold] — sample (left), atlas (right). "
+            "Numbered markers are matched pairs (1↔1, 2↔2, …). "
+            "Scroll the wheel over the atlas (or PgUp/PgDn) to adjust the atlas plane. "
+            "Shortcuts: [bold]←[/bold]/[bold]→[/bold] chooselist slices, [bold]O[/bold] overlay, "
+            "[bold]Backspace[/bold] undo last point."
+        ),
+    )
     if not data.session_path.is_file():
         mark_session_saved_from_napari(data.session)
         data.session.save(data.session_path)

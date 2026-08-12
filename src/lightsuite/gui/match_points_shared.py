@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import numpy as np
 
 PANEL_GAP_X = 24
@@ -71,3 +73,114 @@ def apply_layer_points(layer, xy: np.ndarray) -> None:
             except (TypeError, ValueError, AttributeError):
                 pass
         configure_point_text(layer)
+
+
+def spinbox_native(spinbox: object) -> object | None:
+    return getattr(spinbox, "native", None)
+
+
+def focused_spinbox_native(*spinboxes: object) -> object | None:
+    """Return the native Qt spinbox that currently has keyboard focus, if any."""
+    try:
+        from qtpy.QtWidgets import QApplication
+    except ImportError:
+        return None
+    app = QApplication.instance()
+    if app is None:
+        return None
+    focused = app.focusWidget()
+    natives = [spinbox_native(widget) for widget in spinboxes]
+    return focused if focused in natives else None
+
+
+def read_spinbox_int(spinbox: object, *, fallback: int) -> int:
+    """Read the text the user typed, falling back to the committed spinbox value."""
+    native = spinbox_native(spinbox)
+    if native is not None and hasattr(native, "lineEdit"):
+        line_edit = native.lineEdit()
+        if line_edit is not None:
+            text = line_edit.text().strip()
+            if text not in ("", "-", "+"):
+                try:
+                    return int(text)
+                except ValueError:
+                    pass
+        if hasattr(native, "value"):
+            try:
+                return int(native.value())
+            except (TypeError, ValueError):
+                pass
+    try:
+        return int(spinbox.value)  # type: ignore[attr-defined]
+    except (TypeError, ValueError):
+        return fallback
+
+
+def set_spinbox_int_value(spinbox: object, value: int) -> None:
+    """Set a spinbox value without emitting intermediate Qt change signals."""
+    native = spinbox_native(spinbox)
+    if native is not None and hasattr(native, "blockSignals"):
+        native.blockSignals(True)
+        try:
+            if hasattr(native, "setValue"):
+                native.setValue(int(value))
+            else:
+                spinbox.value = int(value)  # type: ignore[attr-defined]
+        finally:
+            native.blockSignals(False)
+        return
+    spinbox.value = int(value)  # type: ignore[attr-defined]
+
+
+def configure_z_index_spinbox(
+    spinbox: object,
+    on_commit: Callable[[], None],
+    *,
+    blocked: Callable[[], bool] | None = None,
+) -> None:
+    """Defer Z navigation until Enter or focus leaves the spinbox line edit."""
+    native = spinbox_native(spinbox)
+    if native is None:
+        return
+    if hasattr(native, "setKeyboardTracking"):
+        native.setKeyboardTracking(False)
+
+    def _commit() -> None:
+        if blocked is not None and blocked():
+            return
+        on_commit()
+
+    if hasattr(native, "editingFinished"):
+        native.editingFinished.connect(_commit)
+    line_edit = native.lineEdit() if hasattr(native, "lineEdit") else None
+    if line_edit is not None and hasattr(line_edit, "returnPressed"):
+        line_edit.returnPressed.connect(_commit)
+
+
+def sync_z_index_spinboxes(
+    overview_spinbox: object,
+    roi_spinbox: object,
+    *,
+    overview_z: int,
+    roi_z: int,
+    link_z: object | None = None,
+    link_value: bool | None = None,
+) -> object | None:
+    """Update navigation spinboxes without interrupting in-progress text entry."""
+    keep_focus = focused_spinbox_native(overview_spinbox, roi_spinbox)
+    overview_native = spinbox_native(overview_spinbox)
+    roi_native = spinbox_native(roi_spinbox)
+
+    if keep_focus is not overview_native:
+        set_spinbox_int_value(overview_spinbox, int(overview_z))
+    if keep_focus is not roi_native:
+        set_spinbox_int_value(roi_spinbox, int(roi_z))
+    if link_z is not None and link_value is not None:
+        if bool(link_z.value) != bool(link_value):  # type: ignore[attr-defined]
+            link_z.value = bool(link_value)  # type: ignore[attr-defined]
+
+    return keep_focus
+
+
+# Backwards-compatible alias used by multires GUI modules.
+connect_spinbox_apply_on_finish = configure_z_index_spinbox

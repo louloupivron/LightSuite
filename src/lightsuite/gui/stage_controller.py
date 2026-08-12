@@ -1,0 +1,141 @@
+"""Shared helpers for napari stages attachable to a unified LightSuite GUI."""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
+from typing import Any, Protocol, runtime_checkable
+
+
+def require_napari() -> Any:
+    """Import napari or raise with install instructions."""
+    try:
+        import napari
+    except ImportError as exc:
+        msg = "Napari GUI requires: uv sync --extra gui"
+        raise RuntimeError(msg) from exc
+    return napari
+
+
+def require_magicgui() -> Any:
+    """Import magicgui or raise with install instructions."""
+    try:
+        from magicgui import magicgui
+    except ImportError as exc:
+        msg = "Napari GUI requires: uv sync --extra gui"
+        raise RuntimeError(msg) from exc
+    return magicgui
+
+
+def mount_dock_widgets(
+    viewer: Any,
+    widgets: Sequence[tuple[Any, str]],
+    *,
+    area: str = "right",
+) -> list[Any]:
+    """Add multiple dock widgets to a napari viewer.
+
+    Returns the napari dock handles so they can be removed reliably (magicgui
+    ``Label`` widgets are not always discoverable by inner-widget identity).
+    """
+    handles: list[Any] = []
+    for widget, name in widgets:
+        handles.append(viewer.window.add_dock_widget(widget, area=area, name=name))
+    return handles
+
+
+def remove_dock_widget(viewer: Any, widget: Any, *, dock_handle: Any = None) -> None:
+    """Remove a docked widget, tolerating magicgui wrapper/native mismatches."""
+    window = viewer.window
+    if dock_handle is not None:
+        try:
+            window.remove_dock_widget(dock_handle)
+            return
+        except LookupError:
+            pass
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            return
+
+    for candidate in (widget, getattr(widget, "native", None)):
+        if candidate is None:
+            continue
+        try:
+            window.remove_dock_widget(candidate)
+            return
+        except LookupError:
+            continue
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            return
+
+
+def close_stage_or_viewer(viewer: Any, *, refresh: bool = True) -> None:
+    """Close a standalone stage viewer, or detach the stage inside the unified shell."""
+    window = getattr(viewer, "window", None)
+    shell = getattr(window, "_lightsuite_shell", None) if window is not None else None
+    if shell is not None:
+        shell.finish_interactive_stage(refresh=refresh)
+        return
+    viewer.close()
+
+
+@runtime_checkable
+class StageController(Protocol):
+    """Interactive stage logic bound to an existing napari viewer."""
+
+    def mount(self, viewer: Any) -> None:
+        """Attach dock widgets and finalize the stage UI."""
+
+    def refresh(self) -> None:
+        """Refresh layers and status from the current stage state."""
+
+    def teardown(self, viewer: Any) -> None:
+        """Remove UI artifacts before another stage is attached."""
+
+
+@dataclass
+class DockStageController:
+    """Default controller that mounts a list of dock widgets."""
+
+    dock_widgets: list[tuple[Any, str]] = field(default_factory=list)
+    _dock_handles: list[Any] = field(default_factory=list, repr=False)
+    _refresh_fn: Callable[[], None] | None = None
+    _teardown_fn: Callable[[], None] | None = None
+    result: Any = None
+
+    def mount(self, viewer: Any) -> None:
+        self._dock_handles = mount_dock_widgets(viewer, self.dock_widgets)
+        self.refresh()
+
+    def refresh(self) -> None:
+        if self._refresh_fn is not None:
+            self._refresh_fn()
+
+    def teardown(self, viewer: Any) -> None:
+        """Remove dock widgets and run optional cleanup before switching stages."""
+        if self._dock_handles:
+            pairs = list(zip(self.dock_widgets, self._dock_handles, strict=False))
+            for (widget, _name), handle in reversed(pairs):
+                remove_dock_widget(viewer, widget, dock_handle=handle)
+        else:
+            for widget, _name in reversed(self.dock_widgets):
+                remove_dock_widget(viewer, widget)
+        self._dock_handles.clear()
+        if self._teardown_fn is not None:
+            self._teardown_fn()
+
+
+def run_attached_stage(
+    title: str,
+    attach_fn: Callable[[Any], StageController],
+    *,
+    before_run: Callable[[], None] | None = None,
+) -> Any:
+    """Create a viewer, attach a stage, and block until the viewer closes."""
+    napari = require_napari()
+    viewer = napari.Viewer(title=title)
+    controller = attach_fn(viewer)
+    controller.mount(viewer)
+    if before_run is not None:
+        before_run()
+    napari.run()
+    return getattr(controller, "result", None)

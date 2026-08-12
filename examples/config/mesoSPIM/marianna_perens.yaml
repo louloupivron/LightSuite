@@ -1,0 +1,77 @@
+# Marianna CMU — end-to-end: 2.5× ROI segmentation → 0.8× overview → Perens 20 µm atlas
+#
+# Pair with the multires config:
+#   examples/config/multiresolution/marianna_multires.yaml
+#
+# Phase 1 — multires (ROI → overview, warp Arivis segmentation):
+#   uv run lightsuite multires validate-config      -c examples/config/multiresolution/marianna_multires.yaml
+#   uv run lightsuite multires run                  -c examples/config/multiresolution/marianna_multires.yaml --through register
+#   uv run lightsuite multires import-annotations   -c examples/config/multiresolution/marianna_multires.yaml
+#
+# Phase 2 — brain (0.8× overview → Perens atlas, import overview-space annotations):
+#   uv run lightsuite doctor                        -c examples/config/mesoSPIM/marianna_perens.yaml
+#   uv run lightsuite brain validate-config         -c examples/config/mesoSPIM/marianna_perens.yaml
+#   uv run lightsuite brain run                     -c examples/config/mesoSPIM/marianna_perens.yaml --through match-points --resume
+#   uv run lightsuite brain run                     -c examples/config/mesoSPIM/marianna_perens.yaml --from register --resume --include-optional
+#
+# MATLAB parity run (pre-warped 0.8× annotations, no multires import): marianna_yosi_parity.yaml
+
+sample:
+  name: Marianna
+  source:
+    format: tiff_stack
+    path: /media/gbm/NVME2/ALICe-pipelines-data/Marianna_CMU/0.8X
+    tiff_type: channelperfile
+  scratch: /media/gbm/NVME2/lightsuite_scratch
+  save_path: /media/gbm/NVME2/ALICe-pipelines-data/Marianna_CMU/register_perens_python
+  voxel_um: [8.23, 8.23, 5.0]
+
+atlas:
+  provider: perens
+  resolution_um: 20
+  atlas_dir: /home/gbm/ALICe-pipelines/LightSuite/atlas/perens_20um/
+
+registration:
+  channel_primary: 1
+  channel_secondary: 2
+  dual_channel_mi_weight_autofluor: 0.5
+  dual_channel_mi_weight_signal: 1.0
+  resolution_um: 20
+  bspline_spatial_scale_mm: 0.64
+  control_point_weight: 0.6
+  augment_points: false
+  orientation: [2, 1, 3]
+  bcpd_path: /home/gbm/ALICe-pipelines/LightSuite/softwares/bcpd-master/
+  bspline_bending_weight: 0
+  use_slice_correspondence_affine: false
+  use_slice_correspondence_landmarks: false
+
+detection:
+  enabled: false
+
+compute:
+  use_gpu: false
+  workers: 4
+
+export:
+  spaces: [atlas, sample]
+  save_registered_volume: true
+  save_sample_space_volume: true
+  write_cells_csv: true
+  registered_volume_format: tiff
+
+# Written by multires import-annotations (ROI-native Arivis → 0.8× overview grid).
+import:
+  write_csv: true
+  annotations:
+    - format: points_csv
+      path: /media/gbm/NVME2/ALICe-pipelines-data/Marianna_CMU/multiresolution_results/annotations_in_overview/arivis_cells_in_overview.csv
+      label: arivis_cells
+    - format: mask_tiff
+      path: /media/gbm/NVME2/ALICe-pipelines-data/Marianna_CMU/multiresolution_results/annotations_in_overview/arivis_mask_in_overview.tif
+      label: arivis_mask
+
+analysis:
+  write_tidy_csv: true
+  count_points: true
+  point_labels: [arivis_cells]
