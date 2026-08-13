@@ -132,7 +132,7 @@ def register_spinal_commands(app: typer.Typer) -> None:
         include_optional: bool = typer.Option(
             True,
             "--include-optional/--no-include-optional",
-            help="Run optional import-annotations and region-stats when configured.",
+            help="Run optional import-annotations when configured (region stats run with export/import).",
         ),
         headless: bool = typer.Option(
             False,

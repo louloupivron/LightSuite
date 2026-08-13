@@ -8,7 +8,11 @@ import numpy as np
 import pandas as pd
 import tifffile
 
-from lightsuite.analysis.cord_runner import run_cord_region_stats
+from lightsuite.analysis.cord_runner import (
+    cord_analysis_requested,
+    resolve_cord_stats_spaces,
+    run_cord_region_stats,
+)
 from lightsuite.config.models import CordAtlasConfig, CordRegistrationConfig, CordSampleConfig, SpinalCordPipelineConfig
 from lightsuite.export.cord_registered import REGISTERED_ANNOTATION_FILENAME
 
@@ -72,3 +76,18 @@ def test_run_cord_region_stats_intensity_only(tmp_path: Path) -> None:
     df = pd.read_csv(result.combined_path)
     assert "median_intensity" in df["metric"].values
     assert (df["segment"] == "C1").any()
+
+
+def test_resolve_cord_stats_spaces_intersects_export(tmp_path: Path) -> None:
+    config = _minimal_config(tmp_path)
+    config.analysis.stats_spaces = ["atlas", "sample"]
+    assert resolve_cord_stats_spaces(["atlas"], config) == ["atlas"]
+    assert resolve_cord_stats_spaces(["sample"], config) == ["sample"]
+
+
+def test_cord_analysis_requested_respects_flags(tmp_path: Path) -> None:
+    config = _minimal_config(tmp_path)
+    assert cord_analysis_requested(config)
+    config.analysis.parcellate_intensities = False
+    config.analysis.count_points = False
+    assert not cord_analysis_requested(config)

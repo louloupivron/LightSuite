@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -210,3 +211,79 @@ def test_shell_auto_stage_does_not_import_napari_qt() -> None:
 
     source = inspect.getsource(LightsuiteShell._run_auto_stage)
     assert "napari.qt" not in source
+
+
+def test_require_napari_raises_on_incomplete_vispy(monkeypatch) -> None:
+    from lightsuite.gui import stage_controller
+
+    monkeypatch.setattr(stage_controller, "_validate_pint_install", lambda: None)
+    monkeypatch.setattr(stage_controller, "_validate_napari_install", lambda: None)
+    monkeypatch.setattr(
+        stage_controller,
+        "_validate_vispy_install",
+        lambda: (_ for _ in ()).throw(
+            RuntimeError("missing spatial-filters.npy"),
+        ),
+    )
+    with patch.dict("sys.modules", {"napari": MagicMock()}):
+        with pytest.raises(RuntimeError, match="spatial-filters"):
+            stage_controller.require_napari()
+
+
+def test_validate_vispy_install_accepts_complete_package() -> None:
+    from lightsuite.gui.stage_controller import _validate_vispy_install
+
+    try:
+        import vispy
+    except ImportError:
+        pytest.skip("vispy not installed")
+    spatial_filters = (
+        Path(vispy.__file__).resolve().parent / "io" / "_data" / "spatial-filters.npy"
+    )
+    if not spatial_filters.is_file():
+        pytest.skip("vispy installed without spatial-filters data")
+    _validate_vispy_install()
+
+
+def test_validate_vispy_install_raises_when_data_missing(tmp_path, monkeypatch) -> None:
+    from lightsuite.gui.stage_controller import _validate_vispy_install
+
+    vispy_root = tmp_path / "vispy_pkg"
+    vispy_root.mkdir()
+    (vispy_root / "io" / "_data").mkdir(parents=True)
+    fake_vispy = MagicMock()
+    fake_vispy.__file__ = str(vispy_root / "__init__.py")
+    monkeypatch.setitem(__import__("sys").modules, "vispy", fake_vispy)
+    with pytest.raises(RuntimeError, match="reinstall-package vispy"):
+        _validate_vispy_install()
+
+
+def test_validate_napari_install_accepts_complete_package() -> None:
+    from lightsuite.gui.stage_controller import _validate_napari_install
+
+    try:
+        import napari
+    except ImportError:
+        pytest.skip("napari not installed")
+    logo = (
+        Path(napari.__file__).resolve().parent
+        / "resources"
+        / "logos"
+        / "gradient-plain-dark.svg"
+    )
+    if not logo.is_file():
+        pytest.skip("napari installed without bundled logo resources")
+    _validate_napari_install()
+
+
+def test_validate_napari_install_raises_when_resources_missing(tmp_path, monkeypatch) -> None:
+    from lightsuite.gui.stage_controller import _validate_napari_install
+
+    napari_root = tmp_path / "napari_pkg"
+    napari_root.mkdir()
+    (napari_root / "resources" / "logos").mkdir(parents=True)
+    fake_napari = MagicMock()
+    fake_napari.__file__ = str(napari_root / "__init__.py")
+    monkeypatch.setitem(__import__("sys").modules, "napari", fake_napari)
+    with pytest.raises(RuntimeError, match="uv sync --extra gui"):
+        _validate_napari_install()

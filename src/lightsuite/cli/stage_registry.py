@@ -35,6 +35,7 @@ class StageContext:
     config_path: Path
     headless: bool = False
     force_preprocess: bool = False
+    export_spaces: list[str] | None = None
 
 
 StageRunner = Callable[[Any, StageContext], Any]
@@ -93,7 +94,7 @@ def _brain_register(config: Any, ctx: StageContext) -> Any:
 def _brain_export(config: Any, ctx: StageContext) -> Any:
     from lightsuite.export.brain_export import export_registered_brain_volumes
 
-    return export_registered_brain_volumes(config)
+    return export_registered_brain_volumes(config, spaces=ctx.export_spaces)
 
 
 def _brain_import_annotations(config: Any, ctx: StageContext) -> Any:
@@ -117,7 +118,7 @@ def _spinal_check_orientation(config: Any, ctx: StageContext) -> Any:
 def _spinal_preprocess(config: Any, ctx: StageContext) -> Any:
     from lightsuite.preprocess.cord import preprocess_spinal_cord_sample
 
-    return preprocess_spinal_cord_sample(config)
+    return preprocess_spinal_cord_sample(config, headless=ctx.headless)
 
 
 def _spinal_straighten(config: Any, ctx: StageContext) -> Any:
@@ -153,13 +154,19 @@ def _spinal_register(config: Any, ctx: StageContext) -> Any:
 def _spinal_export(config: Any, ctx: StageContext) -> Any:
     from lightsuite.export.cord_export import export_registered_cord_volumes
 
-    return export_registered_cord_volumes(config)
+    return export_registered_cord_volumes(config, spaces=ctx.export_spaces)
 
 
 def _spinal_import_annotations(config: Any, ctx: StageContext) -> Any:
     from lightsuite.import_.cord_import import run_cord_import_annotations
 
     return run_cord_import_annotations(config)
+
+
+def _spinal_view_registration(config: Any, ctx: StageContext) -> Any:
+    from lightsuite.gui.view_registered_cord import run_spinal_view_registration
+
+    return run_spinal_view_registration(config, space="sample", headless=ctx.headless)
 
 
 def _spinal_region_stats(config: Any, ctx: StageContext) -> Any:
@@ -229,6 +236,7 @@ _SPINAL_RUNNERS: dict[str, StageRunner] = {
     "match-points": _spinal_match_points,
     "register": _spinal_register,
     "export": _spinal_export,
+    "view-registration": _spinal_view_registration,
     "import-annotations": _spinal_import_annotations,
     "region-stats": _spinal_region_stats,
 }

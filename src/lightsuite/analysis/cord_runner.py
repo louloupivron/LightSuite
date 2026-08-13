@@ -45,6 +45,47 @@ from lightsuite.registration.volume import load_registration_volume
 console = Console()
 
 
+def cord_analysis_requested(config: SpinalCordPipelineConfig) -> bool:
+    """True when export/import should run region-stats assembly."""
+    return bool(
+        config.analysis.parcellate_intensities or config.analysis.count_points
+    )
+
+
+def resolve_cord_stats_spaces(
+    export_spaces: list[str],
+    config: SpinalCordPipelineConfig,
+) -> list[str]:
+    """Limit stats to spaces that were exported and configured in analysis.stats_spaces."""
+    export_set = {str(space).strip().lower() for space in export_spaces}
+    configured = [str(space).strip().lower() for space in config.analysis.stats_spaces]
+    stats_spaces = [space for space in configured if space in export_set]
+    if not stats_spaces:
+        stats_spaces = sorted(export_set & {"atlas", "sample"})
+    return stats_spaces
+
+
+def maybe_run_cord_region_stats(
+    config: SpinalCordPipelineConfig,
+    *,
+    export_spaces: list[str],
+    run_region_stats: bool | None = None,
+) -> CordRegionStatsRunResult | None:
+    """Run region stats when analysis is enabled; skip quietly on missing prerequisites."""
+    if run_region_stats is False:
+        return None
+    if not cord_analysis_requested(config):
+        return None
+    stats_spaces = resolve_cord_stats_spaces(export_spaces, config)
+    if not stats_spaces:
+        return None
+    try:
+        return run_cord_region_stats(config, stats_spaces=stats_spaces)
+    except (ValueError, FileNotFoundError) as exc:
+        console.print(f"[yellow]Region stats skipped:[/yellow] {exc}")
+        return None
+
+
 @dataclass
 class CordRegionStatsRunResult:
     combined_path: Path | None = None

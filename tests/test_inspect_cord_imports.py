@@ -10,8 +10,10 @@ import yaml
 
 from lightsuite.config.loader import load_spinal_config
 from lightsuite.gui.inspect_cord_imports import (
+    cord_view_spaces_available,
     discover_cord_import_inspect_paths,
     load_cord_import_inspect_volumes,
+    resolve_cord_view_space,
 )
 
 
@@ -67,6 +69,50 @@ def test_discover_cord_import_inspect_paths(tmp_path: Path) -> None:
     assert paths.volume_registered_dir.is_dir()
     assert "cells" in paths.point_npz_paths
     assert 1 in paths.registered_channels
+
+
+def test_resolve_cord_view_space_falls_back_to_atlas(tmp_path: Path) -> None:
+    config_path = _write_minimal_config(tmp_path)
+    cfg = load_spinal_config(config_path)
+    available = cord_view_spaces_available(cfg)
+    assert available["atlas"] is True
+    assert available["sample"] is False
+    assert resolve_cord_view_space(cfg, preferred="sample") == "atlas"
+
+
+def test_resolve_cord_view_space_prefers_sample_when_exported(tmp_path: Path) -> None:
+    import json
+
+    from lightsuite.export.cord_sample_space import (
+        ANNOTATION_IN_SAMPLE,
+        MANIFEST_NAME,
+        TEMPLATE_IN_SAMPLE,
+    )
+    from lightsuite.io.tiff_write import save_registration_volume
+
+    config_path = _write_minimal_config(tmp_path)
+    cfg = load_spinal_config(config_path)
+    out = tmp_path / "registered" / "volume_registered" / "sample_space"
+    out.mkdir(parents=True)
+    shape = (8, 8, 4)
+    save_registration_volume(np.zeros(shape, dtype=np.uint16), out / "chan_01_sample_straight_20um.tif")
+    save_registration_volume(np.ones(shape, dtype=np.uint16), out / ANNOTATION_IN_SAMPLE)
+    save_registration_volume(np.full(shape, 2, dtype=np.uint16), out / TEMPLATE_IN_SAMPLE)
+    (out / MANIFEST_NAME).write_text(
+        json.dumps(
+            {
+                "channel_paths": {"1": str(out / "chan_01_sample_straight_20um.tif")},
+                "annotation_path": str(out / ANNOTATION_IN_SAMPLE),
+                "template_path": str(out / TEMPLATE_IN_SAMPLE),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert resolve_cord_view_space(cfg, preferred="sample") == "sample"
+    available = cord_view_spaces_available(cfg)
+    assert available["sample"] is True
+    assert available["atlas"] is True
 
 
 def test_load_cord_import_inspect_volumes_headless(tmp_path: Path) -> None:

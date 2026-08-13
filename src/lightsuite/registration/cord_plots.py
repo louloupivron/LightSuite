@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import matplotlib.pyplot as plt
+import matplotlib
+
+matplotlib.use("Agg")
+
+from matplotlib.backends.backend_agg import FigureCanvasAgg
+from matplotlib.figure import Figure
 import numpy as np
 from scipy import ndimage
 
@@ -172,7 +177,8 @@ def save_cord_annotation_preview(
     n_long = 4
     bg_threshold = _tissue_threshold(volume)
 
-    fig = plt.figure(figsize=(15, 8.5), dpi=120)
+    fig = Figure(figsize=(15, 8.5), dpi=120)
+    FigureCanvasAgg(fig)
     gs = fig.add_gridspec(2, 2, width_ratios=[1, 1], height_ratios=[1, 1.2], wspace=0.08, hspace=0.12)
     ax_coronal = gs[0, 0].subgridspec(1, n_long, wspace=0.05)
     ax_sagittal = gs[0, 1].subgridspec(1, n_long, wspace=0.05)
@@ -224,5 +230,4 @@ def save_cord_annotation_preview(
     if title:
         fig.suptitle(title, fontsize=10)
     fig.savefig(output_path, bbox_inches="tight", pad_inches=0.05)
-    plt.close(fig)
     return output_path

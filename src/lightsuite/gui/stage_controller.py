@@ -15,7 +15,56 @@ def require_napari() -> Any:
         msg = "Napari GUI requires: uv sync --extra gui"
         raise RuntimeError(msg) from exc
     _validate_pint_install()
+    _validate_vispy_install()
+    _validate_napari_install()
     return napari
+
+
+def _validate_napari_install() -> None:
+    """Catch incomplete napari / PyOpenGL installs before Qt tries to create a GL context."""
+    from pathlib import Path
+
+    import napari
+
+    logo = Path(napari.__file__).resolve().parent / "resources" / "logos" / "gradient-plain-dark.svg"
+    if not logo.is_file():
+        msg = (
+            "The napari package in this environment is incomplete "
+            "(missing resources/logos/gradient-plain-dark.svg). "
+            "Repair with: uv sync --extra gui"
+        )
+        raise RuntimeError(msg)
+
+    try:
+        from OpenGL.arrays import numpymodule  # noqa: F401
+    except ImportError as exc:
+        msg = (
+            "PyOpenGL is missing or incomplete (required for Napari). "
+            "Repair with: uv sync --extra gui"
+        )
+        raise RuntimeError(msg) from exc
+
+
+def _validate_vispy_install() -> None:
+    """Napari image layers need vispy spatial-filter data shipped with the wheel."""
+    try:
+        import vispy
+    except ImportError:
+        return
+    from pathlib import Path
+
+    spatial_filters = (
+        Path(vispy.__file__).resolve().parent / "io" / "_data" / "spatial-filters.npy"
+    )
+    if spatial_filters.is_file():
+        return
+    msg = (
+        "The vispy package in this environment is incomplete "
+        "(missing io/_data/spatial-filters.npy). "
+        "Repair with: uv sync --extra gui --reinstall-package vispy "
+        "(or run `uv sync --extra gui` if other GUI packages are missing)"
+    )
+    raise RuntimeError(msg)
 
 
 def _validate_pint_install() -> None:

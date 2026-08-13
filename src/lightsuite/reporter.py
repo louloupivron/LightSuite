@@ -33,13 +33,15 @@ def capture_pipeline_output(reporter: Reporter | None) -> Iterator[None]:
     original_print = Console.print
 
     def forwarding_print(self: Console, *args: object, **kwargs: object) -> None:
-        original_print(self, *args, **kwargs)
+        active = _current_reporter.get()
         capture_kwargs = {key: value for key, value in kwargs.items() if key != "file"}
+        if active is None:
+            original_print(self, *args, **kwargs)
+            return
         with self.capture() as captured:
             original_print(self, *args, **capture_kwargs)
         text = captured.get().strip()
-        active = _current_reporter.get()
-        if text and active is not None:
+        if text:
             active.message(text)
 
     class _StreamWriter(io.TextIOBase):

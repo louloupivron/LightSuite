@@ -79,4 +79,4 @@ def test_spinal_preprocess_requires_orientation(tmp_path: Path) -> None:
     config_path = _write_config(tmp_path, fixture_root)
     cfg = load_spinal_config(config_path)
     with pytest.raises(FileNotFoundError, match="cord_orientation.txt"):
-        preprocess_spinal_cord_sample(cfg)
+        preprocess_spinal_cord_sample(cfg, headless=True)

@@ -73,6 +73,7 @@ def read_spinal_cord_sample(config: SpinalCordPipelineConfig) -> CordSampleVolum
             registrationres_um=regres,
             skip_corrupt_slices=skip_corrupt,
             channel_folders=channel_folders,
+            workers=config.compute.workers,
         )
     elif layout == CordTiffLayout.MULTICHANNEL_SINGLE:
         files = _sorted_tiff_files(folder)

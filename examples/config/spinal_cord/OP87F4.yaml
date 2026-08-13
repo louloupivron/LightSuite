@@ -1,64 +1,82 @@
-# Developer sample — machine-specific paths (OP87F4). Template: examples/spinal_cord.yaml
-#   uv run lightsuite doctor -c examples/spinal_cord.yaml
+# OP87F4 — SMART lightsheet spinal cord (3 channels, 1.8 µm native)
+#
+#   uv run lightsuite doctor                        -c examples/config/spinal_cord/OP87F4.yaml
+#   uv run lightsuite spinal validate-config        -c examples/config/spinal_cord/OP87F4.yaml
+#   uv run lightsuite gui                           -c examples/config/spinal_cord/OP87F4.yaml
+#   uv run lightsuite spinal run                    -c examples/config/spinal_cord/OP87F4.yaml --resume
+#
+# Channel folders (plane-per-file TIFFs):
+#   Ch0 = 488 nm autofluorescence
+#   Ch1 = 561 nm
+#   Ch2 = 640 nm
+#
+# Orientation was set previously (caudorostral) in registered/cord_orientation.txt.
 
 sample:
-  name: example_spinal_cord
+  name: OP87F4
   source:
     format: tiff_stack
-    # Single-channel (omit channels and set path):
-    # path: /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP93M1/Ex_561_Em_561F_Ch2_stitched
-    # Multi-channel Terastitcher (one folder per channel) — same as brain:
     tiff_type: planeperfile
     channels:
+      - /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP87F4/All_Channels/Ch0
       - /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP87F4/All_Channels/Ch1
-    # auto: detect plane-per-file (Terastitcher) vs channel-per-file (default for single path)
-    # planeperfile: one 2D TIFF per Z slice (large datasets)
-    # channelperfile: one multi-page TIFF per channel
-    # multichannel_single: single stack with interleaved channels (Bioformats layout)
-    # skip_corrupt_slices: true  # optional: drop unreadable plane TIFFs
+      - /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP87F4/All_Channels/Ch2
+    # Ch0 has a few extra Z planes vs Ch1/Ch2; enable if preprocess complains:
+    # skip_corrupt_slices: true
   scratch: /media/gbm/NVME2/lightsuite_scratch
   save_path: /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP87F4/registered
-  # Native microscope voxel size in µm (NOT the registration grid).
   voxel_um: [1.8, 1.8, 1.8]
 
 atlas:
   atlas_dir: /home/gbm/ALICe-pipelines/LightSuite/atlas/SC_P56_Atlas_10x10x20_v5_2020
 
 registration:
+  channel_primary: 1
   resolution_um: 20
-  channel_primary: 2
-  # Optional: skip GUI and set orientation in YAML instead of cord_orientation.txt
-  # longitudinal_direction: caudorostral  # or rostrocaudal
-  control_point_weight: 0.2
+  longitudinal_direction: caudorostral
+  control_point_weight: 0.5
   straightening_lambda_pos: 5000
   straightening_lambda_ang: 5000
 
 compute:
   workers: 4
 
-import:
-  write_csv: true
-  annotations:
-    - format: points_csv
-      path: /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP87F4/annotations/imaris_Coloc_pink_yellow_points.csv
-      label: imaris_Coloc_pink_yellow
-    - format: points_csv
-      path: /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP87F4/annotations/imaris_coloc_cyan_pink_points.csv
-      label: imaris_coloc_cyan_pink
-    - format: points_csv
-      path: /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP87F4/annotations/imaris_Coloc_cyan_yellow_points.csv
-      label: imaris_Coloc_cyan_yellow
-
-analysis:
-  parcellate_intensities: true
-  intensity_channels: [1]
-  rollups: [division, structure, horn]
-  split_hemispheres: true
-  count_points: true
-  point_labels:
-    - imaris_Coloc_pink_yellow
-    - imaris_coloc_cyan_pink
-    - imaris_Coloc_cyan_yellow
-  # Optional: override default plot output dir (sample.save_path/plots)
-  # plots_dir: /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP87F4/registered/plots
-
+# Imaris spots (Spot_OnePageMultiComponent_Detailed.csv) — components:
+#   TA, Virus, GM, Colloc Virus TA
+#
+# After preprocess, convert with shape from registered/sample_reference.json:
+#   uv run lightsuite spinal convert-imaris-spots \
+#     -s /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP87F4/Spot_OnePageMultiComponent_Detailed.csv \
+#     -o /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP87F4/annotations \
+#     --voxel-um 1,1,1.8 \
+#     --shape-yxz 10234,2006,837
+#
+# Then uncomment import + analysis below and run import-annotations / region-stats.
+#
+# import:
+#   write_csv: true
+#   annotations:
+#     - format: points_csv
+#       path: /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP87F4/annotations/imaris_TA_points.csv
+#       label: imaris_TA
+#     - format: points_csv
+#       path: /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP87F4/annotations/imaris_Virus_points.csv
+#       label: imaris_Virus
+#     - format: points_csv
+#       path: /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP87F4/annotations/imaris_GM_points.csv
+#       label: imaris_GM
+#     - format: points_csv
+#       path: /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP87F4/annotations/imaris_Colloc_Virus_TA_points.csv
+#       label: imaris_Colloc_Virus_TA
+#
+# analysis:
+#   parcellate_intensities: true
+#   intensity_channels: [1]
+#   rollups: [division, structure, horn]
+#   split_hemispheres: true
+#   count_points: true
+#   point_labels:
+#     - imaris_TA
+#     - imaris_Virus
+#     - imaris_GM
+#     - imaris_Colloc_Virus_TA

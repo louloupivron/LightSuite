@@ -24,7 +24,9 @@ from lightsuite.preprocess.cord_checkpoint import CordRegOptsCheckpoint
 from lightsuite.registration.cord_orientation import (
     CAUDOROSTRAL,
     ROSTROCAUDAL,
+    cord_orientation_path,
     load_cord_orientation,
+    resolve_cord_orientation,
     save_cord_orientation,
 )
 from lightsuite.registration.cord_paths import cord_cache_dir, cord_save_path
@@ -99,6 +101,33 @@ def _load_atlas_template(config: SpinalCordPipelineConfig) -> np.ndarray:
     volumes = load_fiederling_atlas_volumes(config.atlas)
     tv, _ = resize_fiederling_atlas(volumes, config.registration.resolution_um)
     return tv
+
+
+def cord_orientation_missing(config: SpinalCordPipelineConfig) -> bool:
+    """True when preprocess must collect orientation (no YAML value or saved file)."""
+    if config.registration.longitudinal_direction is not None:
+        return False
+    return load_cord_orientation(cord_save_path(config)) is None
+
+
+def ensure_cord_orientation(
+    config: SpinalCordPipelineConfig,
+    *,
+    headless: bool = False,
+) -> str:
+    """Resolve cord orientation, opening Napari when it has not been set yet."""
+    save_path = cord_save_path(config)
+    if not headless and cord_orientation_missing(config):
+        console.print(
+            "[bold]Cord orientation required[/bold] — opening Napari to set the "
+            "rostrocaudal direction (writes cord_orientation.txt)."
+        )
+        run_spinal_orientation(config, headless=False)
+    return resolve_cord_orientation(
+        save_path,
+        config_direction=config.registration.longitudinal_direction,
+        require=True,
+    )
 
 
 def load_cord_orientation_check_data(config: SpinalCordPipelineConfig) -> CordOrientationData:
@@ -229,4 +258,11 @@ def run_spinal_orientation(
             f"Writes cord_orientation.txt in {save_path}."
         ),
     )
-    return save_cord_orientation(save_path, data.direction, source="manual")
+    stored = load_cord_orientation(save_path)
+    if stored is None:
+        msg = (
+            f"Orientation not saved. Use Save in the Napari window to write "
+            f"{cord_orientation_path(save_path)}."
+        )
+        raise RuntimeError(msg)
+    return cord_orientation_path(save_path)

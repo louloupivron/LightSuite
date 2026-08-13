@@ -12,6 +12,7 @@ from lightsuite.gui.control_points import ControlPointSession, default_session_p
 from lightsuite.gui.slice_correspondence import default_correspondence_path
 from lightsuite.multires.checkpoint import MultiresRegOptsCheckpoint, multires_checkpoint_path
 from lightsuite.preprocess.checkpoint import RegOptsCheckpoint
+from lightsuite.preprocess.cord_checkpoint import CordRegOptsCheckpoint
 from lightsuite.registration.cord_longitudinal import default_longitudinal_correspondence_path
 from lightsuite.registration.cord_orientation import CORD_ORIENTATION_FILENAME
 from lightsuite.registration.orientation import orientation_path
@@ -53,6 +54,13 @@ def _load_regopts(save_path: Path) -> RegOptsCheckpoint | None:
     return RegOptsCheckpoint.load(path)
 
 
+def _load_cord_regopts(save_path: Path) -> CordRegOptsCheckpoint | None:
+    path = save_path / "regopts.json"
+    if not path.is_file():
+        return None
+    return CordRegOptsCheckpoint.load(path)
+
+
 def _load_multires_checkpoint(save_path: Path) -> MultiresRegOptsCheckpoint | None:
     path = multires_checkpoint_path(save_path)
     if not path.is_file():
@@ -66,17 +74,6 @@ def _has_import_annotations(config: _Config) -> bool:
         return False
     annotations = getattr(import_cfg, "annotations", None)
     return bool(annotations)
-
-
-def _has_spinal_analysis(config: SpinalCordPipelineConfig) -> bool:
-    analysis = config.analysis
-    if analysis is None:
-        return False
-    return bool(
-        analysis.parcellate_intensities
-        or analysis.count_points
-        or analysis.rollups
-    )
 
 
 def brain_stage_specs(config: BrainPipelineConfig) -> list[StageSpec]:
@@ -139,6 +136,7 @@ def spinal_stage_specs(config: SpinalCordPipelineConfig) -> list[StageSpec]:
                 "check-orientation",
                 "Check orientation",
                 CORD_ORIENTATION_FILENAME,
+                optional=True,
                 manual=True,
             )
         )
@@ -165,7 +163,14 @@ def spinal_stage_specs(config: SpinalCordPipelineConfig) -> list[StageSpec]:
                 manual=True,
             ),
             StageSpec("register", "Register", "transform_params.json"),
-            StageSpec("export", "Export", "volume_registered/"),
+            StageSpec("export", "Export", "volume_registered/ (+ region stats)"),
+            StageSpec(
+                "view-registration",
+                "View registration",
+                "channels + annotation + imports (Napari)",
+                optional=True,
+                manual=True,
+            ),
         ]
     )
     if _has_import_annotations(config):
@@ -174,15 +179,6 @@ def spinal_stage_specs(config: SpinalCordPipelineConfig) -> list[StageSpec]:
                 "import-annotations",
                 "Import annotations",
                 "volume_registered/import_annotations_summary.json",
-                optional=True,
-            )
-        )
-    if _has_spinal_analysis(config):
-        stages.append(
-            StageSpec(
-                "region-stats",
-                "Region stats",
-                "volume_registered/region_stats_*.csv",
                 optional=True,
             )
         )
@@ -299,7 +295,7 @@ def _spinal_stage_done(
     save_path: Path,
     config: SpinalCordPipelineConfig,
 ) -> tuple[bool, str]:
-    regopts = _load_regopts(save_path)
+    regopts = _load_cord_regopts(save_path)
     if stage_id == "check-orientation":
         if config.registration.longitudinal_direction is not None:
             return True, "registration.longitudinal_direction in YAML"
@@ -324,7 +320,10 @@ def _spinal_stage_done(
             return True, "transform_params.json (post-init)"
         if regopts is None:
             return False, "missing regopts.json"
-        return regopts.original_trans is not None, "original_trans in regopts.json"
+        return (
+            regopts.affine_atlas_to_samp is not None,
+            "affine_atlas_to_samp in regopts.json",
+        )
     if stage_id == "match-points":
         from lightsuite.gui.cord_data import default_cord_session_path
 
@@ -339,17 +338,30 @@ def _spinal_stage_done(
         return tpath.is_file(), str(tpath)
     if stage_id == "export":
         vr = save_path / "volume_registered"
-        return vr.is_dir() and any(vr.iterdir()), str(vr)
+        if not vr.is_dir() or not any(vr.iterdir()):
+            return False, str(vr)
+        if config.analysis.parcellate_intensities:
+            stats = list(vr.glob("region_stats*.csv")) + list(vr.glob("chan*_region_stats.csv"))
+            if not stats:
+                return False, "volumes exported; intensity region stats missing"
+        return True, str(vr)
+    if stage_id == "view-registration":
+        vr = save_path / "volume_registered"
+        if not vr.is_dir():
+            return False, str(vr)
+        tiffs = list(vr.glob("*.tif")) + list(vr.glob("*.tiff"))
+        npz = list(vr.glob("*_atlas_coords.npz")) + list(vr.glob("*_sample_coords.npz"))
+        if tiffs or npz:
+            detail = (
+                f"{len(tiffs)} TIFF(s), {len(npz)} import layer(s)"
+                if npz
+                else f"{len(tiffs)} TIFF(s)"
+            )
+            return True, detail
+        return False, "run export and/or import-annotations first"
     if stage_id == "import-annotations":
         summary = save_path / "volume_registered" / "import_annotations_summary.json"
         return summary.is_file(), str(summary)
-    if stage_id == "region-stats":
-        vr = save_path / "volume_registered"
-        stats = list(vr.glob("region_stats*.csv")) + list(vr.glob("*_region_stats.csv"))
-        plots = config.sample.save_path / "plots"
-        if stats:
-            return True, f"{len(stats)} stats CSV(s)"
-        return plots.is_dir() and any(plots.glob("*.png")), str(plots)
     return False, "unknown stage"
 
 

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+import time
+from collections.abc import Iterator, Sequence
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -14,16 +16,63 @@ from skimage.transform import resize
 from lightsuite.config.models import CordTiffLayout
 from lightsuite.io.discover import _list_tiffs, _single_tiff_stack_info, discover_tiff_stack
 from lightsuite.config.models import TiffLayout
-from lightsuite.preprocess.slice_ops import read_source_plane, resize_xy_fast, SliceLoadJob
+from lightsuite.preprocess.slice_ops import read_source_plane, SliceLoadJob, process_slice_job
 
 from rich.console import Console
 
 console = Console()
 
 
-def _print_slice_progress(current: int, total: int) -> None:
-    if current == 1 or current % 100 == 0 or current == total:
-        console.print(f"  read slice {current} / {total}")
+def _effective_cord_plane_workers(requested: int, n_planes: int) -> int:
+    """Choose worker count for plane-per-file loads (bounded for many small TIFFs)."""
+    if requested <= 1 or n_planes <= 1:
+        return 1
+    return min(max(1, requested), 8, n_planes)
+
+
+def _report_plane_progress(
+    current: int,
+    total: int,
+    label: str,
+    t0: float,
+    *,
+    workers: int,
+) -> None:
+    if current != 1 and current % 50 != 0 and current != total:
+        return
+    elapsed = time.perf_counter() - t0
+    pct = 100.0 * current / max(total, 1)
+    rate = current / elapsed if elapsed > 0 else 0.0
+    eta = (total - current) / rate if rate > 0 else 0.0
+    worker_note = f", {workers} workers" if workers > 1 else ""
+    console.print(
+        f"  [{label}] plane {current}/{total} ({pct:.0f}%) — "
+        f"{elapsed:.0f}s elapsed, ~{eta:.0f}s left{worker_note}"
+    )
+
+
+def _iter_cord_plane_slices(
+    files: Sequence[Path],
+    scale_xy: float,
+    workers: int,
+) -> Iterator[np.ndarray]:
+    jobs = [
+        SliceLoadJob(
+            source_path=str(path),
+            z_page=None,
+            scale_xy=scale_xy,
+            fill_background=False,
+            capture_binary=False,
+        )
+        for path in files
+    ]
+    if workers <= 1:
+        for job in jobs:
+            yield process_slice_job(job).plane_xy
+        return
+    chunksize = max(1, len(jobs) // (workers * 4))
+    with ProcessPoolExecutor(max_workers=workers) as pool:
+        yield from (result.plane_xy for result in pool.map(process_slice_job, jobs, chunksize=chunksize))
 
 
 @dataclass(frozen=True)
@@ -289,6 +338,7 @@ def _load_one_plane_per_file_channel(
     channel_label: str | None = None,
     max_slices: int | None = None,
     files: Sequence[Path] | None = None,
+    workers: int = 1,
 ) -> tuple[np.ndarray, tuple[int, int, int], list[SkippedSlice]]:
     """Load one Terastitcher-style folder into a (Y, X, Z) uint16 volume."""
     skipped: list[SkippedSlice] = []
@@ -329,22 +379,29 @@ def _load_one_plane_per_file_channel(
             f"(sampleres {sampleres_um.tolist()} um -> registration {registrationres_um.tolist()} um)"
         )
 
+    effective_workers = _effective_cord_plane_workers(workers, len(files))
+    if effective_workers > 1:
+        console.print(f"  parallel plane loading: {effective_workers} workers")
+
+    t0 = time.perf_counter()
+
     if target_size == native_listed:
         vol = np.zeros((ny0, nx0, nz_listed), dtype=np.uint16)
-        for iz, path in enumerate(files, start=1):
-            vol[:, :, iz - 1] = read_plane_tiff(path)
-            _print_slice_progress(iz, nz_listed)
+        for iz, plane in enumerate(
+            _iter_cord_plane_slices(files, scale_xy, effective_workers),
+            start=1,
+        ):
+            vol[:, :, iz - 1] = plane
+            _report_plane_progress(iz, nz_listed, label, t0, workers=effective_workers)
         return vol, (ny0, nx0, nz_listed), skipped
 
-    backvol = np.zeros((target_ny, target_nx, 0), dtype=np.uint16)
-    for iz, path in enumerate(files, start=1):
-        plane = read_plane_tiff(path)
-        if np.isclose(scale_xy, 1.0):
-            xy = plane
-        else:
-            xy = resize_xy_fast(plane, scale_xy)
-        backvol = np.concatenate([backvol, xy[:, :, np.newaxis]], axis=2)
-        _print_slice_progress(iz, len(files))
+    backvol = np.zeros((target_ny, target_nx, nz_listed), dtype=np.uint16)
+    for iz, plane in enumerate(
+        _iter_cord_plane_slices(files, scale_xy, effective_workers),
+        start=1,
+    ):
+        backvol[:, :, iz - 1] = plane
+        _report_plane_progress(iz, nz_listed, label, t0, workers=effective_workers)
 
     if np.isclose(resfac[2], 1.0):
         finvol = backvol
@@ -372,6 +429,7 @@ def load_plane_per_file_stack(
     registrationres_um: np.ndarray,
     skip_corrupt_slices: bool = False,
     channel_folders: Sequence[Path] | None = None,
+    workers: int = 1,
 ) -> tuple[np.ndarray, tuple[int, int, int], list[SkippedSlice], CordTiffLayout]:
     """Load Terastitcher-style slice series with optional streaming XY/Z downsampling.
 
@@ -411,6 +469,7 @@ def load_plane_per_file_stack(
             skip_corrupt_slices=skip_corrupt_slices,
             channel_label=label,
             files=channel_files,
+            workers=workers,
         )
         if native_orisize is None:
             native_orisize = native

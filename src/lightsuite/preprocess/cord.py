@@ -18,13 +18,11 @@ from lightsuite.atlas.fiederling import (
     resolve_fiederling_paths,
 )
 from lightsuite.config.models import SpinalCordPipelineConfig
+from lightsuite.gui.orientation_cord import ensure_cord_orientation
 from lightsuite.io.cord_registration_cache import load_or_cache_cord_registration
 from lightsuite.io.cord_volume import normalize_res_um
 from lightsuite.preprocess.cord_checkpoint import CordRegOptsCheckpoint
-from lightsuite.registration.cord_orientation import (
-    resolve_cord_orientation,
-    tofliprc_from_direction,
-)
+from lightsuite.registration.cord_orientation import tofliprc_from_direction
 from lightsuite.registration.cord_paths import cord_cache_dir, cord_save_path
 
 console = Console()
@@ -62,17 +60,17 @@ def _brain_trim_range(ihigh: np.ndarray, tofliprc: bool, nz: int) -> list[int]:
     return ikeep
 
 
-def preprocess_spinal_cord_sample(config: SpinalCordPipelineConfig) -> CordPreprocessResult:
+def preprocess_spinal_cord_sample(
+    config: SpinalCordPipelineConfig,
+    *,
+    headless: bool = False,
+) -> CordPreprocessResult:
     """Prepare cord sample and atlas for straightening / registration."""
     save_path = cord_save_path(config)
     cache_dir = cord_cache_dir(config)
     save_path.mkdir(parents=True, exist_ok=True)
 
-    direction = resolve_cord_orientation(
-        save_path,
-        config_direction=config.registration.longitudinal_direction,
-        require=True,
-    )
+    direction = ensure_cord_orientation(config, headless=headless)
     tofliprc = tofliprc_from_direction(direction)
     console.print(
         f"Longitudinal orientation: [bold]{direction}[/bold] "

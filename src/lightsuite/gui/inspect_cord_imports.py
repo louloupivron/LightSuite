@@ -25,16 +25,46 @@ from lightsuite.export.cord_sample_space import (
 )
 from lightsuite.gui.cord_napari_display import align_sample_space_for_atlas_qc, load_cord_tofliprc
 from lightsuite.gui.brain_view_data import (
+    atlas_points_to_napari_zyx,
     label_from_stem,
     load_points_csv,
     load_points_npz,
     contrast_limits,
     volume_yxz_to_napari_zyx,
 )
-from lightsuite.gui.stage_controller import DockStageController, run_attached_stage
-from lightsuite.gui.view_registered_cord import _add_channel_layers, _add_point_layers
+from lightsuite.gui.stage_controller import DockStageController
 
 ViewSpace = Literal["atlas", "sample"]
+
+
+def _add_channel_layers(viewer, channels: dict[int, np.ndarray], *, name_suffix: str = "") -> None:
+    channel_cmaps = ["gray", "magenta", "cyan", "yellow", "green", "red"]
+    suffix = f" {name_suffix}".rstrip()
+    for idx, (ichan, vol) in enumerate(sorted(channels.items())):
+        cmap = channel_cmaps[idx % len(channel_cmaps)]
+        opacity = 1.0 if len(channels) == 1 else 0.65
+        viewer.add_image(
+            volume_yxz_to_napari_zyx(vol),
+            name=f"channel {ichan}{suffix}",
+            colormap=cmap,
+            blending="additive" if len(channels) > 1 else "opaque",
+            opacity=opacity,
+            contrast_limits=contrast_limits(vol),
+        )
+
+
+def _add_point_layers(viewer, point_layers: dict[str, np.ndarray]) -> None:
+    point_colors = ["red", "yellow", "cyan", "magenta", "orange", "lime"]
+    for idx, (label, coords) in enumerate(sorted(point_layers.items())):
+        napari_pts = atlas_points_to_napari_zyx(coords)
+        color = point_colors[idx % len(point_colors)]
+        viewer.add_points(
+            napari_pts,
+            name=f"points: {label}",
+            size=4,
+            face_color=color,
+            border_color="white",
+        )
 
 
 @dataclass(frozen=True)
@@ -68,6 +98,112 @@ def discover_cord_import_inspect_paths(
     if space == "sample":
         return _discover_cord_import_inspect_paths_sample(config)
     return _discover_cord_import_inspect_paths_atlas(config)
+
+
+def resolve_cord_view_space(
+    config: SpinalCordPipelineConfig,
+    *,
+    preferred: ViewSpace = "sample",
+) -> ViewSpace:
+    """Pick sample- or atlas-space review when the preferred export is missing."""
+    available = cord_view_spaces_available(config)
+    if preferred == "sample" and available["sample"]:
+        return "sample"
+    if available["atlas"]:
+        return "atlas"
+    if available["sample"]:
+        return "sample"
+
+    save_path = config.sample.save_path.expanduser()
+    from lightsuite.export.cord_sample_space import sample_space_dir
+
+    msg = (
+        f"Missing view-registration exports under {save_path / 'volume_registered'}. "
+        "Run 'lightsuite spinal export --space both' first."
+    )
+    raise FileNotFoundError(msg)
+
+
+def cord_view_spaces_available(config: SpinalCordPipelineConfig) -> dict[ViewSpace, bool]:
+    """Return which coordinate spaces can be opened in view-registration."""
+    available: dict[ViewSpace, bool] = {"sample": False, "atlas": False}
+    try:
+        discover_cord_import_inspect_paths(config, space="sample")
+    except FileNotFoundError:
+        pass
+    else:
+        available["sample"] = True
+    try:
+        discover_cord_import_inspect_paths(config, space="atlas")
+    except FileNotFoundError:
+        pass
+    else:
+        available["atlas"] = True
+    return available
+
+
+def cord_view_load_summary(
+    paths: CordImportInspectPaths,
+    volumes: CordImportInspectVolumes,
+    *,
+    space: ViewSpace,
+    config: SpinalCordPipelineConfig,
+) -> str:
+    """Short status line after loading a spinal view-registration space."""
+    summary_path = paths.volume_registered_dir / "import_annotations_summary.json"
+    space_note = "sample-space " if space == "sample" else "atlas-space "
+    parts = [
+        f"Loaded {space_note}{len(volumes.registered_channels)} channel(s) and "
+        f"{len(volumes.point_layers)} point layer(s)."
+    ]
+    if summary_path.is_file():
+        parts.append(f"Summary: {summary_path.name}.")
+    if space == "sample" and load_cord_tofliprc(config.sample.save_path):
+        parts.append("Sample Z flipped to match atlas rostrocaudal orientation (tofliprc).")
+    return " ".join(parts)
+
+
+def add_cord_view_layers(
+    viewer: Any,
+    config: SpinalCordPipelineConfig,
+    *,
+    paths: CordImportInspectPaths,
+    volumes: CordImportInspectVolumes,
+    space: ViewSpace,
+) -> None:
+    """Add Napari layers for one spinal view-registration coordinate space."""
+    if space == "sample":
+        template_name = "atlas template (warped)"
+        annotation_name = "atlas annotation (warped)"
+        channel_suffix = "straightened"
+    else:
+        template_name = "atlas template"
+        annotation_name = "atlas annotation"
+        channel_suffix = "registered"
+
+    viewer.add_image(
+        volume_yxz_to_napari_zyx(volumes.template),
+        name=template_name,
+        colormap="green",
+        blending="additive",
+        opacity=0.35,
+        contrast_limits=contrast_limits(volumes.template),
+    )
+    _add_channel_layers(viewer, volumes.registered_channels, name_suffix=channel_suffix)
+    viewer.add_labels(
+        volume_yxz_to_napari_zyx(volumes.annotation),
+        name=annotation_name,
+        opacity=0.45,
+    )
+    if space == "sample" and volumes.hemisphere is not None:
+        viewer.add_labels(
+            volume_yxz_to_napari_zyx(volumes.hemisphere),
+            name="hemisphere (warped)",
+            opacity=0.2,
+            visible=False,
+        )
+    if volumes.point_layers:
+        _add_point_layers(viewer, volumes.point_layers)
 
 
 def _discover_cord_import_inspect_paths_atlas(
@@ -255,63 +391,16 @@ def attach_cord_inspect_imports(
     """Attach spinal import QC layers to an existing napari viewer."""
     from napari.utils.notifications import show_info
 
-    if space == "sample":
-        template_name = "atlas template (warped)"
-        annotation_name = "atlas annotation (warped)"
-        channel_suffix = "straightened"
-    else:
-        template_name = "atlas template"
-        annotation_name = "atlas annotation"
-        channel_suffix = "registered"
-
-    viewer.add_image(
-        volume_yxz_to_napari_zyx(volumes.template),
-        name=template_name,
-        colormap="green",
-        blending="additive",
-        opacity=0.35,
-        contrast_limits=contrast_limits(volumes.template),
+    add_cord_view_layers(
+        viewer,
+        config,
+        paths=paths,
+        volumes=volumes,
+        space=space,
     )
-
-    _add_channel_layers(viewer, volumes.registered_channels, name_suffix=channel_suffix)
-
-    viewer.add_labels(
-        volume_yxz_to_napari_zyx(volumes.annotation),
-        name=annotation_name,
-        opacity=0.45,
-    )
-
-    if space == "sample" and volumes.hemisphere is not None:
-        viewer.add_labels(
-            volume_yxz_to_napari_zyx(volumes.hemisphere),
-            name="hemisphere (warped)",
-            opacity=0.2,
-            visible=False,
-        )
-
-    if volumes.point_layers:
-        _add_point_layers(viewer, volumes.point_layers)
-
-    summary_path = paths.volume_registered_dir / "import_annotations_summary.json"
-    space_note = "sample-space " if space == "sample" else ""
 
     def _notify() -> None:
-        if summary_path.is_file():
-            show_info(
-                f"Loaded {len(volumes.registered_channels)} {space_note}channel(s) and "
-                f"{len(volumes.point_layers)} point layer(s). "
-                f"Summary: {summary_path.name}"
-                + (
-                    " Sample Z flipped to match atlas rostrocaudal orientation (tofliprc)."
-                    if space == "sample" and load_cord_tofliprc(config.sample.save_path)
-                    else ""
-                )
-            )
-        else:
-            show_info(
-                f"Loaded {len(volumes.registered_channels)} {space_note}channel(s) and "
-                f"{len(volumes.point_layers)} point layer(s)."
-            )
+        show_info(cord_view_load_summary(paths, volumes, space=space, config=config))
 
     return DockStageController(
         dock_widgets=[],
@@ -327,37 +416,15 @@ def run_cord_inspect_imports(
     headless: bool = False,
     recompute_annotation: bool = False,
 ) -> CordImportInspectPaths:
-    """Open Napari to QC registered channels and imported annotations."""
-    paths = discover_cord_import_inspect_paths(config, space=space)
-    if headless:
-        load_cord_import_inspect_volumes(
-            config,
-            paths=paths,
-            space=space,
-            recompute_annotation=recompute_annotation,
-        )
-        return paths
+    """Open Napari to QC registered channels and imported annotations.
 
-    volumes = load_cord_import_inspect_volumes(
+    Deprecated alias — use :func:`lightsuite.gui.view_registered_cord.run_spinal_view_registration`.
+    """
+    from lightsuite.gui.view_registered_cord import run_spinal_view_registration
+
+    return run_spinal_view_registration(
         config,
-        paths=paths,
         space=space,
+        headless=headless,
         recompute_annotation=recompute_annotation,
     )
-
-    if space == "sample":
-        title = f"LightSuite spinal import QC — {config.sample.name} (sample, 20 µm straightened)"
-    else:
-        title = f"LightSuite spinal import QC — {config.sample.name} (atlas)"
-
-    def _attach(viewer: Any) -> DockStageController:
-        return attach_cord_inspect_imports(
-            viewer,
-            config,
-            paths=paths,
-            volumes=volumes,
-            space=space,
-        )
-
-    final = run_attached_stage(title, _attach)
-    return final if final is not None else paths

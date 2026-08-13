@@ -14,7 +14,10 @@ def load_cord_tofliprc(save_path: Path) -> bool:
     json_path = Path(save_path).expanduser() / "transform_params.json"
     if not json_path.is_file():
         return False
-    return bool(CordTransformParamsCheckpoint.load(json_path).tofliprc)
+    try:
+        return bool(CordTransformParamsCheckpoint.load(json_path).tofliprc)
+    except (TypeError, ValueError, OSError):
+        return False
 
 
 def flip_registration_z_volume_yxz(volume: np.ndarray) -> np.ndarray:

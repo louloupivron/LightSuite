@@ -120,8 +120,8 @@ def resolve_cord_orientation(
     if require:
         path = cord_orientation_path(save_path)
         msg = (
-            f"Missing {path}. Set the spinal cord longitudinal orientation first with "
-            "'lightsuite spinal check-orientation' (GUI) or set "
+            f"Missing {path}. Run 'lightsuite spinal preprocess' (opens the orientation "
+            "GUI when needed), 'lightsuite spinal check-orientation', or set "
             "registration.longitudinal_direction in the YAML config."
         )
         raise FileNotFoundError(msg)

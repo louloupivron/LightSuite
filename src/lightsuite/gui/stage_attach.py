@@ -35,6 +35,12 @@ def _brain_view_registration(viewer: Any, config: Any, ctx: StageContext) -> Sta
     return attach_brain_view_registration(viewer, config, space="sample")
 
 
+def _spinal_view_registration(viewer: Any, config: Any, ctx: StageContext) -> StageController:
+    from lightsuite.gui.view_registered_cord import attach_spinal_view_registration
+
+    return attach_spinal_view_registration(viewer, config, space="sample")
+
+
 def _spinal_orientation(viewer: Any, config: Any, ctx: StageContext) -> StageController:
     from lightsuite.gui.orientation_cord import attach_spinal_orientation
 
@@ -87,6 +93,7 @@ STAGE_ATTACH: dict[tuple[str, str], AttachFactory] = {
     ("brain", "match-points"): _brain_match_points,
     ("brain", "view-registration"): _brain_view_registration,
     ("spinal", "check-orientation"): _spinal_orientation,
+    ("spinal", "view-registration"): _spinal_view_registration,
     ("spinal", "straighten"): _spinal_straighten,
     ("spinal", "align-longitudinal"): _spinal_align_longitudinal,
     ("spinal", "match-points"): _spinal_match_points,

@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import threading
+import warnings
 from pathlib import Path
 
+import matplotlib
 import numpy as np
 import pytest
 
@@ -49,3 +52,34 @@ def test_save_cord_annotation_preview_writes_png(tmp_path: Path) -> None:
     out = save_cord_annotation_preview(volume, annotation, tmp_path / "qc.png")
     assert out.is_file()
     assert out.stat().st_size > 0
+
+
+def test_save_cord_annotation_preview_safe_on_background_thread(tmp_path: Path) -> None:
+    matplotlib.use("QtAgg", force=True)
+    volume = np.zeros((40, 20, 30), dtype=np.uint8)
+    annotation = np.zeros((40, 20, 30), dtype=np.uint16)
+    volume[15:25, 8:12, 10:20] = 200
+    annotation[16:24, 7:13, 12:18] = 5
+    errors: list[BaseException] = []
+
+    def _run() -> None:
+        try:
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                save_cord_annotation_preview(volume, annotation, tmp_path / "thread.png")
+            gui_warnings = [
+                w
+                for w in caught
+                if issubclass(w.category, UserWarning)
+                and "outside of the main thread" in str(w.message)
+            ]
+            if gui_warnings:
+                errors.append(RuntimeError(str(gui_warnings[0].message)))
+        except BaseException as exc:
+            errors.append(exc)
+
+    thread = threading.Thread(target=_run)
+    thread.start()
+    thread.join()
+    assert not errors, errors
+    assert (tmp_path / "thread.png").is_file()

@@ -8,6 +8,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from lightsuite.cli.spaces import (
+    default_export_space_checks,
+    export_spaces_from_checks,
+    format_export_spaces,
+)
 from lightsuite.cli.stage_registry import (
     StageContext,
     StageKind,
@@ -19,6 +24,7 @@ from lightsuite.cli.stages import StageState, StageStatus
 from lightsuite.config.workflow import load_project
 from lightsuite.gui.qt_workers import start_background_task
 from lightsuite.gui.stage_attach import get_stage_attach
+from lightsuite.gui.orientation_cord import cord_orientation_missing
 from lightsuite.gui.stage_controller import (
     StageController,
     clear_viewer_layers_safely,
@@ -83,6 +89,7 @@ class LightsuiteShell:
 
     def __init__(self, *, config_path: Path | None = None) -> None:
         from qtpy.QtWidgets import (
+            QCheckBox,
             QComboBox,
             QFileDialog,
             QHBoxLayout,
@@ -117,6 +124,7 @@ class LightsuiteShell:
         self._QLabel = QLabel
         self._QTextEdit = QTextEdit
         self._QComboBox = QComboBox
+        self._QCheckBox = QCheckBox
         self._QFileDialog = QFileDialog
         self.project: PipelineProject | None = None
         self._statuses: list[StageStatus] = []
@@ -125,6 +133,7 @@ class LightsuiteShell:
         self._active_stage_id: str | None = None
         self._opening_stage = False
         self._worker = None
+        self._pending_auto_stage: str | None = None
 
         self._panel = self._build_panel()
         self.viewer.window.add_dock_widget(self._panel, area="right", name="LightSuite")
@@ -140,6 +149,7 @@ class LightsuiteShell:
         QLabel = self._QLabel
         QTextEdit = self._QTextEdit
         QComboBox = self._QComboBox
+        QCheckBox = self._QCheckBox
         QListWidget = self._QListWidget
 
         panel = QWidget()
@@ -170,6 +180,27 @@ class LightsuiteShell:
         channel_layout.addWidget(self._channel_apply_button)
         self._channel_row.setVisible(False)
         layout.addWidget(self._channel_row)
+
+        self._export_row = QWidget()
+        export_layout = QHBoxLayout(self._export_row)
+        export_layout.setContentsMargins(0, 0, 0, 0)
+        export_layout.addWidget(QLabel("Export spaces:"))
+        self._export_atlas_check = QCheckBox("Atlas")
+        self._export_atlas_check.setToolTip(
+            "Warp channels to atlas / Fiederling native grid (volume_registered/*.tiff)"
+        )
+        self._export_sample_check = QCheckBox("Sample")
+        self._export_sample_check.setToolTip(
+            "Warp atlas labels onto the straightened registration grid "
+            "(volume_registered/sample_space/)"
+        )
+        export_layout.addWidget(self._export_atlas_check)
+        export_layout.addWidget(self._export_sample_check)
+        export_layout.addStretch(1)
+        self._export_atlas_check.stateChanged.connect(self._on_export_space_changed)
+        self._export_sample_check.stateChanged.connect(self._on_export_space_changed)
+        self._export_row.setVisible(False)
+        layout.addWidget(self._export_row)
 
         self._optional_toggle = QPushButton("Hide optional")
         self._optional_toggle.clicked.connect(self._toggle_optional_stages)
@@ -202,6 +233,9 @@ class LightsuiteShell:
         if self._channel_row.isVisible():
             self._channel_combo.setEnabled(enabled)
             self._channel_apply_button.setEnabled(enabled)
+        if self._export_row.isVisible():
+            self._export_atlas_check.setEnabled(enabled)
+            self._export_sample_check.setEnabled(enabled)
         self._update_action_button()
 
     def _on_stage_selection_changed(self, _current: Any = None, _previous: Any = None) -> None:
@@ -219,6 +253,13 @@ class LightsuiteShell:
             if stage_kind(spec) == StageKind.INTERACTIVE:
                 self._action_button.setText("Open stage")
                 self._action_button.setToolTip(f"Open {spec.title} in the viewer")
+            elif stage_id == "export" and self._export_row.isVisible():
+                try:
+                    spaces_label = format_export_spaces(self._selected_export_spaces())
+                except ValueError:
+                    spaces_label = "none selected"
+                self._action_button.setText("Run stage")
+                self._action_button.setToolTip(f"Run export ({spaces_label})")
             else:
                 self._action_button.setText("Run stage")
                 self._action_button.setToolTip(f"Run {spec.title} in the background")
@@ -322,6 +363,27 @@ class LightsuiteShell:
         self._channel_combo.blockSignals(False)
         self._channel_row.setVisible(True)
 
+    def _update_export_space_selector(self) -> None:
+        if self.project is None or self.project.workflow not in {"brain", "spinal"}:
+            self._export_row.setVisible(False)
+            return
+        atlas_default, sample_default = default_export_space_checks(
+            getattr(self.project.config.export, "spaces", None),
+        )
+        self._export_atlas_check.blockSignals(True)
+        self._export_sample_check.blockSignals(True)
+        self._export_atlas_check.setChecked(atlas_default)
+        self._export_sample_check.setChecked(sample_default)
+        self._export_atlas_check.blockSignals(False)
+        self._export_sample_check.blockSignals(False)
+        self._export_row.setVisible(True)
+
+    def _selected_export_spaces(self) -> list[str]:
+        return export_spaces_from_checks(
+            atlas=self._export_atlas_check.isChecked(),
+            sample=self._export_sample_check.isChecked(),
+        )
+
     def _on_apply_reference_channel(self) -> None:
         if self.project is None:
             return
@@ -387,6 +449,7 @@ class LightsuiteShell:
         self.log(f"Loaded {workflow} config for sample '{config.sample.name}'")
         self._set_actions_enabled(True)
         self._update_channel_selector()
+        self._update_export_space_selector()
         self.refresh_statuses()
 
     def refresh_statuses(self) -> None:
@@ -416,14 +479,18 @@ class LightsuiteShell:
             return None
         return str(stage_id), status
 
-    def _stage_context(self) -> StageContext:
+    def _stage_context(self, stage_id: str | None = None) -> StageContext:
         if self.project is None:
             msg = "No project loaded"
             raise RuntimeError(msg)
+        export_spaces: list[str] | None = None
+        if stage_id == "export" and self.project.workflow in {"brain", "spinal"}:
+            export_spaces = self._selected_export_spaces()
         return StageContext(
             config_path=self.project.config_path,
             headless=True,
             force_preprocess=False,
+            export_spaces=export_spaces,
         )
 
     def _teardown_active_stage(self, *, defer_layer_clear: bool = False) -> None:
@@ -444,6 +511,18 @@ class LightsuiteShell:
             self.refresh_statuses()
         if stage_id is not None:
             self.log(f"Saved and closed stage: {stage_id}")
+
+        pending = self._pending_auto_stage
+        self._pending_auto_stage = None
+        if pending is None or self.project is None:
+            return
+        config = self.project.config
+        if pending == "preprocess" and cord_orientation_missing(config):
+            self.log("Preprocess paused: save cord orientation first.")
+            return
+        from qtpy.QtCore import QTimer
+
+        QTimer.singleShot(0, lambda: self._run_auto_stage(pending))
 
     def _attach_interactive_stage(self, stage_id: str) -> None:
         if self.project is None or self._opening_stage:
@@ -469,7 +548,7 @@ class LightsuiteShell:
             try:
                 try:
                     controller = factory(self.viewer, config, ctx)
-                except (ImportError, RuntimeError) as exc:
+                except (ImportError, RuntimeError, FileNotFoundError) as exc:
                     self.log(f"Failed to open {stage_id}: {exc}")
                     try:
                         from napari.utils.notifications import show_warning
@@ -501,9 +580,24 @@ class LightsuiteShell:
         if self.project is None or self._is_busy():
             return
 
-        ctx = self._stage_context()
         workflow = self.project.workflow
         config = self.project.config
+        if (
+            workflow == "spinal"
+            and stage_id == "preprocess"
+            and cord_orientation_missing(config)
+        ):
+            self._pending_auto_stage = "preprocess"
+            self.log("Cord orientation required — opening check-orientation before preprocess.")
+            self._attach_interactive_stage("check-orientation")
+            return
+
+        try:
+            ctx = self._stage_context(stage_id)
+        except ValueError as exc:
+            self.log(str(exc))
+            return
+
         reporter = CallbackReporter(on_message=self._emit_log)
 
         def _work() -> Any:
@@ -511,7 +605,14 @@ class LightsuiteShell:
                 return run_stage(workflow, stage_id, config, ctx)
 
         self._set_running(True)
-        self.log(f"Running {stage_id}…")
+        if stage_id == "export" and self._export_row.isVisible():
+            try:
+                spaces_label = format_export_spaces(ctx.export_spaces or [])
+            except (TypeError, ValueError):
+                spaces_label = "atlas + sample"
+            self.log(f"Running {stage_id} ({spaces_label})…")
+        else:
+            self.log(f"Running {stage_id}…")
         try:
             self._worker = start_background_task(
                 _work,
@@ -572,6 +673,9 @@ class LightsuiteShell:
             self._attach_interactive_stage(stage_id)
         elif status.state != StageState.DONE:
             self._run_auto_stage(stage_id)
+
+    def _on_export_space_changed(self, _state: int = 0) -> None:
+        self._update_action_button()
 
     def _on_action(self) -> None:
         if self.project is None or self._is_busy():

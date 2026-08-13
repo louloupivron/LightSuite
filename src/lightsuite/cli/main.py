@@ -848,13 +848,18 @@ def spinal_check_orientation(
 @spinal_app.command("preprocess")
 def spinal_preprocess(
     config: str = typer.Option(..., "--config", "-c", help="Spinal cord pipeline YAML config."),
+    headless: bool = typer.Option(
+        False,
+        "--headless",
+        help="Fail if cord_orientation.txt is missing instead of opening Napari (for tests).",
+    ),
 ) -> None:
     """Prepare cord sample and atlas (prepareCordSampleForRegistration.m)."""
     from lightsuite.config.loader import load_spinal_config
     from lightsuite.preprocess.cord import preprocess_spinal_cord_sample
 
     cfg = load_spinal_config(config)
-    result = preprocess_spinal_cord_sample(cfg)
+    result = preprocess_spinal_cord_sample(cfg, headless=headless)
     typer.echo(f"Wrote checkpoint: {result.checkpoint.lsfolder}/regopts.json")
 
 
@@ -954,6 +959,11 @@ def spinal_export(
     cfg = load_spinal_config(config)
     result = export_registered_cord_volumes(cfg, spaces=parse_spaces_option(space))
     typer.echo(f"Registered volumes in {result.output_dir} ({len(result.channel_paths)} channels)")
+    if result.region_stats is not None and result.region_stats.combined_path is not None:
+        typer.echo(
+            f"Region stats: {result.region_stats.combined_path} "
+            f"({result.region_stats.n_rows} rows)"
+        )
 
 
 @spinal_app.command("import-annotations")
@@ -1110,14 +1120,14 @@ def spinal_inspect_imports(
         help="Rebuild annotation_registered.tiff from transform_params.json (atlas space only).",
     ),
 ) -> None:
-    """Napari QC: registered channels, atlas, and imported points."""
+    """Napari QC: registered channels, atlas, and imported points (alias for view)."""
     from lightsuite.cli.spaces import parse_view_space_option
     from lightsuite.config.loader import load_spinal_config
-    from lightsuite.gui.inspect_cord_imports import run_cord_inspect_imports
+    from lightsuite.gui.view_registered_cord import run_spinal_view_registration
 
     cfg = load_spinal_config(config)
     inspect_space = parse_view_space_option(space)
-    paths = run_cord_inspect_imports(
+    paths = run_spinal_view_registration(
         cfg,
         space=inspect_space,  # type: ignore[arg-type]
         headless=headless,
@@ -1155,28 +1165,29 @@ def spinal_view(
     """Open Napari with registered sample channel(s) and warped atlas annotation."""
     from lightsuite.cli.spaces import parse_view_space_option
     from lightsuite.config.loader import load_spinal_config
-    from lightsuite.export.cord_sample_space import CordSampleSpaceInspectPaths
-    from lightsuite.gui.view_registered_cord import run_spinal_registered_view
+    from lightsuite.gui.view_registered_cord import run_spinal_view_registration
 
     cfg = load_spinal_config(config)
     view_space = parse_view_space_option(space)
-    paths = run_spinal_registered_view(
+    paths = run_spinal_view_registration(
         cfg,
         space=view_space,  # type: ignore[arg-type]
         headless=headless,
         recompute_annotation=recompute_annotation,
     )
-    if isinstance(paths, CordSampleSpaceInspectPaths):
+    if paths.space == "sample":
         typer.echo(f"Sample-space data: {paths.sample_space_dir}")
         typer.echo(f"Annotation: {paths.annotation_path.name}")
-        if paths.channel_paths:
-            typer.echo(f"Channels: {sorted(paths.channel_paths)}")
+        if paths.registered_channels:
+            typer.echo(f"Channels: {sorted(paths.registered_channels)}")
         if paths.point_npz_paths:
             typer.echo(f"Point layers: {list(paths.point_npz_paths)}")
     else:
         typer.echo(f"Registered data: {paths.volume_registered_dir}")
         if paths.annotation_path.is_file():
             typer.echo(f"Annotation: {paths.annotation_path.name}")
+        if paths.point_npz_paths:
+            typer.echo(f"Point layers: {list(paths.point_npz_paths)}")
 
 
 @spinal_app.command("validate-parity")

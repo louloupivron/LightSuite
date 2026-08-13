@@ -13,9 +13,11 @@ from lightsuite.cli.stages import (
     brain_stage_specs,
     brain_stage_statuses,
     slice_stages,
+    spinal_stage_statuses,
 )
-from lightsuite.config.loader import load_config
+from lightsuite.config.loader import load_config, load_spinal_config
 from lightsuite.preprocess.checkpoint import RegOptsCheckpoint
+from lightsuite.preprocess.cord_checkpoint import CordRegOptsCheckpoint
 
 
 def _write_brain_config(path: Path, save_path: Path) -> None:
@@ -128,3 +130,65 @@ def test_load_config_raises_actionable_error(tmp_path: Path) -> None:
     with pytest.raises(LightsuiteConfigError) as exc:
         load_config(bad)
     assert "config explain" in str(exc.value)
+
+
+def _write_spinal_config(path: Path, save_path: Path) -> None:
+    atlas = save_path.parent / "atlas"
+    atlas.mkdir(parents=True, exist_ok=True)
+    (atlas / "Template.tif").write_bytes(b"x")
+    (atlas / "Annotation.tif").write_bytes(b"x")
+    (atlas / "Segments.csv").write_text("Segment,Start,End\nC1,0,1\n", encoding="utf-8")
+    (atlas / "Atlas_Regions.csv").write_text("id,name,children_IDs\n1,gm,1\n", encoding="utf-8")
+    sample = save_path.parent / "sample"
+    sample.mkdir(parents=True, exist_ok=True)
+    save_path.mkdir(parents=True, exist_ok=True)
+    data = {
+        "sample": {
+            "name": "test_cord",
+            "source": {"path": str(sample), "tiff_type": "channelperfile"},
+            "scratch": str(save_path.parent / "scratch"),
+            "save_path": str(save_path),
+            "voxel_um": [20.0, 20.0, 20.0],
+        },
+        "atlas": {"atlas_dir": str(atlas)},
+        "registration": {"longitudinal_direction": "caudorostral"},
+    }
+    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+
+
+def test_spinal_preprocess_status_done_with_cord_regopts(tmp_path: Path) -> None:
+    cfg_path = tmp_path / "spinal.yaml"
+    save_path = tmp_path / "results"
+    _write_spinal_config(cfg_path, save_path)
+    cfg = load_spinal_config(cfg_path)
+    regvol = save_path / "regvol.tif"
+    regvol.write_bytes(b"x")
+    checkpoint = CordRegOptsCheckpoint(
+        sample_name="test_cord",
+        data_folder=str(tmp_path / "sample"),
+        lsfolder=str(save_path),
+        orisize=[10, 10, 10],
+        nchans=1,
+        sampleres_um=[20.0, 20.0, 20.0],
+        registrationres_um=[20.0, 20.0, 20.0],
+        reg_channel=0,
+        sample_perm=[1, 2, 3],
+        tofliprc=False,
+        ikeeprange=[0, 9],
+        xrange=[0, 9],
+        yrange=[0, 9],
+        regvol_path=str(regvol),
+        tv_path=str(save_path / "tv.tif"),
+        av_path=str(save_path / "av.tif"),
+        smpts_path=str(save_path / "smpts.npy"),
+        tvpts_path=str(save_path / "tvpts.npy"),
+        atlas_res_um=[10.0, 10.0, 20.0],
+        segments_path=str(save_path / "segments.csv"),
+        regions_path=str(save_path / "regions.csv"),
+        tiff_type="channelperfile",
+    )
+    checkpoint.save(save_path / "regopts.json")
+
+    statuses = spinal_stage_statuses(cfg)
+    preprocess = next(item for item in statuses if item.stage.id == "preprocess")
+    assert preprocess.state == StageState.DONE

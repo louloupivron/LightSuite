@@ -1,0 +1,82 @@
+# OP87F2 — SMART lightsheet spinal cord (2 channels, 1.8 µm native)
+#
+#   uv run lightsuite doctor                        -c examples/config/spinal_cord/OP87F2.yaml
+#   uv run lightsuite spinal validate-config        -c examples/config/spinal_cord/OP87F2.yaml
+#   uv run lightsuite gui                           -c examples/config/spinal_cord/OP87F2.yaml
+#   uv run lightsuite spinal run                    -c examples/config/spinal_cord/OP87F2.yaml --resume
+#
+# Channel folders (plane-per-file TIFFs):
+#   Ch0 = 488 nm autofluorescence
+#   Ch1 = 561 nm
+#
+# Orientation: caudorostral (registration.longitudinal_direction in YAML).
+
+sample:
+  name: OP87F2
+  source:
+    format: tiff_stack
+    tiff_type: planeperfile
+    channels:
+      - /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP87F2/All_Channels/Ch0
+      - /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP87F2/All_Channels/Ch1
+    # Ch0 has a few extra Z planes vs Ch1; enable if preprocess complains:
+    # skip_corrupt_slices: true
+  scratch: /media/gbm/NVME2/lightsuite_scratch
+  save_path: /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP87F2/registered
+  voxel_um: [1.8, 1.8, 1.8]
+
+atlas:
+  atlas_dir: /home/gbm/ALICe-pipelines/LightSuite/atlas/SC_P56_Atlas_10x10x20_v5_2020
+
+registration:
+  channel_primary: 1
+  resolution_um: 20
+  longitudinal_direction: caudorostral
+  control_point_weight: 0.5
+  straightening_lambda_pos: 5000
+  straightening_lambda_ang: 5000
+
+compute:
+  workers: 4
+
+# Imaris spots (Spot_OnePageMultiComponent_Detailed.csv) — components:
+#   TA, Virus, MG, Virus + TA
+#
+# Position columns are labeled µm but the .ims is calibrated at 1 µm/voxel (values match
+# native voxel indices), same as OP87F1 — convert with 1,1,1 not sample.voxel_um:
+#   uv run lightsuite spinal convert-imaris-spots \
+#     -s /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP87F2/Spot_OnePageMultiComponent_Detailed.csv \
+#     -o /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP87F2/annotations \
+#     --voxel-um 1,1,1 \
+#     --shape-yxz 13118,2005,1474
+
+export:
+  spaces: [atlas, sample]
+
+import:
+  write_csv: true
+  annotations:
+    - format: points_csv
+      path: /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP87F2/annotations/imaris_TA_points.csv
+      label: imaris_TA
+    - format: points_csv
+      path: /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP87F2/annotations/imaris_Virus_points.csv
+      label: imaris_Virus
+    - format: points_csv
+      path: /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP87F2/annotations/imaris_MG_points.csv
+      label: imaris_MG
+    - format: points_csv
+      path: /media/gbm/NVME2/ALICe-pipelines-data/spinal_cord/OP87F2/annotations/imaris_Virus___TA_points.csv
+      label: imaris_Virus_TA
+
+analysis:
+  parcellate_intensities: true
+  intensity_channels: [1]
+  rollups: [division, structure, horn]
+  split_hemispheres: true
+  count_points: true
+  point_labels:
+    - imaris_TA
+    - imaris_Virus
+    - imaris_MG
+    - imaris_Virus_TA

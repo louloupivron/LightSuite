@@ -18,8 +18,8 @@ from lightsuite.cli.stage_registry import (
     stage_kind,
     validate_registry,
 )
-from lightsuite.cli.stages import brain_stage_specs
-from lightsuite.config.loader import load_config
+from lightsuite.cli.stages import brain_stage_specs, spinal_stage_specs
+from lightsuite.config.loader import load_config, load_spinal_config
 from lightsuite.reporter import CallbackReporter, ConsoleReporter, NullReporter
 
 
@@ -73,6 +73,41 @@ def test_brain_runner_ids_cover_stage_specs(tmp_path: Path) -> None:
     spec_ids = {spec.id for spec in brain_stage_specs(cfg)}
     runner_ids = runner_stage_ids("brain")
     assert spec_ids <= runner_ids
+
+
+def _write_spinal_config(path: Path, save_path: Path) -> None:
+    atlas = save_path.parent / "atlas"
+    atlas.mkdir(parents=True, exist_ok=True)
+    (atlas / "Template.tif").write_bytes(b"x")
+    (atlas / "Annotation.tif").write_bytes(b"x")
+    (atlas / "Segments.csv").write_text("Segment,Start,End\nC1,0,1\n", encoding="utf-8")
+    (atlas / "Atlas_Regions.csv").write_text("id,name,children_IDs\n1,gm,1\n", encoding="utf-8")
+    sample = save_path.parent / "sample"
+    sample.mkdir(parents=True, exist_ok=True)
+    save_path.mkdir(parents=True, exist_ok=True)
+    data = {
+        "sample": {
+            "name": "test_cord",
+            "source": {"path": str(sample), "tiff_type": "channelperfile"},
+            "scratch": str(save_path.parent / "scratch"),
+            "save_path": str(save_path),
+            "voxel_um": [20.0, 20.0, 20.0],
+        },
+        "atlas": {"atlas_dir": str(atlas)},
+        "registration": {"longitudinal_direction": "caudorostral"},
+    }
+    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+
+
+def test_spinal_runner_ids_cover_stage_specs(tmp_path: Path) -> None:
+    cfg_path = tmp_path / "spinal.yaml"
+    save_path = tmp_path / "results"
+    _write_spinal_config(cfg_path, save_path)
+    cfg = load_spinal_config(cfg_path)
+    spec_ids = {spec.id for spec in spinal_stage_specs(cfg)}
+    runner_ids = runner_stage_ids("spinal")
+    assert spec_ids <= runner_ids
+    assert "view-registration" in spec_ids
 
 
 def test_stage_kind_reflects_manual_flag(tmp_path: Path) -> None:

@@ -12,7 +12,7 @@ def test_capture_pipeline_output_forwards_rich_console() -> None:
     reporter = CallbackReporter(on_message=messages.append)
     with capture_pipeline_output(reporter):
         Console().print("slice progress")
-    assert any("slice progress" in message for message in messages)
+    assert messages.count("slice progress") == 1
 
 
 def test_capture_pipeline_output_forwards_stdout() -> None:

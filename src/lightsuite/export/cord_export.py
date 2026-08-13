@@ -39,6 +39,10 @@ from lightsuite.registration.cord_paths import (
 )
 from lightsuite.registration.elastix.runner import run_transformix
 from lightsuite.registration.straightening import load_slicetforms, transform_cord_images_slices
+from lightsuite.analysis.cord_runner import (
+    CordRegionStatsRunResult,
+    maybe_run_cord_region_stats,
+)
 
 console = Console()
 
@@ -47,6 +51,7 @@ console = Console()
 class CordExportResult:
     output_dir: Path
     channel_paths: list[Path]
+    region_stats: CordRegionStatsRunResult | None = None
 
 
 def _load_transform_params(save_path: Path) -> CordTransformParamsCheckpoint:
@@ -61,6 +66,7 @@ def export_registered_cord_volumes(
     config: SpinalCordPipelineConfig,
     *,
     spaces: list[str] | None = None,
+    run_region_stats: bool | None = None,
 ) -> CordExportResult:
     """Register all channels and save slice-style TIFF outputs."""
     save_path = cord_save_path(config)
@@ -159,4 +165,13 @@ def export_registered_cord_volumes(
             save_volume=config.export.save_sample_space_volume,
         )
 
-    return CordExportResult(output_dir=output_dir, channel_paths=channel_paths)
+    region_stats = maybe_run_cord_region_stats(
+        config,
+        export_spaces=export_spaces,
+        run_region_stats=run_region_stats,
+    )
+    return CordExportResult(
+        output_dir=output_dir,
+        channel_paths=channel_paths,
+        region_stats=region_stats,
+    )

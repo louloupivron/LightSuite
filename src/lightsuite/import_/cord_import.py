@@ -209,10 +209,18 @@ def run_cord_import_annotations(
         template_native_shape=tuple(int(v) for v in atlas_volumes.template.shape),
         write_csv=write_csv_resolved,
     )
-    return run_annotation_import(
+    results = run_annotation_import(
         specs,
         importer=importer,
         output_dir=output_dir,
         supports_masks=False,
         mask_unsupported_message=MASK_UNSUPPORTED,
     )
+    if config.analysis.count_points:
+        from lightsuite.analysis.cord_runner import maybe_run_cord_region_stats
+
+        maybe_run_cord_region_stats(
+            config,
+            export_spaces=list(config.export.spaces),
+        )
+    return results
