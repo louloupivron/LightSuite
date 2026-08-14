@@ -175,6 +175,12 @@ def _spinal_region_stats(config: Any, ctx: StageContext) -> Any:
     return run_cord_region_stats(config)
 
 
+def _spinal_plot_stats(config: Any, ctx: StageContext) -> Any:
+    from lightsuite.gui.spinal_stats_plots import run_spinal_stats_plots
+
+    return run_spinal_stats_plots(config, headless=ctx.headless)
+
+
 def _multires_match_points(config: Any, ctx: StageContext) -> Any:
     from lightsuite.gui.match_points_multires import run_multires_match_points
 
@@ -239,6 +245,7 @@ _SPINAL_RUNNERS: dict[str, StageRunner] = {
     "view-registration": _spinal_view_registration,
     "import-annotations": _spinal_import_annotations,
     "region-stats": _spinal_region_stats,
+    "plot-stats": _spinal_plot_stats,
 }
 
 _MULTIRES_RUNNERS: dict[str, StageRunner] = {

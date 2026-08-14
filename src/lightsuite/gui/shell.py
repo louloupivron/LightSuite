@@ -49,6 +49,7 @@ _INTERACTIVE_LOADING_HINTS: dict[str, str] = {
     "inspect-geometry": "reading multiresolution manifest",
     "inspect-registration": "reading registered ROI volumes",
     "view-registration": "reading registered volumes and annotations",
+    "plot-stats": "loading region stats tables",
 }
 
 

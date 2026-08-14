@@ -8,8 +8,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from lightsuite.cli.stage_registry import StageContext
-from lightsuite.cli.stages import brain_stage_specs, multires_stage_specs
-from lightsuite.config.loader import load_config
+from lightsuite.cli.stages import brain_stage_specs, multires_stage_specs, spinal_stage_specs
+from lightsuite.config.loader import load_config, load_spinal_config
 from lightsuite.gui.stage_attach import STAGE_ATTACH, attach_stage, get_stage_attach
 from lightsuite.gui.stage_controller import (
     DockStageController,
@@ -20,7 +20,7 @@ from lightsuite.gui.stage_controller import (
     run_attached_stage,
 )
 from lightsuite.reporter import CallbackReporter, NullReporter
-from tests.test_stage_registry import _write_brain_config
+from tests.test_stage_registry import _write_brain_config, _write_spinal_config
 
 
 def test_stage_attach_covers_manual_brain_stages(tmp_path) -> None:
@@ -86,6 +86,16 @@ def test_multires_manual_stages_have_attach(tmp_path) -> None:
     cfg = MultiresPipelineConfig.model_validate(raw)
     manual_ids = {spec.id for spec in multires_stage_specs(cfg) if spec.manual}
     missing = manual_ids - {stage_id for wf, stage_id in STAGE_ATTACH if wf == "multires"}
+    assert not missing, f"Missing attach functions for: {missing}"
+
+
+def test_stage_attach_covers_manual_spinal_stages(tmp_path: Path) -> None:
+    cfg_path = tmp_path / "spinal.yaml"
+    save_path = tmp_path / "results"
+    _write_spinal_config(cfg_path, save_path)
+    cfg = load_spinal_config(cfg_path)
+    manual_ids = {spec.id for spec in spinal_stage_specs(cfg) if spec.manual}
+    missing = manual_ids - {stage_id for wf, stage_id in STAGE_ATTACH if wf == "spinal"}
     assert not missing, f"Missing attach functions for: {missing}"
 
 

@@ -1190,6 +1190,95 @@ def spinal_view(
             typer.echo(f"Point layers: {list(paths.point_npz_paths)}")
 
 
+@spinal_app.command("plot-heatmap")
+def spinal_plot_heatmap(
+    config: str = typer.Option(..., "--config", "-c", help="Spinal cord pipeline YAML config."),
+    metric: str = typer.Option(
+        "median_intensity",
+        "--metric",
+        "-m",
+        help="Value to plot: median_intensity, relative_median_intensity, cell_count, cell_density, std.",
+    ),
+    channel: str | None = typer.Option(
+        None,
+        "--channel",
+        help="Intensity channel index (e.g. 1) or import label (e.g. imaris_TA).",
+    ),
+    hemisphere: str = typer.Option(
+        "whole",
+        "--hemisphere",
+        help="Hemisphere filter when split_hemispheres is enabled: whole, left, or right.",
+    ),
+    segments: str = typer.Option(
+        "C1:Co2",
+        "--segments",
+        help="Segment range (C1:Co2) or comma-separated labels.",
+    ),
+    rollup_level: str = typer.Option(
+        "structure",
+        "--rollup",
+        help="Rollup level to plot (structure = Lamina I–X + df/lf/vf).",
+    ),
+    input_path: str | None = typer.Option(
+        None,
+        "--input",
+        help="Override path to region_stats.csv.",
+    ),
+    output: str | None = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Output PNG path (default: <save_path>/plots/cord_heatmap_<metric>_<channel>.png).",
+    ),
+    cmap: str | None = typer.Option(None, "--cmap", help="Matplotlib colormap name."),
+    vmin: float | None = typer.Option(None, "--vmin", help="Color scale minimum."),
+    vmax: float | None = typer.Option(None, "--vmax", help="Color scale maximum."),
+    log_scale: bool = typer.Option(False, "--log-scale", help="Use logarithmic color scaling."),
+    normalize: str = typer.Option(
+        "none",
+        "--normalize",
+        help="Rescale values before plotting: none, row, or column.",
+    ),
+) -> None:
+    """Plot a paper-style segment × lamina/WM heatmap from region_stats.csv."""
+    from lightsuite.analysis.cord_heatmap import (
+        MetricName,
+        parse_segment_range,
+        run_cord_heatmap,
+    )
+    from lightsuite.config.loader import load_spinal_config
+
+    cfg = load_spinal_config(config)
+    parsed_channel: int | str | None
+    if channel is None:
+        parsed_channel = None
+    elif channel.isdigit():
+        parsed_channel = int(channel)
+    else:
+        parsed_channel = channel
+
+    segment_labels = parse_segment_range(segments, atlas_dir=cfg.atlas.atlas_dir)
+    output_path = Path(output).expanduser() if output else None
+    stats_input = Path(input_path).expanduser() if input_path else None
+
+    path = run_cord_heatmap(
+        cfg,
+        metric=metric,  # type: ignore[arg-type]
+        channel=parsed_channel,
+        rollup_level=rollup_level,
+        hemisphere=hemisphere,
+        segments=segment_labels,
+        input_path=stats_input,
+        output_path=output_path,
+        cmap=cmap,
+        vmin=vmin,
+        vmax=vmax,
+        log_scale=log_scale,
+        normalize=normalize,
+    )
+    typer.echo(f"Heatmap saved: {path}")
+
+
 @spinal_app.command("validate-parity")
 def spinal_validate_parity(
     fixture_root: str = typer.Option(

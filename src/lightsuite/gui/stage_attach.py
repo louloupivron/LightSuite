@@ -65,6 +65,12 @@ def _spinal_match_points(viewer: Any, config: Any, ctx: StageContext) -> StageCo
     return attach_spinal_match_points(viewer, config)
 
 
+def _spinal_stats_plots(viewer: Any, config: Any, ctx: StageContext) -> StageController:
+    from lightsuite.gui.spinal_stats_plots import attach_spinal_stats_plots
+
+    return attach_spinal_stats_plots(viewer, config)
+
+
 def _multires_match_points(viewer: Any, config: Any, ctx: StageContext) -> StageController:
     from lightsuite.gui.match_points_multires import attach_multires_match_points
 
@@ -97,6 +103,7 @@ STAGE_ATTACH: dict[tuple[str, str], AttachFactory] = {
     ("spinal", "straighten"): _spinal_straighten,
     ("spinal", "align-longitudinal"): _spinal_align_longitudinal,
     ("spinal", "match-points"): _spinal_match_points,
+    ("spinal", "plot-stats"): _spinal_stats_plots,
     ("multires", "match-points"): _multires_match_points,
     ("multires", "inspect-geometry"): _multires_inspect_geometry_attach,
     ("multires", "inspect-registration"): _multires_inspect_registration_attach,

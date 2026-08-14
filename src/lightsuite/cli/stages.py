@@ -182,6 +182,15 @@ def spinal_stage_specs(config: SpinalCordPipelineConfig) -> list[StageSpec]:
                 optional=True,
             )
         )
+    stages.append(
+        StageSpec(
+            "plot-stats",
+            "Stats / plots",
+            "plots/cord_heatmap_*.png",
+            optional=True,
+            manual=True,
+        )
+    )
     return stages
 
 
@@ -362,6 +371,12 @@ def _spinal_stage_done(
     if stage_id == "import-annotations":
         summary = save_path / "volume_registered" / "import_annotations_summary.json"
         return summary.is_file(), str(summary)
+    if stage_id == "plot-stats":
+        plots = save_path / "plots"
+        stats = save_path / "volume_registered" / "region_stats.csv"
+        if plots.is_dir() and any(plots.glob("cord_heatmap_*.png")):
+            return True, str(plots)
+        return stats.is_file(), "open Stats / plots after export"
     return False, "unknown stage"
 
 
