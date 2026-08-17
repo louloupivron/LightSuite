@@ -54,75 +54,16 @@ The Python pipeline is **CPU + RAM + fast local disk** bound. **GPU is not used*
 
 Run `uv run lightsuite doctor -c <config.yaml>` before long jobs — it checks Elastix, scratch free space (≥50 GB), atlas paths, and common config mistakes.
 
-### Workstation profiles
+Use a **fast local SSD/NVMe** for `sample.scratch` (not a network mount). Elastix/transformix temps also use scratch (spinal: `sample.scratch/<sample.name>/`).
 
-| Profile | CPU | RAM | Scratch disk |
-|---------|-----|-----|--------------|
-| Spinal cord, 1–2 channels | 4+ cores | 16 GB | 50 GB SSD |
-| Whole brain, 20 µm, 1–2 channels | 8+ cores | 32–64 GB | 100–200 GB SSD |
-| Large brain / wide field / dual-channel MI | 8–16 cores | 64–128 GB | 200–500 GB SSD |
-| Multiresolution (large overlap crop) | 8+ cores | 32–64 GB+ | 100 GB+ SSD |
+| Profile | CPU | RAM | Scratch disk | Notes |
+|---------|-----|-----|--------------|-------|
+| Spinal cord, 1–2 channels | 4+ cores | 16 GB | 50 GB SSD | Register/export usually fit 16 GB. |
+| Whole brain, 20 µm, 1–2 channels | 8+ cores | 32–64 GB | 100–200 GB SSD | `register` is the RAM peak. |
+| Large brain / wide field / dual-channel MI | 8–16 cores | 64–128 GB | 200–500 GB SSD | Content crop and B-spline tuning often required. |
+| Multiresolution (large overlap crop) | 8+ cores | 32–64 GB+ | 100 GB+ SSD | Watch `check-geometry` RAM warnings. |
 
-Scratch should be a **fast local SSD/NVMe** (`sample.scratch`), not a network mount. Elastix/transformix temps also use scratch (spinal: `sample.scratch/<sample.name>/`).
-
-### Sizing formulas (brain / spinal preprocess)
-
-| Quantity | Formula |
-|----------|---------|
-| XY downsample factor | `vx / registration.resolution_um` (and `vy`) |
-| Z downsample factor | `vz / registration.resolution_um` |
-| Preprocess XY scratch (per channel) | `out_y × out_x × nz × 2` bytes (`uint16`; `nz` = native Z during load) |
-| Registration TIFF (per channel) | `out_y × out_x × out_z × 2` bytes |
-| Scratch disk (plane-per-file, rough) | `2 × ny × nx × nz × (vx/registres)²` bytes + Elastix temps |
-
-In RAM if scratch fits below `compute.max_in_memory_scratch_gb` (default **24 GB**); otherwise a memmap on `sample.scratch`. `planeperfile` stacks always use **1 worker** (parallel reads thrash disk); `channelperfile` uses `compute.workers` (default 4).
-
-### Brain pipeline (`lightsuite brain`)
-
-| Step | Command | CPU | RAM | Disk | If requirements are not met |
-|------|---------|-----|-----|------|----------------------------|
-| Environment | `doctor` | 1 core | &lt;1 GB | ≥50 GB free on scratch | Point `sample.scratch` to fast SSD; install Elastix 5.1.0 on `PATH`. |
-| Preprocess | `preprocess` | High (`workers` for channel-per-file; **1 worker** for plane-per-file) | XY scratch ≤24 GB default in RAM, else memmap | Heavy read/write of TIFF stacks | Fast NVMe scratch; correct `sample.voxel_um`; lower `max_in_memory_scratch_gb` to force memmap if OOM; raise `workers` only for channel-per-file. |
-| Check orientation | `check-orientation` | Low | Napari previews capped (~256 MB/volume) | Minimal | Set `registration.orientation` in YAML and skip GUI; `uv sync --extra gui`. |
-| Init registration | `init-registration` | Moderate (BCPD / Open3D ICP) | Full 20 µm volume + atlas (often 8–32 GB) | Small | Install BCPD; raise `registration.resolution_um` and re-preprocess; `sample_content_crop: auto`. |
-| Align slices | `align-slices` | Low | Napari loads registration volume | Minimal | `--headless` or skip; register works without correspondence. |
-| Match points | `match-points` | Low | Napari | Minimal | Optional — register can use init-registration auto points only. |
-| Register | `register` | **Very high** (Elastix B-spline, CPU-only) | **Peak step** — sample + atlas + warped copies (often 32–128 GB for large/wide fields) | `elastix_temp/` under `save_path` | `sample_content_crop: auto` or manual box; larger `bspline_spatial_scale_mm`; `--single-step`; drop `channel_secondary`; raise `registration.resolution_um` and re-preprocess. |
-| Export | `export` | High (transformix per channel) | Full volume per channel during warp | Large if `save_registered_volume: true` | `save_registered_volume: false`; `save_sample_space_volume: false`; CSV-only export; subset `analysis.intensity_channels`. |
-| Import annotations | `import-annotations` | Low–moderate | Small (points); mask + transformix for TIFF masks | Small outputs | Prefer `points_csv`; requires `transformix` on `PATH`. |
-| View registration | `view-registration` | Low | Napari + optional TIFF overlays | Reads existing exports | Run `export --space sample` first; needs `--extra gui`. |
-
-See [brain lightsheet usage](https://lightsuite.readthedocs.io/en/latest/usage_lightsheet_brain/) for B-spline tuning (`bspline_bending_weight`, wide-field crops).
-
-### Spinal cord pipeline (`lightsuite spinal`)
-
-| Step | Command | CPU | RAM | Disk | If requirements are not met |
-|------|---------|-----|-----|------|----------------------------|
-| Preprocess | `preprocess` | High (streaming planes) | Caches all channels in `cache/` | Heavy plane TIFF reads | Correct `sample.voxel_um` (doctor warns if no downsampling on load); fast scratch. |
-| Check orientation | `check-orientation` | Low | Small | Minimal | Set orientation in YAML / `cord_orientation.txt`. |
-| Straighten | `straighten` | Moderate (per-slice 2D warps) | Full registration-grid volume | Straightened cache TIFF | Cord volumes are smaller than whole brain; trim Z in preprocess if needed. |
-| Init / match / register | `init-registration`, `match-points`, `register` | High at register (Elastix) | Typically 4–16 GB at register | Elastix under `sample.scratch/<name>/` | Same Elastix mitigations as brain; match-points optional. |
-| Export / region-stats | `export`, `region-stats` | High at export (transformix) | Upsampled Fiederling grid | `volume_registered/` TIFFs | Export subset of channels; defer full TIFF export. |
-
-### Multiresolution pipeline (`lightsuite multires`)
-
-| Step | Command | CPU | RAM | Disk | If requirements are not met |
-|------|---------|-----|-----|------|----------------------------|
-| Check geometry | `check-geometry` | Moderate | Warns if overlap peak &gt; available RAM | Minimal | Shrink overlap (`overlap_margin_um` negative); increase `registration_bin`. |
-| Register | `register` | High (Elastix on overlap crop) | Peak ≈ `2.5 × crop_gb + max_slab_bytes` (default slab 500 MB); stacks streamed, not loaded whole | Elastix + outputs under `save_path` | Raise `registration_bin` (e.g. 2); lower `max_slab_bytes`; `write_full_overview_canvas: false`; fast scratch SSD. |
-| Export / preview | `export-preview`, etc. | Moderate | Streaming slabs | Registered canvases | Lower `max_slab_bytes`. |
-
-Full stacks are **not** held in RAM; overlap crops are materialized in slabs. See [multiresolution usage](https://lightsuite.readthedocs.io/en/latest/usage_multiresolution/).
-
-### Cross-cutting remediation
-
-| Problem | What to try |
-|---------|-------------|
-| Scratch full or slow | Move `sample.scratch` to NVMe; free ≥50 GB; delete old `elastix_temp/` and scratch memmaps (`chan_*_xy_*.dat`). |
-| RAM OOM at register/export | Content crop; higher `registration.resolution_um` + re-preprocess; disable registered volume export; single channel; `brain register --single-step`. |
-| RAM OOM at preprocess | Lower `compute.max_in_memory_scratch_gb` (disk memmap); reduce `compute.workers` on channel-per-file. |
-| Process killed, no Python traceback | Likely Linux OOM killer during Elastix/transformix — same RAM mitigations. |
-| GUI won't start | `uv sync --extra gui`; more RAM; set orientation/control points in YAML and skip Napari stages. |
+Per-step bottlenecks, sizing formulas, and remediation options are in the [installation guide](https://lightsuite.readthedocs.io/en/latest/installation/) and workflow docs ([brain](https://lightsuite.readthedocs.io/en/latest/usage_lightsheet_brain/), [spinal](https://lightsuite.readthedocs.io/en/latest/usage_spinal_cord/), [multires](https://lightsuite.readthedocs.io/en/latest/usage_multiresolution/)).
 
 ---
 
