@@ -297,3 +297,24 @@ def test_validate_napari_install_raises_when_resources_missing(tmp_path, monkeyp
     monkeypatch.setitem(__import__("sys").modules, "napari", fake_napari)
     with pytest.raises(RuntimeError, match="uv sync --extra gui"):
         _validate_napari_install()
+
+
+def test_validate_pint_install_raises_when_package_missing(monkeypatch) -> None:
+    from lightsuite.gui.stage_controller import _validate_pint_install
+
+    monkeypatch.delitem(__import__("sys").modules, "pint", raising=False)
+    with patch.dict("sys.modules", {"pint": None}):
+        with pytest.raises(RuntimeError, match="uv sync --extra gui"):
+            _validate_pint_install()
+
+
+def test_validate_pint_install_raises_when_definitions_missing(tmp_path, monkeypatch) -> None:
+    from lightsuite.gui.stage_controller import _validate_pint_install
+
+    pint_root = tmp_path / "pint_pkg"
+    pint_root.mkdir()
+    fake_pint = MagicMock()
+    fake_pint.__file__ = str(pint_root / "__init__.py")
+    monkeypatch.setitem(__import__("sys").modules, "pint", fake_pint)
+    with pytest.raises(RuntimeError, match="default_en.txt"):
+        _validate_pint_install()

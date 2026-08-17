@@ -14,6 +14,7 @@ import tifffile
 from rich.console import Console
 
 from lightsuite.config.models import BrainPipelineConfig, TiffLayout
+from lightsuite.reporter import emit_pipeline_message, report_step_progress
 from lightsuite.io.discover import TiffStackDiscovery, discover_tiff_stack
 from lightsuite.io.readers.tiff_stack import TiffStackReader
 from lightsuite.preprocess.checkpoint import (
@@ -192,18 +193,21 @@ def _process_channel_to_registration_tiff(
             binary_path.unlink()
         binary_handle = binary_path.open("wb")
 
+    label = f"channel {channel}"
     t0 = time.perf_counter()
     try:
         for islice, result in enumerate(_iter_processed_slices(jobs, workers), start=1):
             xy_stack[:, :, islice - 1] = result.plane_xy
             if binary_handle is not None and result.binary_bytes is not None:
                 binary_handle.write(result.binary_bytes)
-            if islice == 1 or islice % 20 == 0 or islice == nz:
-                elapsed = time.perf_counter() - t0
-                console.print(
-                    f"Slice {islice}/{nz}. "
-                    f"Time per slice {elapsed / islice:.2f} s. Elapsed {elapsed:.2f} s..."
-                )
+            report_step_progress(
+                islice,
+                nz,
+                label=label,
+                t0=t0,
+                workers=workers,
+                unit="slice",
+            )
     finally:
         if on_disk:
             del xy_stack
@@ -218,7 +222,8 @@ def _process_channel_to_registration_tiff(
         if binary_path.exists():
             binary_path.unlink()
 
-    console.print(f"Saving volume for registration (channel {channel})...", end=" ")
+    emit_pipeline_message(f"[{label}] writing registration TIFF ({output_path.name})…")
+    t_save = time.perf_counter()
     try:
         if on_disk and mmap_path is not None:
             xy_read = np.memmap(mmap_path, dtype=np.uint16, mode="r", shape=(out_h, out_w, nz))
@@ -229,7 +234,9 @@ def _process_channel_to_registration_tiff(
     finally:
         if on_disk and mmap_path is not None and mmap_path.exists():
             mmap_path.unlink()
-    console.print("Done.")
+    emit_pipeline_message(
+        f"[{label}] saved registration TIFF in {time.perf_counter() - t_save:.1f}s"
+    )
 
 
 def _registration_volume_matches(
@@ -325,6 +332,8 @@ def preprocess_lightsheet_volume(
     config.sample.scratch.mkdir(parents=True, exist_ok=True)
     config.sample.save_path.mkdir(parents=True, exist_ok=True)
 
+    emit_pipeline_message(f"Discovering TIFF stack at {config.sample.source.path}…")
+    t_discover = time.perf_counter()
     discovery = discover_tiff_stack(
         config.sample.source.path,
         tiff_type=config.sample.source.tiff_type,
@@ -334,6 +343,11 @@ def preprocess_lightsheet_volume(
     workers = _effective_preprocess_workers(discovery, requested_workers)
 
     ny, nx, nz, nchans = discovery.ny, discovery.nx, discovery.nz, discovery.nchans
+    emit_pipeline_message(
+        f"Stack: {ny}×{nx} pixels, {nz} planes, {nchans} channel(s) "
+        f"({discovery.tiff_type.value}); target resolution {registres:g} µm "
+        f"(discovered in {time.perf_counter() - t_discover:.1f}s)"
+    )
     regvolpaths: dict[int, Path] = {}
     cell_channel = _channel_for_cells(config)
     out_h, out_w = output_xy_shape(ny, nx, scale_xy)

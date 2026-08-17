@@ -31,6 +31,7 @@ from lightsuite.gui.stage_controller import (
     clear_viewer_layers_safely,
     defer_clear_viewer_layers,
     require_napari,
+    validate_gui_dependencies,
 )
 from lightsuite.reporter import CallbackReporter, capture_pipeline_output
 
@@ -627,13 +628,21 @@ class LightsuiteShell:
         def _open_stage() -> None:
             try:
                 try:
+                    validate_gui_dependencies()
                     controller = factory(self.viewer, config, ctx)
                 except (ImportError, RuntimeError, FileNotFoundError) as exc:
-                    self.log(f"Failed to open {stage_id}: {exc}")
+                    message = str(exc)
+                    if "default_en.txt" in message:
+                        message = (
+                            "The pint package in this environment is incomplete "
+                            "(missing default_en.txt). Repair with: "
+                            "uv sync --extra gui --reinstall-package pint, then restart the GUI."
+                        )
+                    self.log(f"Failed to open {stage_id}: {message}")
                     try:
                         from napari.utils.notifications import show_warning
 
-                        show_warning(str(exc))
+                        show_warning(message)
                     except ImportError:
                         pass
                     return

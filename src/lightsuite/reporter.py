@@ -5,11 +5,14 @@ from __future__ import annotations
 import contextlib
 import contextvars
 import io
+import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from rich.console import Console
+
+_DEFAULT_CONSOLE = Console()
 
 _current_reporter: contextvars.ContextVar[Reporter | None] = contextvars.ContextVar(
     "lightsuite_reporter",
@@ -20,6 +23,40 @@ _current_reporter: contextvars.ContextVar[Reporter | None] = contextvars.Context
 def get_active_reporter() -> Reporter | None:
     """Return the reporter active in the current context, if any."""
     return _current_reporter.get()
+
+
+def emit_pipeline_message(text: str) -> None:
+    """Send a status line to the active reporter, or Rich console when none is set."""
+    reporter = get_active_reporter()
+    if reporter is not None:
+        reporter.message(text)
+        return
+    _DEFAULT_CONSOLE.print(text)
+
+
+def report_step_progress(
+    current: int,
+    total: int,
+    *,
+    label: str = "",
+    t0: float,
+    workers: int = 1,
+    every: int = 20,
+    unit: str = "step",
+) -> None:
+    """Emit throttled progress with elapsed time and ETA estimate."""
+    if current != 1 and current % every != 0 and current != total:
+        return
+    elapsed = time.perf_counter() - t0
+    pct = 100.0 * current / max(total, 1)
+    rate = current / elapsed if elapsed > 0 else 0.0
+    eta = (total - current) / rate if rate > 0 else 0.0
+    worker_note = f", {workers} workers" if workers > 1 else ""
+    prefix = f"[{label}] " if label else ""
+    emit_pipeline_message(
+        f"{prefix}{unit} {current}/{total} ({pct:.0f}%) — "
+        f"{elapsed:.0f}s elapsed, ~{eta:.0f}s left{worker_note}"
+    )
 
 
 @contextlib.contextmanager

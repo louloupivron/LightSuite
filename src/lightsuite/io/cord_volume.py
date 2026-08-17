@@ -20,6 +20,8 @@ from lightsuite.preprocess.slice_ops import read_source_plane, SliceLoadJob, pro
 
 from rich.console import Console
 
+from lightsuite.reporter import report_step_progress
+
 console = Console()
 
 
@@ -38,16 +40,14 @@ def _report_plane_progress(
     *,
     workers: int,
 ) -> None:
-    if current != 1 and current % 50 != 0 and current != total:
-        return
-    elapsed = time.perf_counter() - t0
-    pct = 100.0 * current / max(total, 1)
-    rate = current / elapsed if elapsed > 0 else 0.0
-    eta = (total - current) / rate if rate > 0 else 0.0
-    worker_note = f", {workers} workers" if workers > 1 else ""
-    console.print(
-        f"  [{label}] plane {current}/{total} ({pct:.0f}%) — "
-        f"{elapsed:.0f}s elapsed, ~{eta:.0f}s left{worker_note}"
+    report_step_progress(
+        current,
+        total,
+        label=label,
+        t0=t0,
+        workers=workers,
+        every=50,
+        unit="plane",
     )
 
 

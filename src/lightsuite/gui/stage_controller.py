@@ -71,8 +71,12 @@ def _validate_pint_install() -> None:
     """Napari layer scales need pint unit definitions shipped with the wheel."""
     try:
         import pint
-    except ImportError:
-        return
+    except ImportError as exc:
+        msg = (
+            "Pint is required for Napari physical scales but is not installed. "
+            "Repair with: uv sync --extra gui"
+        )
+        raise RuntimeError(msg) from exc
     from pathlib import Path
 
     definitions = Path(pint.__file__).resolve().parent / "default_en.txt"
@@ -83,6 +87,12 @@ def _validate_pint_install() -> None:
         "Repair with: uv sync --extra gui --reinstall-package pint"
     )
     raise RuntimeError(msg)
+
+
+def validate_gui_dependencies() -> None:
+    """Re-check GUI runtime packages before opening interactive stages."""
+    _validate_pint_install()
+    _validate_vispy_install()
 
 
 def require_magicgui() -> Any:
