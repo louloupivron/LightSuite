@@ -22,6 +22,7 @@ from lightsuite.cli.stage_registry import (
 )
 from lightsuite.cli.stages import StageState, StageStatus
 from lightsuite.config.workflow import load_project
+from lightsuite.gui.config_editor import ConfigEditorDock
 from lightsuite.gui.qt_workers import start_background_task
 from lightsuite.gui.stage_attach import get_stage_attach
 from lightsuite.gui.orientation_cord import cord_orientation_missing
@@ -92,7 +93,6 @@ class LightsuiteShell:
         from qtpy.QtWidgets import (
             QCheckBox,
             QComboBox,
-            QFileDialog,
             QHBoxLayout,
             QLabel,
             QListWidget,
@@ -126,8 +126,8 @@ class LightsuiteShell:
         self._QTextEdit = QTextEdit
         self._QComboBox = QComboBox
         self._QCheckBox = QCheckBox
-        self._QFileDialog = QFileDialog
         self.project: PipelineProject | None = None
+        self._workflow_preview: str | None = None
         self._statuses: list[StageStatus] = []
         self._show_optional_stages = True
         self._active_controller: StageController | None = None
@@ -137,7 +137,27 @@ class LightsuiteShell:
         self._pending_auto_stage: str | None = None
 
         self._panel = self._build_panel()
-        self.viewer.window.add_dock_widget(self._panel, area="right", name="LightSuite")
+        self._lightsuite_dock = self.viewer.window.add_dock_widget(
+            self._panel,
+            area="left",
+            name="LightSuite",
+            tabify=True,
+            add_vertical_stretch=False,
+        )
+        self._lightsuite_dock.show()
+        self._lightsuite_dock.raise_()
+
+        self._config_editor = ConfigEditorDock(
+            on_saved=self._on_config_saved,
+            on_log=self.log,
+            on_template_loaded=self.preview_workflow,
+        )
+        self._config_dock = self.viewer.window.add_dock_widget(
+            self._config_editor.widget,
+            area="right",
+            name="Config",
+        )
+        self._config_dock.show()
 
         if config_path is not None:
             self.load_project(config_path)
@@ -156,19 +176,6 @@ class LightsuiteShell:
         panel = QWidget()
         layout = QVBoxLayout(panel)
 
-        self._title_label = QLabel("No project loaded")
-        self._title_label.setWordWrap(True)
-        layout.addWidget(self._title_label)
-
-        open_row = QHBoxLayout()
-        self._open_button = QPushButton("Open config…")
-        self._open_button.clicked.connect(self._on_open_config)
-        self._refresh_button = QPushButton("Refresh")
-        self._refresh_button.clicked.connect(self.refresh_statuses)
-        open_row.addWidget(self._open_button)
-        open_row.addWidget(self._refresh_button)
-        layout.addLayout(open_row)
-
         self._channel_row = QWidget()
         channel_layout = QHBoxLayout(self._channel_row)
         channel_layout.setContentsMargins(0, 0, 0, 0)
@@ -181,6 +188,21 @@ class LightsuiteShell:
         channel_layout.addWidget(self._channel_apply_button)
         self._channel_row.setVisible(False)
         layout.addWidget(self._channel_row)
+
+        self._optional_toggle = QPushButton("Hide optional")
+        self._optional_toggle.clicked.connect(self._toggle_optional_stages)
+        self._optional_toggle.setEnabled(False)
+        layout.addWidget(self._optional_toggle)
+
+        self._stage_list = QListWidget()
+        self._stage_list.itemDoubleClicked.connect(self._on_stage_activated)
+        from qtpy.QtWidgets import QSizePolicy
+
+        self._stage_list.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Maximum,
+        )
+        layout.addWidget(self._stage_list, stretch=0)
 
         self._export_row = QWidget()
         export_layout = QHBoxLayout(self._export_row)
@@ -203,15 +225,6 @@ class LightsuiteShell:
         self._export_row.setVisible(False)
         layout.addWidget(self._export_row)
 
-        self._optional_toggle = QPushButton("Hide optional")
-        self._optional_toggle.clicked.connect(self._toggle_optional_stages)
-        self._optional_toggle.setEnabled(False)
-        layout.addWidget(self._optional_toggle)
-
-        self._stage_list = QListWidget()
-        self._stage_list.itemDoubleClicked.connect(self._on_stage_activated)
-        layout.addWidget(self._stage_list, stretch=3)
-
         self._action_button = QPushButton("Run")
         self._action_button.clicked.connect(self._on_action)
         layout.addWidget(self._action_button)
@@ -220,14 +233,12 @@ class LightsuiteShell:
         self._log = QTextEdit()
         self._log.setReadOnly(True)
         self._log.setPlaceholderText("Pipeline log…")
-        layout.addWidget(self._log, stretch=2)
+        layout.addWidget(self._log, stretch=1)
 
         self._set_actions_enabled(False)
         return panel
 
     def _set_actions_enabled(self, enabled: bool) -> None:
-        self._open_button.setEnabled(True)
-        self._refresh_button.setEnabled(enabled)
         self._optional_toggle.setEnabled(enabled)
         self._stage_list.setEnabled(enabled)
         self._action_button.setEnabled(enabled)
@@ -240,12 +251,19 @@ class LightsuiteShell:
         self._update_action_button()
 
     def _on_stage_selection_changed(self, _current: Any = None, _previous: Any = None) -> None:
+        self._update_export_row_visibility()
         self._update_action_button()
 
     def _update_action_button(self) -> None:
         if self.project is None:
-            self._action_button.setText("Run")
-            self._action_button.setToolTip("Load a config, then select a stage")
+            if self._workflow_preview is not None:
+                self._action_button.setText("Save config first")
+                self._action_button.setToolTip(
+                    "Fill sample paths in the Config panel, then Save as… to enable running stages"
+                )
+            else:
+                self._action_button.setText("Run")
+                self._action_button.setToolTip("Load a config, then select a stage")
             return
         selected = self._selected_stage()
         if selected is not None:
@@ -301,6 +319,7 @@ class LightsuiteShell:
         self._show_optional_stages = not self._show_optional_stages
         self._update_optional_toggle_label()
         self._populate_stage_list()
+        self._update_export_row_visibility()
         self._update_action_button()
 
     def _update_optional_toggle_label(self) -> None:
@@ -336,6 +355,21 @@ class LightsuiteShell:
             self._stage_list.addItem(list_item)
             if current_id is not None and stage.id == current_id:
                 self._stage_list.setCurrentItem(list_item)
+        self._fit_stage_list_height()
+
+    def _fit_stage_list_height(self) -> None:
+        """Size the stage list to its rows so the log can use remaining space."""
+        count = self._stage_list.count()
+        if count == 0:
+            self._stage_list.setFixedHeight(0)
+            return
+        row_height = self._stage_list.sizeHintForRow(0)
+        if row_height <= 0:
+            row_height = self._stage_list.fontMetrics().height() + 6
+        frame = self._stage_list.frameWidth() * 2
+        visible_rows = min(count, 10)
+        height = row_height * visible_rows + frame + 2
+        self._stage_list.setFixedHeight(height)
 
     def _update_channel_selector(self) -> None:
         if self.project is None or self.project.workflow != "multires":
@@ -364,9 +398,9 @@ class LightsuiteShell:
         self._channel_combo.blockSignals(False)
         self._channel_row.setVisible(True)
 
-    def _update_export_space_selector(self) -> None:
+    def _load_export_space_defaults(self) -> None:
+        """Initialize export-space checkboxes from YAML (row stays hidden until export)."""
         if self.project is None or self.project.workflow not in {"brain", "spinal"}:
-            self._export_row.setVisible(False)
             return
         atlas_default, sample_default = default_export_space_checks(
             getattr(self.project.config.export, "spaces", None),
@@ -377,7 +411,26 @@ class LightsuiteShell:
         self._export_sample_check.setChecked(sample_default)
         self._export_atlas_check.blockSignals(False)
         self._export_sample_check.blockSignals(False)
-        self._export_row.setVisible(True)
+
+    def _update_export_row_visibility(self) -> None:
+        if self.project is None or self.project.workflow not in {"brain", "spinal"}:
+            self._export_row.setVisible(False)
+            return
+        selected = self._selected_stage()
+        show = selected is not None and selected[0] == "export"
+        self._export_row.setVisible(show)
+
+    def _export_spaces_for_stage(self, stage_id: str | None) -> list[str] | None:
+        if stage_id != "export" or self.project is None:
+            return None
+        if self.project.workflow not in {"brain", "spinal"}:
+            return None
+        if self._export_row.isVisible():
+            return self._selected_export_spaces()
+        atlas_default, sample_default = default_export_space_checks(
+            getattr(self.project.config.export, "spaces", None),
+        )
+        return export_spaces_from_checks(atlas=atlas_default, sample=sample_default)
 
     def _selected_export_spaces(self) -> list[str]:
         return export_spaces_from_checks(
@@ -435,6 +488,26 @@ class LightsuiteShell:
     def _loading_message(self, stage_id: str) -> str:
         return interactive_loading_message(self._stage_title(stage_id), stage_id)
 
+    def preview_workflow(self, workflow: str) -> None:
+        """Show the stage checklist for a workflow before a config file is saved."""
+        from lightsuite.cli.stages import preview_stage_statuses
+
+        self._teardown_active_stage()
+        self.project = None
+        self._workflow_preview = workflow
+        self._statuses = preview_stage_statuses(workflow)
+        self._populate_stage_list()
+        self._optional_toggle.setEnabled(True)
+        self._stage_list.setEnabled(True)
+        self._action_button.setEnabled(False)
+        self._channel_row.setVisible(False)
+        self._update_export_row_visibility()
+        self._update_action_button()
+        self.log(
+            f"Loaded {workflow} template — stages shown as preview. "
+            "Fill paths in Config, Save as…, then stages become runnable."
+        )
+
     def load_project(self, config_path: str | Path) -> None:
         """Load a YAML config and populate the stage checklist."""
         try:
@@ -443,15 +516,19 @@ class LightsuiteShell:
         except Exception as exc:
             self.log(f"Failed to load config: {exc}")
             return
+        self._workflow_preview = None
         self.project = PipelineProject(workflow=workflow, config_path=path, config=config)
-        self._title_label.setText(
-            f"{workflow.title()} — {config.sample.name}\n{path}"
-        )
         self.log(f"Loaded {workflow} config for sample '{config.sample.name}'")
+        self._config_editor.load_from_path(path)
         self._set_actions_enabled(True)
         self._update_channel_selector()
-        self._update_export_space_selector()
+        self._load_export_space_defaults()
+        self._update_export_row_visibility()
         self.refresh_statuses()
+
+    def _on_config_saved(self, config_path: Path) -> None:
+        """Reload the shell after the YAML editor saves a valid config."""
+        self.load_project(config_path)
 
     def refresh_statuses(self) -> None:
         """Re-read checkpoint artifacts and refresh the stage list."""
@@ -466,7 +543,9 @@ class LightsuiteShell:
         spec = get_workflow(self.project.workflow)
         self._statuses = spec.stage_statuses(self.project.config)
         self._populate_stage_list()
+        self._update_export_row_visibility()
         self._update_action_button()
+        self._config_editor.maybe_reload_from_disk()
 
     def _selected_stage(self) -> tuple[str, StageStatus] | None:
         item = self._stage_list.currentItem()
@@ -485,8 +564,8 @@ class LightsuiteShell:
             msg = "No project loaded"
             raise RuntimeError(msg)
         export_spaces: list[str] | None = None
-        if stage_id == "export" and self.project.workflow in {"brain", "spinal"}:
-            export_spaces = self._selected_export_spaces()
+        if stage_id == "export":
+            export_spaces = self._export_spaces_for_stage(stage_id)
         return StageContext(
             config_path=self.project.config_path,
             headless=True,
@@ -629,8 +708,6 @@ class LightsuiteShell:
     def _set_running(self, running: bool) -> None:
         enabled = not running and self.project is not None
         self._action_button.setEnabled(enabled)
-        self._open_button.setEnabled(not running)
-        self._refresh_button.setEnabled(enabled)
         self._optional_toggle.setEnabled(enabled)
         self._stage_list.setEnabled(enabled)
         if not running:
@@ -654,17 +731,10 @@ class LightsuiteShell:
         self.log(f"Stage failed: {exc}")
         self.log(traceback.format_exc())
 
-    def _on_open_config(self) -> None:
-        path, _ = self._QFileDialog.getOpenFileName(
-            self._panel,
-            "Open LightSuite config",
-            str(Path.home()),
-            "YAML files (*.yaml *.yml)",
-        )
-        if path:
-            self.load_project(path)
-
     def _on_stage_activated(self, _item: Any) -> None:
+        if self.project is None:
+            self.log("Save a valid config file before running stages.")
+            return
         selected = self._selected_stage()
         if selected is None:
             return

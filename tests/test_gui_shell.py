@@ -13,7 +13,7 @@ from lightsuite.gui.shell import (
     filter_stage_statuses,
     interactive_loading_message,
 )
-from lightsuite.cli.stages import StageSpec, StageState, StageStatus
+from lightsuite.cli.stages import StageSpec, StageState, StageStatus, preview_stage_statuses
 
 
 def test_detect_workflow_brain() -> None:
@@ -105,3 +105,13 @@ def test_filter_stage_statuses_hides_optional() -> None:
         "align-slices",
         "register",
     ]
+
+
+def test_preview_stage_statuses_brain_includes_core_steps() -> None:
+    statuses = preview_stage_statuses("brain")
+    stage_ids = [item.stage.id for item in statuses]
+    assert "preprocess" in stage_ids
+    assert "check-orientation" in stage_ids
+    assert "register" in stage_ids
+    assert "export" in stage_ids
+    assert all(item.state in {StageState.PENDING, StageState.OPTIONAL} for item in statuses)

@@ -10,7 +10,9 @@ import pytest
 
 from lightsuite.analysis.hemisphere import hemisphere_side_masks
 from lightsuite.atlas.brainglobe_backend import (
+    BrainGlobeAtlasEntry,
     default_brainglobe_name,
+    find_brainglobe_catalog_entry,
     hemisphere_side_masks_from_brainglobe,
 )
 from lightsuite.atlas.registry import resolve_brain_atlas, uses_ccf_id_parcellation
@@ -18,10 +20,48 @@ from lightsuite.atlas.registry import resolve_brain_atlas, uses_ccf_id_parcellat
 
 def test_default_brainglobe_name_mapping() -> None:
     assert default_brainglobe_name("allen", 10.0) == "allen_mouse_10um"
+    assert default_brainglobe_name("allen", 25.0) == "allen_mouse_10um"
     assert default_brainglobe_name("perens", 20.0) == "perens_lsfm_mouse_20um"
-    assert default_brainglobe_name("perens", 25.0) == "perens_multimodal_lsfm_25um"
+    assert default_brainglobe_name("perens", 25.0) == "perens_lsfm_mouse_20um"
     assert default_brainglobe_name("princeton", 20.0) == "princeton_mouse_20um"
     assert default_brainglobe_name("rat", 39.0) == "whs_sd_rat_39um"
+
+
+def test_list_lightsuite_brainglobe_atlases_is_curated() -> None:
+    from lightsuite.atlas.brainglobe_backend import (
+        brainglobe_name_key,
+        list_lightsuite_brainglobe_atlases,
+    )
+
+    entries = list_lightsuite_brainglobe_atlases()
+    keys = [brainglobe_name_key(entry.name) for entry in entries]
+    assert keys == [
+        "allen_mouse_10um",
+        "princeton_mouse_20um",
+        "whs_sd_rat_39um",
+        "perens_lsfm_mouse_20um",
+    ]
+
+
+def test_find_brainglobe_catalog_entry_matches_versioned_name() -> None:
+    entries = [
+        BrainGlobeAtlasEntry(
+            name="allen_mouse_10um_v3",
+            provider="allen",
+            resolution_um=10.0,
+            label="Allen CCF (mouse) — 10 µm",
+        ),
+        BrainGlobeAtlasEntry(
+            name="perens_lsfm_mouse_20um_v1.2",
+            provider="perens",
+            resolution_um=20.0,
+            label="Perens / Gubra LSFM (mouse) — 20 µm",
+        ),
+    ]
+    match = find_brainglobe_catalog_entry(entries, brainglobe_name="allen_mouse_10um")
+    assert match is not None
+    assert match.provider == "allen"
+    assert match.resolution_um == 10.0
 
 
 def test_uses_ccf_id_parcellation_flags() -> None:

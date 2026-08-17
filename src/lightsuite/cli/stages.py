@@ -76,6 +76,38 @@ def _has_import_annotations(config: _Config) -> bool:
     return bool(annotations)
 
 
+@dataclass
+class _PreviewPipelineConfig:
+    """Minimal config stand-in for GUI stage-list preview before save."""
+
+    import_: Any = None
+    multires: Any = None
+
+
+_PREVIEW_CONFIG = _PreviewPipelineConfig()
+_PREVIEW_STAGE_DETAIL = "Save a valid config file to run this stage"
+
+
+def preview_stage_statuses(workflow: str) -> list[StageStatus]:
+    """Return the default stage checklist for a workflow (all pending/optional)."""
+    workflow_key = workflow.strip().lower()
+    if workflow_key == "brain":
+        specs = brain_stage_specs(_PREVIEW_CONFIG)  # type: ignore[arg-type]
+    elif workflow_key == "spinal":
+        specs = spinal_stage_specs(_PREVIEW_CONFIG)  # type: ignore[arg-type]
+    elif workflow_key == "multires":
+        specs = multires_stage_specs(_PREVIEW_CONFIG)
+    else:
+        msg = f"Unknown workflow {workflow!r} for stage preview."
+        raise ValueError(msg)
+
+    statuses: list[StageStatus] = []
+    for spec in specs:
+        state = StageState.OPTIONAL if spec.optional else StageState.PENDING
+        statuses.append(StageStatus(spec, state, _PREVIEW_STAGE_DETAIL))
+    return statuses
+
+
 def brain_stage_specs(config: BrainPipelineConfig) -> list[StageSpec]:
     stages = [
         StageSpec("preprocess", "Preprocess", "regopts.json → regvolpath"),
@@ -129,50 +161,36 @@ def brain_stage_specs(config: BrainPipelineConfig) -> list[StageSpec]:
 def spinal_stage_specs(config: SpinalCordPipelineConfig) -> list[StageSpec]:
     stages: list[StageSpec] = [
         StageSpec("preprocess", "Preprocess", "regopts.json"),
+        StageSpec(
+            "straighten",
+            "Straighten",
+            "spinal_alignment_opt.json",
+            manual=True,
+        ),
+        StageSpec(
+            "align-longitudinal",
+            "Align longitudinal",
+            "longitudinal_correspondence.json",
+            manual=True,
+        ),
+        StageSpec("init-registration", "Init registration", "regopts.json → slicetforms"),
+        StageSpec(
+            "match-points",
+            "Match control points",
+            "atlas2histology_tform.json",
+            optional=True,
+            manual=True,
+        ),
+        StageSpec("register", "Register", "transform_params.json"),
+        StageSpec("export", "Export", "volume_registered/ (+ region stats)"),
+        StageSpec(
+            "view-registration",
+            "View registration",
+            "channels + annotation + imports (Napari)",
+            optional=True,
+            manual=True,
+        ),
     ]
-    if config.registration.longitudinal_direction is None:
-        stages.append(
-            StageSpec(
-                "check-orientation",
-                "Check orientation",
-                CORD_ORIENTATION_FILENAME,
-                optional=True,
-                manual=True,
-            )
-        )
-    stages.extend(
-        [
-            StageSpec(
-                "straighten",
-                "Straighten",
-                "spinal_alignment_opt.json",
-                manual=True,
-            ),
-            StageSpec(
-                "align-longitudinal",
-                "Align longitudinal",
-                "longitudinal_correspondence.json",
-                manual=True,
-            ),
-            StageSpec("init-registration", "Init registration", "regopts.json → slicetforms"),
-            StageSpec(
-                "match-points",
-                "Match control points",
-                "atlas2histology_tform.json",
-                optional=True,
-                manual=True,
-            ),
-            StageSpec("register", "Register", "transform_params.json"),
-            StageSpec("export", "Export", "volume_registered/ (+ region stats)"),
-            StageSpec(
-                "view-registration",
-                "View registration",
-                "channels + annotation + imports (Napari)",
-                optional=True,
-                manual=True,
-            ),
-        ]
-    )
     if _has_import_annotations(config):
         stages.append(
             StageSpec(

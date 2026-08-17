@@ -14,6 +14,27 @@ from lightsuite.exceptions import LightsuiteConfigError, format_validation_error
 from lightsuite.registration.orientation import validate_permvec
 
 
+def parse_config_yaml(text: str) -> dict[str, Any]:
+    """Parse YAML config text and ensure it is a non-empty mapping."""
+    try:
+        raw = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        raise LightsuiteConfigError(f"Invalid YAML syntax: {exc}") from exc
+    if not isinstance(raw, dict) or not raw:
+        msg = "Config must be a non-empty YAML mapping."
+        raise LightsuiteConfigError(msg)
+    return raw
+
+
+def write_config_yaml(path: str | Path, text: str) -> Path:
+    """Write YAML text to disk after a basic syntax check."""
+    parse_config_yaml(text)
+    out = Path(path).expanduser().resolve()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(text if text.endswith("\n") else text + "\n", encoding="utf-8")
+    return out
+
+
 def _validate_config(model, raw: dict[str, Any], config_path: Path):
     try:
         return model.model_validate(raw)

@@ -1,0 +1,254 @@
+"""Tests for GUI config form helpers."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from lightsuite.config.loader import parse_config_yaml, write_config_yaml
+from lightsuite.exceptions import LightsuiteConfigError
+from lightsuite.gui.config_form_data import (
+    brain_atlas_help_text,
+    brain_atlas_provider_options,
+    brain_form_from_raw,
+    brain_form_to_raw,
+    default_local_atlas_resolution_um,
+    load_template_raw,
+    resolve_brain_brainglobe_form_fields,
+    spinal_form_from_raw,
+    spinal_form_to_raw,
+    try_validate_config_dict,
+)
+from lightsuite.atlas.brainglobe_backend import BrainGlobeAtlasEntry
+
+
+def test_parse_config_yaml_rejects_empty() -> None:
+    with pytest.raises(LightsuiteConfigError, match="non-empty"):
+        parse_config_yaml("")
+
+
+def test_parse_config_yaml_rejects_invalid_syntax() -> None:
+    with pytest.raises(LightsuiteConfigError, match="Invalid YAML"):
+        parse_config_yaml("sample: [")
+
+
+def test_write_config_yaml_roundtrip(tmp_path: Path) -> None:
+    text = "sample:\n  name: mouse\n"
+    out = write_config_yaml(tmp_path / "cfg.yaml", text)
+    assert out.read_text(encoding="utf-8") == text
+    assert parse_config_yaml(text)["sample"]["name"] == "mouse"
+
+
+def test_try_validate_config_dict_brain(tmp_path: Path) -> None:
+    (tmp_path / "src").mkdir()
+    (tmp_path / "scratch").mkdir()
+    (tmp_path / "results").mkdir()
+    (tmp_path / "atlas").mkdir()
+    data = {
+        "sample": {
+            "name": "mouse",
+            "source": {
+                "format": "tiff_stack",
+                "path": str(tmp_path / "src"),
+                "tiff_type": "channelperfile",
+            },
+            "scratch": str(tmp_path / "scratch"),
+            "save_path": str(tmp_path / "results"),
+            "voxel_um": [5.0, 5.0, 5.0],
+        },
+        "atlas": {"provider": "allen", "resolution_um": 10, "atlas_dir": str(tmp_path / "atlas")},
+        "registration": {"resolution_um": 20, "channel_primary": 1},
+        "detection": {"enabled": False},
+        "compute": {"workers": 1},
+        "export": {"registered_volume_format": "tiff"},
+    }
+    result = try_validate_config_dict(data)
+    assert not isinstance(result, LightsuiteConfigError)
+    workflow, config = result
+    assert workflow == "brain"
+    assert config.sample.name == "mouse"
+
+
+def test_try_validate_config_dict_reports_missing_paths() -> None:
+    _, raw = load_template_raw("brain")
+    result = try_validate_config_dict(raw)
+    assert isinstance(result, LightsuiteConfigError)
+
+
+def test_load_template_raw_unknown_workflow() -> None:
+    with pytest.raises(ValueError, match="Unknown workflow"):
+        load_template_raw("not_a_workflow")
+
+
+def test_tooltips_for_workflow_brain_and_spinal_differ_on_atlas() -> None:
+    from lightsuite.gui.config_form_tooltips import tooltips_for_workflow
+
+    brain = tooltips_for_workflow("brain")
+    spinal = tooltips_for_workflow("spinal")
+    multires = tooltips_for_workflow("multires")
+    assert "atlas_dir" in brain
+    assert "Fiederling" in spinal["atlas_dir"]
+    assert "pair_manifest" in multires
+    assert brain["atlas_dir"] != spinal["atlas_dir"]
+
+
+def test_brain_form_roundtrip_preserves_extra_keys() -> None:
+    raw = {
+        "sample": {
+            "name": "mouse",
+            "source": {"format": "tiff_stack", "path": "/data", "tiff_type": "channelperfile"},
+            "scratch": "/scratch",
+            "save_path": "/out",
+            "voxel_um": [1.0, 1.0, 1.0],
+        },
+        "atlas": {"provider": "allen", "resolution_um": 10, "atlas_dir": "/atlas"},
+        "registration": {"resolution_um": 20, "channel_primary": 1},
+        "export": {"write_pyramid": True},
+    }
+    state = brain_form_from_raw(raw)
+    state.sample_name = "renamed"
+    updated = brain_form_to_raw(state, raw)
+    assert updated["sample"]["name"] == "renamed"
+    assert updated["export"]["write_pyramid"] is True
+
+
+def test_brain_atlas_provider_options_local_vs_brainglobe() -> None:
+    local_ids = [provider for provider, _label in brain_atlas_provider_options("files")]
+    bg_ids = [provider for provider, _label in brain_atlas_provider_options("brainglobe")]
+    assert local_ids == ["allen", "perens"]
+    assert bg_ids == ["allen", "perens", "princeton", "rat"]
+
+
+def test_brain_atlas_help_text_mentions_orientation_switch() -> None:
+    perens_bg = brain_atlas_help_text("brainglobe", "perens")
+    assert "check-orientation" in perens_bg
+    allen_local = brain_atlas_help_text("files", "allen")
+    assert "average_template_10.nii.gz" in allen_local
+
+
+def test_brain_form_roundtrip_brainglobe_source() -> None:
+    raw = {
+        "sample": {
+            "name": "mouse",
+            "source": {"format": "tiff_stack", "path": "/data", "tiff_type": "channelperfile"},
+            "scratch": "/scratch",
+            "save_path": "/out",
+            "voxel_um": [1.0, 1.0, 1.0],
+        },
+        "atlas": {
+            "provider": "princeton",
+            "source": "brainglobe",
+            "brainglobe_name": "princeton_mouse_20um",
+            "resolution_um": 20,
+        },
+        "registration": {"resolution_um": 20, "channel_primary": 1},
+    }
+    state = brain_form_from_raw(raw)
+    assert state.atlas_source == "brainglobe"
+    assert state.atlas_provider == "princeton"
+    assert state.atlas_resolution_um == 20.0
+    updated = brain_form_to_raw(state, raw)
+    assert updated["atlas"]["source"] == "brainglobe"
+    assert updated["atlas"]["brainglobe_name"] == "princeton_mouse_20um"
+    assert updated["atlas"]["resolution_um"] == 20.0
+    assert "atlas_dir" not in updated["atlas"]
+
+
+def test_resolve_brain_brainglobe_form_fields_uses_catalog_resolution() -> None:
+    catalog = [
+        BrainGlobeAtlasEntry(
+            name="allen_mouse_10um_v4",
+            provider="allen",
+            resolution_um=10.0,
+            label="Allen CCF (mouse) — 10 µm",
+        )
+    ]
+    name, provider, resolution_um = resolve_brain_brainglobe_form_fields(
+        brainglobe_name="allen_mouse_10um",
+        provider="allen",
+        resolution_um=25.0,
+        catalog=catalog,
+    )
+    assert name == "allen_mouse_10um_v4"
+    assert provider == "allen"
+    assert resolution_um == 10.0
+
+
+def test_default_local_atlas_resolution_um() -> None:
+    assert default_local_atlas_resolution_um("allen") == 10.0
+    assert default_local_atlas_resolution_um("perens") == 20.0
+
+
+def test_brain_form_files_source_clears_brainglobe_name() -> None:
+    raw = {
+        "sample": {
+            "name": "mouse",
+            "source": {"format": "tiff_stack", "path": "/data", "tiff_type": "channelperfile"},
+            "scratch": "/scratch",
+            "save_path": "/out",
+            "voxel_um": [1.0, 1.0, 1.0],
+        },
+        "atlas": {
+            "provider": "allen",
+            "source": "brainglobe",
+            "brainglobe_name": "allen_mouse_10um",
+            "resolution_um": 10,
+            "atlas_dir": "/atlas",
+        },
+        "registration": {"resolution_um": 20, "channel_primary": 1},
+    }
+    state = brain_form_from_raw(raw)
+    state.atlas_source = "files"
+    updated = brain_form_to_raw(state, raw)
+    assert "source" not in updated["atlas"]
+    assert "brainglobe_name" not in updated["atlas"]
+    assert updated["atlas"]["atlas_dir"] == "/atlas"
+
+
+def test_spinal_form_channel_list() -> None:
+    raw = {
+        "sample": {
+            "name": "cord",
+            "source": {
+                "format": "tiff_stack",
+                "tiff_type": "planeperfile",
+                "channels": ["/ch0", "/ch1"],
+            },
+            "scratch": "/scratch",
+            "save_path": "/out",
+            "voxel_um": [1.8, 1.8, 1.8],
+        },
+        "atlas": {"atlas_dir": "/atlas"},
+        "registration": {"resolution_um": 20, "channel_primary": 1},
+        "compute": {"workers": 2},
+    }
+    state = spinal_form_from_raw(raw)
+    assert state.use_channel_list is True
+    assert state.channel_paths == ["/ch0", "/ch1"]
+    updated = spinal_form_to_raw(state, raw)
+    assert updated["registration"]["channel_primary"] == 1
+
+
+def test_spinal_form_preserves_longitudinal_direction() -> None:
+    raw = {
+        "sample": {
+            "name": "cord",
+            "source": {"format": "tiff_stack", "path": "/data", "tiff_type": "planeperfile"},
+            "scratch": "/scratch",
+            "save_path": "/out",
+            "voxel_um": [1.8, 1.8, 1.8],
+        },
+        "atlas": {"atlas_dir": "/atlas"},
+        "registration": {
+            "resolution_um": 20,
+            "channel_primary": 1,
+            "longitudinal_direction": "caudorostral",
+        },
+        "compute": {"workers": 2},
+    }
+    state = spinal_form_from_raw(raw)
+    state.workers = 8
+    updated = spinal_form_to_raw(state, raw)
+    assert updated["registration"]["longitudinal_direction"] == "caudorostral"
+    assert updated["compute"]["workers"] == 8
