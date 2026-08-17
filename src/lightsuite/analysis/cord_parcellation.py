@@ -16,6 +16,7 @@ from lightsuite.analysis.cord_counts import (
 )
 from lightsuite.analysis.cord_hemisphere import hemisphere_label_from_side
 from lightsuite.analysis.cord_ontology import CordRegionTable
+from lightsuite.analysis.intensity_metrics import normalize_intensity_metrics
 
 _META_COLUMNS = ["acronym", "name", "structure", "division"]
 
@@ -108,11 +109,13 @@ def _aggregate_intensity_groups(
         long.groupby(["parcellation_index", "segment", "hemisphere"], sort=True)
         .agg(
             median_intensity=("value", "median"),
+            mean_intensity=("value", "mean"),
             std=("value", lambda s: float(np.std(s.to_numpy(dtype=np.float64), ddof=0)) if len(s) > 1 else 0.0),
             n_voxels=("value", "count"),
         )
         .reset_index()
     )
+    grouped["variance"] = grouped["std"].astype(np.float64) ** 2
     grouped["volume_mm3"] = grouped["n_voxels"].astype(np.float64) * voxel_mm3
 
     if rel_mode == "background":
@@ -143,8 +146,9 @@ def parcellate_cord_intensities(
     hemisphere_side: np.ndarray | None = None,
     split_hemispheres: bool = False,
     keep_whole: bool = False,
+    intensity_metrics: list[str] | None = None,
 ) -> pd.DataFrame:
-    """Compute median intensity, std, and volume per Fiederling region and segment."""
+    """Compute per-region intensity statistics per Fiederling region and segment."""
     long = _flatten_region_segment_values(
         registered_volume,
         annotation,
@@ -196,9 +200,11 @@ def parcellate_cord_intensities(
         return pd.DataFrame(columns=CORD_TIDY_COLUMNS)
 
     grouped = pd.concat(frames, ignore_index=True)
-    metric_columns = ["median_intensity", "std", "volume_mm3"]
+    requested = normalize_intensity_metrics(intensity_metrics)
+    metric_columns = [metric for metric in requested if metric in grouped.columns]
     if rel_mode == "background" and "relative_median_intensity" in grouped.columns:
-        metric_columns.append("relative_median_intensity")
+        if "relative_median_intensity" not in metric_columns:
+            metric_columns.append("relative_median_intensity")
 
     records: list[dict] = []
     for row in grouped.itertuples(index=False):

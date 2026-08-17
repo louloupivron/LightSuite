@@ -11,7 +11,9 @@ from lightsuite.config.loader import write_config_yaml
 from lightsuite.exceptions import LightsuiteConfigError
 from lightsuite.atlas.brainglobe_backend import brainglobe_name_key
 from lightsuite.gui.config_form_tooltips import tooltips_for_workflow
+from lightsuite.analysis.intensity_metrics import DEFAULT_INTENSITY_METRICS
 from lightsuite.gui.config_form_data import (
+    AnnotationImportRow,
     BrainFormState,
     ChannelPaths,
     MultiresFormState,
@@ -27,6 +29,7 @@ from lightsuite.gui.config_form_data import (
     load_template_raw,
     multires_form_from_raw,
     multires_form_to_raw,
+    parse_orientation_text,
     resolve_brain_brainglobe_form_fields,
     spinal_form_from_raw,
     spinal_form_to_raw,
@@ -48,10 +51,27 @@ def _browse_file(parent: Any, title: str, start: str) -> str:
     return path or ""
 
 
+_INTENSITY_METRIC_OPTIONS: list[tuple[str, str]] = [
+    ("median_intensity", "Median"),
+    ("mean_intensity", "Mean"),
+    ("std", "Std"),
+    ("variance", "Variance"),
+    ("volume_mm3", "Volume mm³"),
+]
+
+
 @dataclass
 class _ChannelRow:
     row_widget: Any
     field: "_PathField"
+
+
+@dataclass
+class _AnnotationRow:
+    row_widget: Any
+    format_combo: Any
+    path_field: _PathField
+    label_edit: Any
 
 
 class _PathField:
@@ -256,6 +276,77 @@ class ConfigEditorDock:
         self._config_form.addRow("Secondary channel", self._channel_secondary)
         self._registration_resolution = self._float_spin(1.0, 100.0, self._mark_dirty)
         self._config_form.addRow("Registration resolution µm", self._registration_resolution)
+        self._bspline_spatial_scale = self._float_spin(0.01, 10.0, self._mark_dirty)
+        self._config_form.addRow("B-spline grid spacing mm", self._bspline_spatial_scale)
+        self._control_point_weight = self._float_spin(0.0, 1.0, self._mark_dirty)
+        self._control_point_weight.setSingleStep(0.05)
+        self._config_form.addRow("Control point weight", self._control_point_weight)
+        self._augment_points_check = QCheckBox("Add auto-landmarks to control points")
+        self._augment_points_check.stateChanged.connect(self._mark_dirty)
+        self._config_form.addRow(self._augment_points_check)
+        self._dual_channel_mi_primary = self._float_spin(0.0, 1.0, self._mark_dirty)
+        self._dual_channel_mi_primary.setSingleStep(0.05)
+        self._config_form.addRow("Dual MI weight (primary)", self._dual_channel_mi_primary)
+        self._dual_channel_mi_secondary = self._float_spin(0.0, 1.0, self._mark_dirty)
+        self._dual_channel_mi_secondary.setSingleStep(0.05)
+        self._config_form.addRow("Dual MI weight (secondary)", self._dual_channel_mi_secondary)
+        self._orientation_edit = self._line_edit(self._mark_dirty)
+        self._orientation_edit.setPlaceholderText("1, 2, 3 (empty = from check-orientation)")
+        self._config_form.addRow("Orientation", self._orientation_edit)
+        self._canvas_mode_combo = QComboBox()
+        self._canvas_mode_combo.addItem("None", "off")
+        self._canvas_mode_combo.addItem("Pad to atlas", "pad")
+        self._canvas_mode_combo.addItem("Crop to sample", "crop")
+        self._canvas_mode_combo.addItem("Union bbox", "union")
+        self._canvas_mode_combo.currentIndexChanged.connect(self._mark_dirty)
+        self._config_form.addRow("Registration canvas", self._canvas_mode_combo)
+        self._geometry_mode_combo = QComboBox()
+        self._geometry_mode_combo.addItem("Metadata (manifest)", "metadata")
+        self._geometry_mode_combo.addItem("Hybrid (landmarks)", "hybrid")
+        self._geometry_mode_combo.currentIndexChanged.connect(self._mark_dirty)
+        self._config_form.addRow("Geometry mode", self._geometry_mode_combo)
+        self._landmark_fit_mode_combo = QComboBox()
+        self._landmark_fit_mode_combo.addItem("Similarity", "similarity")
+        self._landmark_fit_mode_combo.addItem("Affine", "affine")
+        self._landmark_fit_mode_combo.addItem("Rigid", "rigid")
+        self._landmark_fit_mode_combo.currentIndexChanged.connect(self._mark_dirty)
+        self._config_form.addRow("Landmark fit mode", self._landmark_fit_mode_combo)
+        self._overlap_margin_um = self._float_spin(-500.0, 500.0, self._mark_dirty)
+        self._config_form.addRow("Overlap margin µm", self._overlap_margin_um)
+        self._write_full_overview_canvas = QCheckBox("Write full overview canvas")
+        self._write_full_overview_canvas.stateChanged.connect(self._mark_dirty)
+        self._config_form.addRow(self._write_full_overview_canvas)
+        self._import_annotations_host = QWidget()
+        self._import_annotations_layout = QVBoxLayout(self._import_annotations_host)
+        self._import_annotations_layout.setContentsMargins(0, 0, 0, 0)
+        import_annotation_buttons = QHBoxLayout()
+        self._add_import_annotation_button = QPushButton("Add annotation")
+        self._add_import_annotation_button.clicked.connect(
+            lambda _checked=False: self._add_import_annotation_row()
+        )
+        import_annotation_buttons.addWidget(self._add_import_annotation_button)
+        import_annotation_buttons.addStretch(1)
+        import_annotation_column = QVBoxLayout()
+        import_annotation_column.addWidget(self._import_annotations_host)
+        import_annotation_column.addLayout(import_annotation_buttons)
+        import_annotation_wrapper = QWidget()
+        import_annotation_wrapper.setLayout(import_annotation_column)
+        self._import_annotations_wrapper = import_annotation_wrapper
+        self._config_form.addRow("Import annotations", import_annotation_wrapper)
+        self._intensity_metric_checks: dict[str, Any] = {}
+        metrics_host = QWidget()
+        metrics_layout = QVBoxLayout(metrics_host)
+        metrics_layout.setContentsMargins(0, 0, 0, 0)
+        for metric_id, label in _INTENSITY_METRIC_OPTIONS:
+            check = QCheckBox(label)
+            check.stateChanged.connect(self._mark_dirty)
+            self._intensity_metric_checks[metric_id] = check
+            metrics_layout.addWidget(check)
+        self._analysis_metrics_wrapper = metrics_host
+        self._config_form.addRow("Intensity metrics", metrics_host)
+        self._parcellate_intensities_check = QCheckBox("Parcellate channel intensities")
+        self._parcellate_intensities_check.stateChanged.connect(self._mark_dirty)
+        self._config_form.addRow(self._parcellate_intensities_check)
         self._workers = self._int_spin(1, 64, self._mark_dirty)
         self._config_form.addRow("Workers", self._workers)
         self._detection_check = QCheckBox("Enable cell detection")
@@ -312,6 +403,8 @@ class ConfigEditorDock:
 
         self._channel_rows: list[_ChannelRow] = []
         self._multires_channel_rows: list[tuple[Any, _PathField, _PathField]] = []
+        self._import_annotation_rows: list[_AnnotationRow] = []
+        self._loading_metrics = False
         self._brainglobe_catalog: list[Any] = []
         self._update_buttons()
 
@@ -404,6 +497,7 @@ class ConfigEditorDock:
         self._dirty = False
         self._clear_channel_rows()
         self._clear_multires_channel_rows()
+        self._clear_import_annotation_rows()
         self._placeholder.show()
         self._config_block.hide()
         self._update_path_label()
@@ -440,6 +534,25 @@ class ConfigEditorDock:
         self._set_form_row_visible(form, self._channel_primary, not is_multires)
         self._set_form_row_visible(form, self._channel_secondary, is_brain)
         self._set_form_row_visible(form, self._registration_resolution, not is_multires)
+
+        self._set_form_row_visible(form, self._bspline_spatial_scale, is_brain)
+        self._set_form_row_visible(form, self._control_point_weight, is_brain or is_spinal)
+        self._set_form_row_visible(form, self._augment_points_check, is_brain)
+        self._set_form_row_visible(form, self._dual_channel_mi_primary, is_brain)
+        self._set_form_row_visible(form, self._dual_channel_mi_secondary, is_brain)
+        self._set_form_row_visible(form, self._orientation_edit, is_brain)
+        self._set_form_row_visible(form, self._canvas_mode_combo, is_brain)
+        self._set_form_row_visible(form, self._geometry_mode_combo, is_multires)
+        self._set_form_row_visible(form, self._landmark_fit_mode_combo, is_multires)
+        self._set_form_row_visible(form, self._overlap_margin_um, is_multires)
+        self._set_form_row_visible(form, self._write_full_overview_canvas, is_multires)
+        self._set_form_row_visible(
+            form,
+            self._import_annotations_wrapper,
+            is_brain or is_spinal or is_multires,
+        )
+        self._set_form_row_visible(form, self._analysis_metrics_wrapper, is_brain or is_spinal)
+        self._set_form_row_visible(form, self._parcellate_intensities_check, is_spinal)
 
         self._set_form_row_visible(form, self._workers, True)
         self._set_form_row_visible(form, self._detection_check, is_brain)
@@ -487,10 +600,16 @@ class ConfigEditorDock:
                 (self._pair_manifest, "pair_manifest"),
                 (self._reference_channel_edit, "reference_channel"),
                 (self._multires_channels_wrapper, "multires_channels"),
+                (self._geometry_mode_combo, "geometry_mode"),
+                (self._landmark_fit_mode_combo, "landmark_fit_mode"),
+                (self._overlap_margin_um, "overlap_margin_um"),
+                (self._write_full_overview_canvas, "write_full_overview_canvas"),
+                (self._import_annotations_wrapper, "import_annotations"),
             ]
             for field, key in multires_fields:
                 self._set_field_tooltip(field, tips.get(key, ""))
             self._add_multires_channel_button.setToolTip(tips.get("multires_channels", ""))
+            self._add_import_annotation_button.setToolTip(tips.get("import_annotations", ""))
             return
 
         sample_fields: list[tuple[Any, str]] = [
@@ -507,6 +626,12 @@ class ConfigEditorDock:
             self._set_field_tooltip(spin, tips.get("voxel_um", ""))
         channel_tip = tips.get("channel_folders", "")
         self._add_channel_button.setToolTip(channel_tip)
+        self._add_import_annotation_button.setToolTip(tips.get("import_annotations", ""))
+        analysis_fields: list[tuple[Any, str]] = [
+            (self._analysis_metrics_wrapper, "intensity_metrics"),
+        ]
+        for field, key in analysis_fields:
+            self._set_field_tooltip(field, tips.get(key, ""))
 
         if self._workflow == "brain":
             brain_fields: list[tuple[Any, str]] = [
@@ -516,12 +641,27 @@ class ConfigEditorDock:
                 (self._atlas_resolution, "atlas_resolution"),
                 (self._atlas_dir, "atlas_dir"),
                 (self._channel_secondary, "channel_secondary"),
+                (self._bspline_spatial_scale, "bspline_spatial_scale_mm"),
+                (self._control_point_weight, "control_point_weight"),
+                (self._augment_points_check, "augment_points"),
+                (self._dual_channel_mi_primary, "dual_channel_mi_weight_primary"),
+                (self._dual_channel_mi_secondary, "dual_channel_mi_weight_secondary"),
+                (self._orientation_edit, "orientation"),
+                (self._canvas_mode_combo, "canvas_mode"),
+                (self._import_annotations_wrapper, "import_annotations"),
                 (self._detection_check, "detection"),
             ]
             for field, key in brain_fields:
                 self._set_field_tooltip(field, tips.get(key, ""))
         elif self._workflow == "spinal":
-            self._set_field_tooltip(self._atlas_dir, tips.get("atlas_dir", ""))
+            spinal_fields: list[tuple[Any, str]] = [
+                (self._atlas_dir, "atlas_dir"),
+                (self._control_point_weight, "control_point_weight"),
+                (self._import_annotations_wrapper, "import_annotations"),
+                (self._parcellate_intensities_check, "parcellate_intensities"),
+            ]
+            for field, key in spinal_fields:
+                self._set_field_tooltip(field, tips.get(key, ""))
 
     def _refresh_atlas_provider_combo(self, source: str, *, preferred_provider: str) -> None:
         current = str(self._atlas_provider_combo.currentData() or "")
@@ -631,6 +771,17 @@ class ConfigEditorDock:
             self._channel_primary.setValue(state.channel_primary)
             self._channel_secondary.setValue(state.channel_secondary or 0)
             self._registration_resolution.setValue(state.registration_resolution_um)
+            self._bspline_spatial_scale.setValue(state.bspline_spatial_scale_mm)
+            self._control_point_weight.setValue(state.control_point_weight)
+            self._augment_points_check.setChecked(state.augment_points)
+            self._dual_channel_mi_primary.setValue(state.dual_channel_mi_weight_primary)
+            self._dual_channel_mi_secondary.setValue(state.dual_channel_mi_weight_secondary)
+            self._orientation_edit.setText(
+                "" if state.orientation is None else f"{state.orientation[0]}, {state.orientation[1]}, {state.orientation[2]}"
+            )
+            self._set_combo_value(self._canvas_mode_combo, state.canvas_mode)
+            self._fill_import_annotations(state.import_annotations)
+            self._fill_intensity_metrics(state.intensity_metrics)
             self._workers.setValue(state.workers)
             self._detection_check.setChecked(state.detection_enabled)
         elif workflow == "spinal":
@@ -648,6 +799,10 @@ class ConfigEditorDock:
             self._atlas_dir.set_text(state.atlas_dir)
             self._channel_primary.setValue(state.channel_primary)
             self._registration_resolution.setValue(state.registration_resolution_um)
+            self._control_point_weight.setValue(state.control_point_weight)
+            self._fill_import_annotations(state.import_annotations)
+            self._fill_intensity_metrics(state.intensity_metrics)
+            self._parcellate_intensities_check.setChecked(state.parcellate_intensities)
             self._workers.setValue(state.workers)
         else:
             state = multires_form_from_raw(raw)
@@ -657,6 +812,11 @@ class ConfigEditorDock:
             self._pair_label_edit.setText(state.pair_label)
             self._pair_manifest.set_text(state.pair_manifest)
             self._reference_channel_edit.setText(state.reference_channel)
+            self._set_combo_value(self._geometry_mode_combo, state.geometry_mode)
+            self._set_combo_value(self._landmark_fit_mode_combo, state.landmark_fit_mode)
+            self._overlap_margin_um.setValue(state.overlap_margin_um)
+            self._write_full_overview_canvas.setChecked(state.write_full_overview_canvas)
+            self._fill_import_annotations(state.import_annotations)
             compute = raw.get("compute") or {}
             self._workers.setValue(int(compute.get("workers") or 4))
             self._clear_multires_channel_rows()
@@ -667,6 +827,100 @@ class ConfigEditorDock:
 
         self._loading = False
         self._update_workflow_layout()
+
+    def _fill_intensity_metrics(self, metrics: list[str]) -> None:
+        selected = set(metrics or DEFAULT_INTENSITY_METRICS)
+        self._loading_metrics = True
+        for metric_id, check in self._intensity_metric_checks.items():
+            check.setChecked(metric_id in selected)
+        self._loading_metrics = False
+
+    def _collect_intensity_metrics(self) -> list[str]:
+        metrics = [
+            metric_id
+            for metric_id, check in self._intensity_metric_checks.items()
+            if check.isChecked()
+        ]
+        return metrics or list(DEFAULT_INTENSITY_METRICS)
+
+    def _fill_import_annotations(self, rows: list[AnnotationImportRow]) -> None:
+        self._clear_import_annotation_rows()
+        if rows:
+            for row in rows:
+                self._add_import_annotation_row(row.format, row.path, row.label)
+        else:
+            self._add_import_annotation_row()
+
+    def _collect_import_annotations(self) -> list[AnnotationImportRow]:
+        rows: list[AnnotationImportRow] = []
+        for row in self._import_annotation_rows:
+            rows.append(
+                AnnotationImportRow(
+                    format=str(row.format_combo.currentData() or "points_csv"),
+                    path=row.path_field.text(),
+                    label=row.label_edit.text().strip(),
+                )
+            )
+        return rows
+
+    def _clear_import_annotation_rows(self) -> None:
+        self._clear_layout_widgets(self._import_annotations_layout)
+        self._import_annotation_rows.clear()
+
+    def _add_import_annotation_row(
+        self,
+        format_name: str = "points_csv",
+        path: str = "",
+        label: str = "",
+    ) -> None:
+        from qtpy.QtWidgets import QComboBox, QHBoxLayout, QLineEdit, QPushButton, QWidget
+
+        row_widget = QWidget(self._import_annotations_host)
+        layout = QHBoxLayout(row_widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        format_combo = QComboBox()
+        format_combo.addItem("points_csv", "points_csv")
+        format_combo.addItem("mask_tiff", "mask_tiff")
+        format_combo.currentIndexChanged.connect(self._mark_dirty)
+        self._set_combo_value(format_combo, format_name)
+        path_field = _PathField(
+            parent=row_widget,
+            browse_label="Annotation file",
+            browse_mode="file",
+            on_change=self._mark_dirty,
+        )
+        path_field.set_text(path)
+        label_edit = QLineEdit()
+        label_edit.setPlaceholderText("label (optional)")
+        label_edit.setText(label)
+        label_edit.textChanged.connect(self._mark_dirty)
+        remove = QPushButton("Remove")
+        remove.clicked.connect(
+            lambda _checked=False, row_path=path_field: self._remove_import_annotation_row(row_path)
+        )
+        layout.addWidget(format_combo)
+        layout.addWidget(path_field.widget, stretch=1)
+        layout.addWidget(label_edit)
+        layout.addWidget(remove)
+        self._import_annotations_layout.addWidget(row_widget)
+        self._import_annotation_rows.append(
+            _AnnotationRow(
+                row_widget=row_widget,
+                format_combo=format_combo,
+                path_field=path_field,
+                label_edit=label_edit,
+            )
+        )
+
+    def _remove_import_annotation_row(self, path_field: _PathField) -> None:
+        for index, row in enumerate(self._import_annotation_rows):
+            if row.path_field is not path_field:
+                continue
+            row.row_widget.setParent(None)
+            row.row_widget.deleteLater()
+            self._import_annotation_rows.pop(index)
+            self._mark_dirty()
+            return
 
     def _fill_sample_fields(
         self,
@@ -841,6 +1095,15 @@ class ConfigEditorDock:
                     None if self._channel_secondary.value() == 0 else self._channel_secondary.value()
                 ),
                 registration_resolution_um=self._registration_resolution.value(),
+                bspline_spatial_scale_mm=self._bspline_spatial_scale.value(),
+                control_point_weight=self._control_point_weight.value(),
+                augment_points=self._augment_points_check.isChecked(),
+                dual_channel_mi_weight_primary=self._dual_channel_mi_primary.value(),
+                dual_channel_mi_weight_secondary=self._dual_channel_mi_secondary.value(),
+                orientation=parse_orientation_text(self._orientation_edit.text()),
+                canvas_mode=str(self._canvas_mode_combo.currentData() or "off"),
+                import_annotations=self._collect_import_annotations(),
+                intensity_metrics=self._collect_intensity_metrics(),
                 workers=self._workers.value(),
                 detection_enabled=self._detection_check.isChecked(),
             )
@@ -862,6 +1125,10 @@ class ConfigEditorDock:
                 atlas_dir=self._atlas_dir.text(),
                 channel_primary=self._channel_primary.value(),
                 registration_resolution_um=self._registration_resolution.value(),
+                control_point_weight=self._control_point_weight.value(),
+                import_annotations=self._collect_import_annotations(),
+                intensity_metrics=self._collect_intensity_metrics(),
+                parcellate_intensities=self._parcellate_intensities_check.isChecked(),
                 workers=self._workers.value(),
             )
             return spinal_form_to_raw(state, self._raw)
@@ -881,6 +1148,11 @@ class ConfigEditorDock:
             pair_manifest=self._pair_manifest.text(),
             reference_channel=self._reference_channel_edit.text().strip(),
             channels=channels,
+            geometry_mode=str(self._geometry_mode_combo.currentData() or "metadata"),
+            landmark_fit_mode=str(self._landmark_fit_mode_combo.currentData() or "similarity"),
+            overlap_margin_um=self._overlap_margin_um.value(),
+            write_full_overview_canvas=self._write_full_overview_canvas.isChecked(),
+            import_annotations=self._collect_import_annotations(),
         )
         raw = multires_form_to_raw(state, self._raw)
         compute = dict(raw.get("compute") or {})
@@ -904,6 +1176,8 @@ class ConfigEditorDock:
 
     def _mark_dirty(self) -> None:
         if self._loading:
+            return
+        if getattr(self, "_loading_metrics", False):
             return
         self._dirty = True
         self._update_path_label()

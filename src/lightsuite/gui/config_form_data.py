@@ -9,6 +9,7 @@ from typing import Any
 
 import yaml
 
+from lightsuite.analysis.intensity_metrics import DEFAULT_INTENSITY_METRICS, normalize_intensity_metrics
 from lightsuite.atlas.brainglobe_backend import (
     brainglobe_name_for_yaml,
     find_brainglobe_catalog_entry,
@@ -32,6 +33,91 @@ class ChannelPaths:
     name: str
     overview: str = ""
     roi: str = ""
+
+
+@dataclass
+class AnnotationImportRow:
+    format: str = "points_csv"
+    path: str = ""
+    label: str = ""
+
+
+def _parse_orientation(raw: Any) -> tuple[int, int, int] | None:
+    if not isinstance(raw, list) or len(raw) != 3:
+        return None
+    try:
+        return (int(raw[0]), int(raw[1]), int(raw[2]))
+    except (TypeError, ValueError):
+        return None
+
+
+def _format_orientation(orientation: tuple[int, int, int] | None) -> str:
+    if orientation is None:
+        return ""
+    return f"{orientation[0]}, {orientation[1]}, {orientation[2]}"
+
+
+def parse_orientation_text(text: str) -> tuple[int, int, int] | None:
+    """Parse ``1, 2, 3`` or ``[1, -3, 2]`` into an orientation triple."""
+    cleaned = text.strip().replace("[", "").replace("]", "")
+    if not cleaned:
+        return None
+    parts = [part.strip() for part in cleaned.split(",")]
+    if len(parts) != 3:
+        return None
+    try:
+        return (int(parts[0]), int(parts[1]), int(parts[2]))
+    except ValueError:
+        return None
+
+
+def import_annotations_from_raw(raw: dict[str, Any]) -> list[AnnotationImportRow]:
+    import_block = raw.get("import") or {}
+    annotations = import_block.get("annotations")
+    rows: list[AnnotationImportRow] = []
+    if isinstance(annotations, list):
+        for item in annotations:
+            if not isinstance(item, dict):
+                continue
+            rows.append(
+                AnnotationImportRow(
+                    format=str(item.get("format") or "points_csv"),
+                    path=_path_str(item.get("path")),
+                    label=str(item.get("label") or ""),
+                )
+            )
+    return rows
+
+
+def import_annotations_to_raw(
+    rows: list[AnnotationImportRow],
+    raw: dict[str, Any],
+) -> dict[str, Any]:
+    out = dict(raw)
+    import_block = dict(out.get("import") or {})
+    annotations: list[dict[str, str]] = []
+    for row in rows:
+        path = row.path.strip()
+        if not path:
+            continue
+        entry: dict[str, str] = {
+            "format": row.format.strip() or "points_csv",
+            "path": path,
+        }
+        if row.label.strip():
+            entry["label"] = row.label.strip()
+        annotations.append(entry)
+    if annotations:
+        import_block["annotations"] = annotations
+        import_block.setdefault("write_csv", True)
+        out["import"] = import_block
+    else:
+        import_block.pop("annotations", None)
+        if import_block:
+            out["import"] = import_block
+        else:
+            out.pop("import", None)
+    return out
 
 
 _BRAIN_ATLAS_PROVIDERS_FILES = ("allen", "perens")
@@ -153,6 +239,15 @@ class BrainFormState:
     channel_primary: int = 1
     channel_secondary: int | None = None
     registration_resolution_um: float = 20.0
+    bspline_spatial_scale_mm: float = 0.64
+    control_point_weight: float = 0.2
+    augment_points: bool = False
+    dual_channel_mi_weight_primary: float = 0.4
+    dual_channel_mi_weight_secondary: float = 0.4
+    orientation: tuple[int, int, int] | None = None
+    canvas_mode: str = "off"
+    import_annotations: list[AnnotationImportRow] = field(default_factory=list)
+    intensity_metrics: list[str] = field(default_factory=lambda: list(DEFAULT_INTENSITY_METRICS))
     workers: int = 4
     detection_enabled: bool = False
 
@@ -170,6 +265,10 @@ class SpinalFormState:
     atlas_dir: str = ""
     channel_primary: int = 1
     registration_resolution_um: float = 20.0
+    control_point_weight: float = 0.2
+    import_annotations: list[AnnotationImportRow] = field(default_factory=list)
+    intensity_metrics: list[str] = field(default_factory=lambda: list(DEFAULT_INTENSITY_METRICS))
+    parcellate_intensities: bool = True
     workers: int = 4
 
 
@@ -182,6 +281,11 @@ class MultiresFormState:
     pair_manifest: str = ""
     reference_channel: str = ""
     channels: list[ChannelPaths] = field(default_factory=list)
+    geometry_mode: str = "metadata"
+    landmark_fit_mode: str = "similarity"
+    overlap_margin_um: float = 0.0
+    write_full_overview_canvas: bool = True
+    import_annotations: list[AnnotationImportRow] = field(default_factory=list)
 
 
 def load_template_raw(workflow: str) -> tuple[str, dict[str, Any]]:
@@ -230,6 +334,30 @@ def _voxel_tuple(raw: Any, default: tuple[float, float, float]) -> tuple[float, 
         return default
 
 
+def _analysis_intensity_metrics_from_raw(raw: dict[str, Any]) -> list[str]:
+    analysis = raw.get("analysis") or {}
+    metrics = analysis.get("intensity_metrics")
+    if metrics is None:
+        return list(DEFAULT_INTENSITY_METRICS)
+    return normalize_intensity_metrics(metrics)
+
+
+def _apply_analysis_to_raw(
+    raw: dict[str, Any],
+    *,
+    intensity_metrics: list[str],
+    parcellate_intensities: bool | None = None,
+) -> dict[str, Any]:
+    out = dict(raw)
+    analysis = dict(out.get("analysis") or {})
+    analysis["intensity_metrics"] = normalize_intensity_metrics(intensity_metrics)
+    analysis["count_points"] = True
+    if parcellate_intensities is not None:
+        analysis["parcellate_intensities"] = parcellate_intensities
+    out["analysis"] = analysis
+    return out
+
+
 def brain_form_from_raw(raw: dict[str, Any]) -> BrainFormState:
     sample = raw.get("sample") or {}
     source = sample.get("source") or {}
@@ -237,6 +365,7 @@ def brain_form_from_raw(raw: dict[str, Any]) -> BrainFormState:
     registration = raw.get("registration") or {}
     compute = raw.get("compute") or {}
     detection = raw.get("detection") or {}
+    analysis = raw.get("analysis") or {}
     channels = source.get("channels")
     channel_paths = [_path_str(item) for item in channels] if isinstance(channels, list) else []
     secondary = registration.get("channel_secondary")
@@ -267,6 +396,23 @@ def brain_form_from_raw(raw: dict[str, Any]) -> BrainFormState:
         channel_primary=int(registration.get("channel_primary") or 1),
         channel_secondary=int(secondary) if secondary is not None else None,
         registration_resolution_um=float(registration.get("resolution_um") or 20.0),
+        bspline_spatial_scale_mm=float(registration.get("bspline_spatial_scale_mm") or 0.64),
+        control_point_weight=float(registration.get("control_point_weight") or 0.2),
+        augment_points=bool(registration.get("augment_points", False)),
+        dual_channel_mi_weight_primary=float(
+            registration.get("dual_channel_mi_weight_primary")
+            or registration.get("dual_channel_mi_weight_autofluor")
+            or 0.4
+        ),
+        dual_channel_mi_weight_secondary=float(
+            registration.get("dual_channel_mi_weight_secondary")
+            or registration.get("dual_channel_mi_weight_signal")
+            or 0.4
+        ),
+        orientation=_parse_orientation(registration.get("orientation")),
+        canvas_mode=str(registration.get("canvas_mode") or "off").lower(),
+        import_annotations=import_annotations_from_raw(raw),
+        intensity_metrics=_analysis_intensity_metrics_from_raw(raw),
         workers=int(compute.get("workers") or 4),
         detection_enabled=bool(detection.get("enabled", False)),
     )
@@ -326,6 +472,21 @@ def brain_form_to_raw(state: BrainFormState, raw: dict[str, Any]) -> dict[str, A
     registration = dict(out.get("registration") or {})
     registration["channel_primary"] = state.channel_primary
     registration["resolution_um"] = state.registration_resolution_um
+    registration["bspline_spatial_scale_mm"] = state.bspline_spatial_scale_mm
+    registration["control_point_weight"] = state.control_point_weight
+    registration["augment_points"] = state.augment_points
+    registration["dual_channel_mi_weight_primary"] = state.dual_channel_mi_weight_primary
+    registration["dual_channel_mi_weight_secondary"] = state.dual_channel_mi_weight_secondary
+    registration.pop("dual_channel_mi_weight_autofluor", None)
+    registration.pop("dual_channel_mi_weight_signal", None)
+    if state.orientation is None:
+        registration.pop("orientation", None)
+    else:
+        registration["orientation"] = list(state.orientation)
+    if state.canvas_mode and state.canvas_mode != "off":
+        registration["canvas_mode"] = state.canvas_mode
+    else:
+        registration.pop("canvas_mode", None)
     if state.channel_secondary is None:
         registration["channel_secondary"] = None
     else:
@@ -339,7 +500,11 @@ def brain_form_to_raw(state: BrainFormState, raw: dict[str, Any]) -> dict[str, A
     detection = dict(out.get("detection") or {})
     detection["enabled"] = state.detection_enabled
     out["detection"] = detection
-    return out
+    out = _apply_analysis_to_raw(
+        out,
+        intensity_metrics=state.intensity_metrics,
+    )
+    return import_annotations_to_raw(state.import_annotations, out)
 
 
 def spinal_form_from_raw(raw: dict[str, Any]) -> SpinalFormState:
@@ -348,6 +513,7 @@ def spinal_form_from_raw(raw: dict[str, Any]) -> SpinalFormState:
     atlas = raw.get("atlas") or {}
     registration = raw.get("registration") or {}
     compute = raw.get("compute") or {}
+    analysis = raw.get("analysis") or {}
     channels = source.get("channels")
     channel_paths = [_path_str(item) for item in channels] if isinstance(channels, list) else []
     return SpinalFormState(
@@ -362,6 +528,10 @@ def spinal_form_from_raw(raw: dict[str, Any]) -> SpinalFormState:
         atlas_dir=_path_str(atlas.get("atlas_dir")),
         channel_primary=int(registration.get("channel_primary") or 1),
         registration_resolution_um=float(registration.get("resolution_um") or 20.0),
+        control_point_weight=float(registration.get("control_point_weight") or 0.2),
+        import_annotations=import_annotations_from_raw(raw),
+        intensity_metrics=_analysis_intensity_metrics_from_raw(raw),
+        parcellate_intensities=bool(analysis.get("parcellate_intensities", True)),
         workers=int(compute.get("workers") or 4),
     )
 
@@ -399,12 +569,18 @@ def spinal_form_to_raw(state: SpinalFormState, raw: dict[str, Any]) -> dict[str,
     registration = dict(out.get("registration") or {})
     registration["channel_primary"] = state.channel_primary
     registration["resolution_um"] = state.registration_resolution_um
+    registration["control_point_weight"] = state.control_point_weight
     out["registration"] = registration
 
     compute = dict(out.get("compute") or {})
     compute["workers"] = state.workers
     out["compute"] = compute
-    return out
+    out = _apply_analysis_to_raw(
+        out,
+        intensity_metrics=state.intensity_metrics,
+        parcellate_intensities=state.parcellate_intensities,
+    )
+    return import_annotations_to_raw(state.import_annotations, out)
 
 
 def multires_form_from_raw(raw: dict[str, Any]) -> MultiresFormState:
@@ -424,6 +600,7 @@ def multires_form_from_raw(raw: dict[str, Any]) -> MultiresFormState:
                     roi=_path_str(item.get("roi")),
                 )
             )
+    landmarks = multires.get("landmarks") or {}
     return MultiresFormState(
         sample_name=str(sample.get("name") or ""),
         save_path=_path_str(sample.get("save_path")),
@@ -432,6 +609,11 @@ def multires_form_from_raw(raw: dict[str, Any]) -> MultiresFormState:
         pair_manifest=_path_str(multires.get("pair_manifest")),
         reference_channel=str(registration.get("reference_channel") or ""),
         channels=channels,
+        geometry_mode=str(multires.get("geometry_mode") or "metadata"),
+        landmark_fit_mode=str(landmarks.get("fit_mode") or "similarity"),
+        overlap_margin_um=float(registration.get("overlap_margin_um") or 0.0),
+        write_full_overview_canvas=bool(registration.get("write_full_overview_canvas", True)),
+        import_annotations=import_annotations_from_raw(raw),
     )
 
 
@@ -456,6 +638,11 @@ def multires_form_to_raw(state: MultiresFormState, raw: dict[str, Any]) -> dict[
     else:
         multires.pop("pair_manifest", None)
 
+    multires["geometry_mode"] = state.geometry_mode
+    landmarks = dict(multires.get("landmarks") or {})
+    landmarks["fit_mode"] = state.landmark_fit_mode
+    multires["landmarks"] = landmarks
+
     channels: dict[str, dict[str, str]] = {}
     for item in state.channels:
         name = item.name.strip()
@@ -478,9 +665,11 @@ def multires_form_to_raw(state: MultiresFormState, raw: dict[str, Any]) -> dict[
         registration["reference_channel"] = state.reference_channel.strip()
     else:
         registration.pop("reference_channel", None)
+    registration["overlap_margin_um"] = state.overlap_margin_um
+    registration["write_full_overview_canvas"] = state.write_full_overview_canvas
     multires["registration"] = registration
     out["multires"] = multires
-    return out
+    return import_annotations_to_raw(state.import_annotations, out)
 
 
 def try_validate_config_dict(data: dict[str, Any]) -> tuple[str, Any] | LightsuiteConfigError:

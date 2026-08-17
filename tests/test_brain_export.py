@@ -18,11 +18,13 @@ def test_accumulate_side_median() -> None:
     labels = np.array([0, 1, 1, 2, 2, 2], dtype=np.int32)
     values = np.array([10, 20, 40, 5, 5, 5], dtype=np.float32)
     area_ids = np.array([0, 1, 2], dtype=np.int64)
-    med, std, vol = _accumulate_side(labels, values, area_ids, voxel_mm3=0.001)
+    med, mean, std, var, vol = _accumulate_side(labels, values, area_ids, voxel_mm3=0.001)
     assert med[0] == 10
     assert med[1] == 30
     assert med[2] == 5
+    assert mean[1] == 30
     assert std[1] == pytest.approx(10.0)
+    assert var[1] == pytest.approx(100.0)
     assert vol[0] == pytest.approx(0.001)
     assert vol[2] == pytest.approx(0.003)
 
@@ -33,7 +35,9 @@ def test_write_parcellation_csv(tmp_path: Path) -> None:
     result = ParcellationResult(
         area_ids=np.array([1, 2]),
         median_over_areas=np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32),
+        mean_over_areas=np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32),
         std_over_areas=np.zeros((2, 2), dtype=np.float32),
+        variance_over_areas=np.zeros((2, 2), dtype=np.float32),
         volume_over_areas=np.ones((2, 2), dtype=np.float32),
     )
     path = tmp_path / "intensities.csv"

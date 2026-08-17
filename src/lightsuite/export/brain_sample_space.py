@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 from rich.console import Console
 
+from lightsuite.analysis.brain_runner import maybe_write_brain_sample_region_stats
 from lightsuite.analysis.division_map import ensure_division_map
 from lightsuite.analysis.ontology import RegionTable, load_region_table
 from lightsuite.analysis.region_stats import (
@@ -212,6 +213,7 @@ def export_brain_sample_space(
                 sample=config.sample.name,
                 channel=ichan,
                 atlas=atlas.brain_atlas,
+                intensity_metrics=config.analysis.intensity_metrics,
             )
             tidy_path = out_dir / f"chan{ichan:02d}_region_stats_sample.csv"
             write_region_stats_csv(tidy_path, tidy)
@@ -221,8 +223,17 @@ def export_brain_sample_space(
             tidy_frames.append(tidy)
 
         if tidy_frames:
-            combined = out_dir / "region_stats_sample.csv"
-            write_region_stats_csv(combined, concat_tidy(tidy_frames))
+            register_path = save_path / "volume_registered"
+            maybe_write_brain_sample_region_stats(
+                config,
+                tidy_frames=tidy_frames,
+                annotation_sample=np.rint(annotation_sample).astype(np.int32),
+                region_table=region_table,
+                atlas=atlas,
+                registres_um=registres_um,
+                transform_params=transform_params,
+                register_path=register_path,
+            )
 
     console.print(
         f"Sample-space export done in {time.perf_counter() - t0:.1f}s under {out_dir}"

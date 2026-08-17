@@ -17,6 +17,7 @@ from lightsuite.analysis.cord_counts import (
     write_cord_region_stats_csv,
 )
 from lightsuite.analysis.cord_parcellation import parcellate_cord_intensities
+from lightsuite.analysis.intensity_metrics import filter_intensity_metric_rows
 from lightsuite.analysis.cord_rollup import apply_cord_rollups
 from lightsuite.analysis.cord_hemisphere import (
     cord_hemisphere_side_volume,
@@ -215,7 +216,9 @@ def run_cord_region_stats(
                             hemisphere_side=hemisphere_side,
                             split_hemispheres=split_hemispheres,
                             keep_whole=keep_whole,
+                            intensity_metrics=config.analysis.intensity_metrics,
                         )
+                        tidy = filter_intensity_metric_rows(tidy, config.analysis.intensity_metrics)
                         if len(tidy):
                             per_chan_path = register_path / f"chan{ichan:02d}_region_stats.csv"
                             write_cord_region_stats_csv(per_chan_path, tidy)

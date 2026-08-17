@@ -247,4 +247,9 @@ def run_brain_import_annotations(
         temp_dir=temp_root,
         write_csv=write_csv_resolved,
     )
-    return run_annotation_import(specs, importer=importer, output_dir=output_dir)
+    results = run_annotation_import(specs, importer=importer, output_dir=output_dir)
+    if config.analysis.count_points:
+        from lightsuite.analysis.brain_runner import maybe_refresh_brain_region_stats
+
+        maybe_refresh_brain_region_stats(config, export_spaces=list(config.export.spaces))
+    return results

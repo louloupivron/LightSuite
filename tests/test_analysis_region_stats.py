@@ -34,7 +34,9 @@ def _result() -> ParcellationResult:
     return ParcellationResult(
         area_ids=np.array([1, 2], dtype=np.int64),
         median_over_areas=np.array([[10.0, 20.0], [30.0, 40.0]], dtype=np.float32),
+        mean_over_areas=np.array([[11.0, 21.0], [31.0, 41.0]], dtype=np.float32),
         std_over_areas=np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32),
+        variance_over_areas=np.array([[1.0, 4.0], [9.0, 16.0]], dtype=np.float32),
         volume_over_areas=np.array([[0.1, 0.2], [0.3, 0.4]], dtype=np.float32),
     )
 
@@ -44,7 +46,7 @@ def test_parcellation_result_to_tidy_shape_and_metadata() -> None:
         _result(), _region_table(), sample="m1", channel=2, atlas="allen"
     )
     assert list(tidy.columns) == TIDY_COLUMNS
-    # 2 regions × 2 hemispheres × 3 metrics
+    # 2 regions × 2 hemispheres × 3 default intensity metrics
     assert len(tidy) == 12
 
     mop_right_median = tidy[

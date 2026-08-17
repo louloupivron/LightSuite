@@ -6,7 +6,9 @@ from enum import Enum
 from pathlib import Path
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from lightsuite.analysis.intensity_metrics import DEFAULT_INTENSITY_METRICS, normalize_intensity_metrics
 
 
 class SourceFormat(str, Enum):
@@ -174,8 +176,24 @@ class RegistrationConfig(BaseModel):
     )
     control_point_weight: float = Field(default=0.2, ge=0, le=1)
     augment_points: bool = False
-    dual_channel_mi_weight_autofluor: float = Field(default=0.4, ge=0, le=1)
-    dual_channel_mi_weight_signal: float = Field(default=0.4, ge=0, le=1)
+    dual_channel_mi_weight_primary: float = Field(
+        default=0.4,
+        ge=0,
+        le=1,
+        validation_alias=AliasChoices(
+            "dual_channel_mi_weight_primary",
+            "dual_channel_mi_weight_autofluor",
+        ),
+    )
+    dual_channel_mi_weight_secondary: float = Field(
+        default=0.4,
+        ge=0,
+        le=1,
+        validation_alias=AliasChoices(
+            "dual_channel_mi_weight_secondary",
+            "dual_channel_mi_weight_signal",
+        ),
+    )
     orientation: Annotated[list[int], Field(min_length=3, max_length=3)] | None = Field(
         default=None,
         description="Axis permutation e.g. [1, 2, 3]. Loaded from brain_orientation.txt if unset.",
@@ -325,7 +343,14 @@ class AnalysisConfig(BaseModel):
     )
     parcellate_intensities: bool = Field(
         default=True,
-        description="Compute per-region median intensity from registered channel volumes (spinal cord).",
+        description="Compute per-region intensity statistics from registered channel volumes.",
+    )
+    intensity_metrics: list[str] = Field(
+        default_factory=lambda: list(DEFAULT_INTENSITY_METRICS),
+        description=(
+            "Intensity metrics in region_stats tables: median_intensity, mean_intensity, "
+            "std, variance, volume_mm3 (and relative_median_intensity for spinal background mode)."
+        ),
     )
     intensity_channels: list[int] | None = Field(
         default=None,
@@ -359,6 +384,18 @@ class AnalysisConfig(BaseModel):
         default=False,
         description="When split_hemispheres is true, also emit whole-cord summary rows.",
     )
+
+    @field_validator("intensity_metrics", mode="before")
+    @classmethod
+    def validate_intensity_metrics(cls, value: object) -> list[str]:
+        if value is None:
+            return list(DEFAULT_INTENSITY_METRICS)
+        if isinstance(value, str):
+            value = [part.strip() for part in value.split(",") if part.strip()]
+        if not isinstance(value, list):
+            msg = "analysis.intensity_metrics must be a list of metric names"
+            raise ValueError(msg)
+        return normalize_intensity_metrics(value)
 
 
 class AnnotationFormat(str, Enum):

@@ -21,6 +21,11 @@ import numpy as np
 import pandas as pd
 
 from lightsuite.analysis.hemisphere import SIDE_LABELS
+from lightsuite.analysis.intensity_metrics import (
+    DEFAULT_INTENSITY_METRICS,
+    PARCELLATION_METRIC_FIELDS,
+    normalize_intensity_metrics,
+)
 from lightsuite.analysis.ontology import RegionTable
 
 if TYPE_CHECKING:
@@ -29,8 +34,11 @@ if TYPE_CHECKING:
 #: All metric names the tidy schema understands.
 METRICS = (
     "median_intensity",
+    "mean_intensity",
     "std",
+    "variance",
     "volume_mm3",
+    "relative_median_intensity",
     "cell_count",
     "cell_density",
 )
@@ -53,18 +61,18 @@ TIDY_COLUMNS = [
 _META_COLUMNS = ["acronym", "name", "structure", "division"]
 
 #: ``ParcellationResult`` array field per intensity-derived metric.
-_PARCELLATION_FIELDS = {
-    "median_intensity": "median_over_areas",
-    "std": "std_over_areas",
-    "volume_mm3": "volume_over_areas",
-}
+_PARCELLATION_FIELDS = PARCELLATION_METRIC_FIELDS
 
 #: (metric, hemisphere) → legacy wide column name.
 _WIDE_NAME = {
     ("median_intensity", "right"): "RightSideIntensity",
     ("median_intensity", "left"): "LeftSideIntensity",
+    ("mean_intensity", "right"): "RightSideIntensityMean",
+    ("mean_intensity", "left"): "LeftSideIntensityMean",
     ("std", "right"): "RightSideIntensityStd",
     ("std", "left"): "LeftSideIntensityStd",
+    ("variance", "right"): "RightSideIntensityVariance",
+    ("variance", "left"): "LeftSideIntensityVariance",
     ("volume_mm3", "right"): "RightSideVolume[mm3]",
     ("volume_mm3", "left"): "LeftSideVolume[mm3]",
     ("cell_count", "right"): "RightSideCellCount",
@@ -102,11 +110,16 @@ def parcellation_result_to_tidy(
     channel: int | str,
     atlas: str,
     drop_nan: bool = True,
+    intensity_metrics: list[str] | None = None,
 ) -> pd.DataFrame:
     """Expand a :class:`ParcellationResult` into tidy rows with region metadata."""
     area_ids = np.asarray(result.area_ids).astype("int64")
+    metrics = normalize_intensity_metrics(intensity_metrics)
     frames: list[pd.DataFrame] = []
-    for metric, field in _PARCELLATION_FIELDS.items():
+    for metric in metrics:
+        field = _PARCELLATION_FIELDS.get(metric)
+        if field is None:
+            continue
         values = np.asarray(getattr(result, field), dtype=float)
         for side, hemisphere in enumerate(SIDE_LABELS):
             frames.append(

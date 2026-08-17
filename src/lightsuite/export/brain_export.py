@@ -12,12 +12,14 @@ import numpy as np
 import pandas as pd
 from rich.console import Console
 
+from lightsuite.analysis.brain_runner import finalize_brain_region_stats
 from lightsuite.analysis.ontology import RegionTable, load_region_table
 from lightsuite.analysis.region_stats import (
     concat_tidy,
     parcellation_result_to_tidy,
     write_region_stats_csv,
 )
+from lightsuite.atlas.io import load_atlas_volume
 from lightsuite.atlas.registry import (
     resolve_brain_atlas_from_config,
     uses_ccf_id_parcellation,
@@ -209,6 +211,7 @@ def export_registered_brain_volumes(
                     sample=config.sample.name,
                     channel=ichan,
                     atlas=atlas.brain_atlas,
+                    intensity_metrics=config.analysis.intensity_metrics,
                 )
                 tidy_path = register_path / f"chan{ichan:02d}_region_stats.csv"
                 write_region_stats_csv(tidy_path, tidy)
@@ -220,7 +223,19 @@ def export_registered_brain_volumes(
                 all_medians = np.full((n_areas, 2, n_chans), np.nan, dtype=np.float32)
             all_medians[:, :, ichan - 1] = result.median_over_areas
 
-        if tidy_frames:
+        if tidy_frames or config.analysis.count_points:
+            annotation = np.asarray(load_atlas_volume(atlas.annotation_path)).astype(np.int32)
+            stats_result = finalize_brain_region_stats(
+                config,
+                register_path,
+                tidy_frames,
+                annotation=annotation,
+                region_table=region_table,
+                atlas=atlas,
+                transform_params=transform_params,
+            )
+            region_stats_combined_path = stats_result.combined_path
+        elif tidy_frames:
             region_stats_combined_path = register_path / "region_stats.csv"
             write_region_stats_csv(region_stats_combined_path, concat_tidy(tidy_frames))
     elif write_csv and "atlas" not in export_spaces:

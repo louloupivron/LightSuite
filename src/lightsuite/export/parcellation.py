@@ -18,7 +18,9 @@ from lightsuite.atlas.registry import AtlasPaths
 class ParcellationResult:
     area_ids: np.ndarray
     median_over_areas: np.ndarray  # (n_areas, 2)
+    mean_over_areas: np.ndarray
     std_over_areas: np.ndarray
+    variance_over_areas: np.ndarray
     volume_over_areas: np.ndarray
 
 
@@ -33,10 +35,12 @@ def _accumulate_side(
     values: np.ndarray,
     area_ids: np.ndarray,
     voxel_mm3: float,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     n_bins = int(max(labels.max(initial=0), area_ids.max(initial=0))) + 2
     medians = np.zeros(n_bins, dtype=np.float32)
+    means = np.zeros(n_bins, dtype=np.float32)
     stds = np.zeros(n_bins, dtype=np.float32)
+    variances = np.zeros(n_bins, dtype=np.float32)
     volumes = np.zeros(n_bins, dtype=np.float32)
 
     positive = labels > 0
@@ -48,30 +52,42 @@ def _accumulate_side(
             group = vals[mask]
             bin_idx = int(uid) + 1
             medians[bin_idx] = np.median(group)
-            stds[bin_idx] = _std_per_group(group)
+            means[bin_idx] = float(np.mean(group))
+            std_val = _std_per_group(group)
+            stds[bin_idx] = std_val
+            variances[bin_idx] = float(std_val * std_val)
             volumes[bin_idx] = float(mask.sum()) * voxel_mm3
 
     background = labels <= 0
     if np.any(background):
         bg = values[background].astype(np.float64)
         medians[0] = np.median(bg)
-        stds[0] = _std_per_group(bg)
+        means[0] = float(np.mean(bg))
+        std_val = _std_per_group(bg)
+        stds[0] = std_val
+        variances[0] = float(std_val * std_val)
         volumes[0] = float(background.sum()) * voxel_mm3
 
     lookup = np.zeros(len(area_ids), dtype=np.float32)
+    lookup_mean = np.zeros(len(area_ids), dtype=np.float32)
     lookup_std = np.zeros(len(area_ids), dtype=np.float32)
+    lookup_var = np.zeros(len(area_ids), dtype=np.float32)
     lookup_vol = np.zeros(len(area_ids), dtype=np.float32)
     for row, aid in enumerate(area_ids.astype(np.int64)):
         if aid == 0:
             lookup[row] = medians[0]
+            lookup_mean[row] = means[0]
             lookup_std[row] = stds[0]
+            lookup_var[row] = variances[0]
             lookup_vol[row] = volumes[0]
         else:
             bin_idx = int(aid) + 1
             lookup[row] = medians[bin_idx]
+            lookup_mean[row] = means[bin_idx]
             lookup_std[row] = stds[bin_idx]
+            lookup_var[row] = variances[bin_idx]
             lookup_vol[row] = volumes[bin_idx]
-    return lookup, lookup_std, lookup_vol
+    return lookup, lookup_mean, lookup_std, lookup_var, lookup_vol
 
 
 def compute_allen_parcellation(
@@ -100,21 +116,27 @@ def compute_allen_parcellation(
     voxel_mm3 = (res_um * 1e-3) ** 3
 
     median_over = np.full((len(area_ids), 2), np.nan, dtype=np.float32)
+    mean_over = np.full((len(area_ids), 2), np.nan, dtype=np.float32)
     std_over = np.full((len(area_ids), 2), np.nan, dtype=np.float32)
+    variance_over = np.full((len(area_ids), 2), np.nan, dtype=np.float32)
     volume_over = np.full((len(area_ids), 2), np.nan, dtype=np.float32)
 
     for side, mask in enumerate(hemisphere_side_masks(av, "allen")):
         labels = av[mask]
         values = registered_volume[mask]
-        med, std, vol = _accumulate_side(labels, values, area_ids, voxel_mm3)
+        med, mean, std, var, vol = _accumulate_side(labels, values, area_ids, voxel_mm3)
         median_over[:, side] = med
+        mean_over[:, side] = mean
         std_over[:, side] = std
+        variance_over[:, side] = var
         volume_over[:, side] = vol
 
     return ParcellationResult(
         area_ids=area_ids,
         median_over_areas=median_over,
+        mean_over_areas=mean_over,
         std_over_areas=std_over,
+        variance_over_areas=variance_over,
         volume_over_areas=volume_over,
     )
 
@@ -142,7 +164,9 @@ def compute_perens_parcellation(
     res_um = float(voxel_um if voxel_um is not None else atlas_resolution_um)
     voxel_mm3 = (res_um * 1e-3) ** 3
     median_over = np.full((len(area_ids), 2), np.nan, dtype=np.float32)
+    mean_over = np.full((len(area_ids), 2), np.nan, dtype=np.float32)
     std_over = np.full((len(area_ids), 2), np.nan, dtype=np.float32)
+    variance_over = np.full((len(area_ids), 2), np.nan, dtype=np.float32)
     volume_over = np.full((len(area_ids), 2), np.nan, dtype=np.float32)
 
     for side, side_mask in enumerate(
@@ -165,14 +189,20 @@ def compute_perens_parcellation(
             if row.size == 0:
                 continue
             mask = labels == uid
-            median_over[row[0], side] = np.median(values[mask])
-            std_over[row[0], side] = _std_per_group(values[mask])
+            group = values[mask]
+            median_over[row[0], side] = np.median(group)
+            mean_over[row[0], side] = float(np.mean(group))
+            std_val = _std_per_group(group)
+            std_over[row[0], side] = std_val
+            variance_over[row[0], side] = float(std_val * std_val)
             volume_over[row[0], side] = float(mask.sum()) * voxel_mm3
 
     return ParcellationResult(
         area_ids=area_ids,
         median_over_areas=median_over,
+        mean_over_areas=mean_over,
         std_over_areas=std_over,
+        variance_over_areas=variance_over,
         volume_over_areas=volume_over,
     )
 

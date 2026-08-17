@@ -14,7 +14,12 @@ from lightsuite.gui.config_form_data import (
     brain_form_from_raw,
     brain_form_to_raw,
     default_local_atlas_resolution_um,
+    import_annotations_from_raw,
+    import_annotations_to_raw,
     load_template_raw,
+    multires_form_from_raw,
+    multires_form_to_raw,
+    parse_orientation_text,
     resolve_brain_brainglobe_form_fields,
     spinal_form_from_raw,
     spinal_form_to_raw,
@@ -252,3 +257,160 @@ def test_spinal_form_preserves_longitudinal_direction() -> None:
     updated = spinal_form_to_raw(state, raw)
     assert updated["registration"]["longitudinal_direction"] == "caudorostral"
     assert updated["compute"]["workers"] == 8
+
+
+def test_parse_orientation_text() -> None:
+    assert parse_orientation_text("1, 2, 3") == (1, 2, 3)
+    assert parse_orientation_text("[1, -3, 2]") == (1, -3, 2)
+    assert parse_orientation_text("") is None
+    assert parse_orientation_text("bad") is None
+
+
+def test_brain_form_roundtrip_registration_advanced_fields() -> None:
+    raw = {
+        "sample": {
+            "name": "mouse",
+            "source": {"format": "tiff_stack", "path": "/data", "tiff_type": "channelperfile"},
+            "scratch": "/scratch",
+            "save_path": "/out",
+            "voxel_um": [1.0, 1.0, 1.0],
+        },
+        "atlas": {"provider": "allen", "resolution_um": 10, "atlas_dir": "/atlas"},
+        "registration": {
+            "resolution_um": 20,
+            "channel_primary": 1,
+            "channel_secondary": 2,
+            "bspline_spatial_scale_mm": 0.5,
+            "control_point_weight": 0.3,
+            "augment_points": True,
+            "dual_channel_mi_weight_primary": 0.5,
+            "dual_channel_mi_weight_secondary": 0.7,
+            "orientation": [1, -3, 2],
+            "canvas_mode": "pad",
+        },
+        "import": {
+            "write_csv": True,
+            "annotations": [
+                {"format": "points_csv", "path": "/pts.csv", "label": "cells"},
+            ],
+        },
+    }
+    state = brain_form_from_raw(raw)
+    assert state.bspline_spatial_scale_mm == 0.5
+    assert state.augment_points is True
+    assert state.orientation == (1, -3, 2)
+    assert state.canvas_mode == "pad"
+    assert len(state.import_annotations) == 1
+    updated = brain_form_to_raw(state, raw)
+    assert updated["registration"]["dual_channel_mi_weight_primary"] == 0.5
+    assert updated["registration"]["dual_channel_mi_weight_secondary"] == 0.7
+    assert "dual_channel_mi_weight_autofluor" not in updated["registration"]
+    assert updated["registration"]["orientation"] == [1, -3, 2]
+    assert updated["import"]["annotations"][0]["label"] == "cells"
+
+
+def test_brain_form_reads_legacy_dual_channel_mi_weight_keys() -> None:
+    raw = {
+        "sample": {
+            "name": "mouse",
+            "source": {"format": "tiff_stack", "path": "/data", "tiff_type": "channelperfile"},
+            "scratch": "/scratch",
+            "save_path": "/out",
+            "voxel_um": [1.0, 1.0, 1.0],
+        },
+        "atlas": {"provider": "allen", "resolution_um": 10, "atlas_dir": "/atlas"},
+        "registration": {
+            "resolution_um": 20,
+            "channel_primary": 1,
+            "dual_channel_mi_weight_autofluor": 0.6,
+            "dual_channel_mi_weight_signal": 0.8,
+        },
+    }
+    state = brain_form_from_raw(raw)
+    assert state.dual_channel_mi_weight_primary == 0.6
+    assert state.dual_channel_mi_weight_secondary == 0.8
+
+
+def test_brain_form_roundtrip_analysis_metrics() -> None:
+    raw = {
+        "sample": {
+            "name": "mouse",
+            "source": {"format": "tiff_stack", "path": "/data", "tiff_type": "channelperfile"},
+            "scratch": "/scratch",
+            "save_path": "/out",
+            "voxel_um": [1.0, 1.0, 1.0],
+        },
+        "atlas": {"provider": "allen", "resolution_um": 10, "atlas_dir": "/atlas"},
+        "registration": {"resolution_um": 20, "channel_primary": 1},
+        "analysis": {
+            "intensity_metrics": ["mean_intensity", "std"],
+        },
+    }
+    state = brain_form_from_raw(raw)
+    assert state.intensity_metrics == ["mean_intensity", "std"]
+    updated = brain_form_to_raw(state, raw)
+    assert updated["analysis"]["intensity_metrics"] == ["mean_intensity", "std"]
+    assert updated["analysis"]["count_points"] is True
+
+
+def test_spinal_form_roundtrip_control_point_and_import() -> None:
+    raw = {
+        "sample": {
+            "name": "cord",
+            "source": {"format": "tiff_stack", "path": "/data", "tiff_type": "planeperfile"},
+            "scratch": "/scratch",
+            "save_path": "/out",
+            "voxel_um": [1.8, 1.8, 1.8],
+        },
+        "atlas": {"atlas_dir": "/atlas"},
+        "registration": {"resolution_um": 20, "channel_primary": 1, "control_point_weight": 0.5},
+        "import": {
+            "annotations": [{"format": "mask_tiff", "path": "/mask.tif", "label": "region"}],
+        },
+    }
+    state = spinal_form_from_raw(raw)
+    assert state.control_point_weight == 0.5
+    assert state.import_annotations[0].format == "mask_tiff"
+    updated = spinal_form_to_raw(state, raw)
+    assert updated["registration"]["control_point_weight"] == 0.5
+    assert updated["import"]["annotations"][0]["path"] == "/mask.tif"
+
+
+def test_multires_form_roundtrip_geometry_and_registration() -> None:
+    raw = {
+        "sample": {"name": "tg14", "save_path": "/out", "scratch": "/scratch"},
+        "multires": {
+            "pair_label": "pair",
+            "geometry_mode": "hybrid",
+            "landmarks": {"fit_mode": "affine"},
+            "registration": {
+                "reference_channel": "488",
+                "overlap_margin_um": -10.0,
+                "write_full_overview_canvas": False,
+            },
+            "channels": {"488": {"overview": "/ov.tif", "roi": "/roi.tif"}},
+        },
+        "import": {
+            "annotations": [{"format": "points_csv", "path": "/a.csv"}],
+        },
+    }
+    state = multires_form_from_raw(raw)
+    assert state.geometry_mode == "hybrid"
+    assert state.landmark_fit_mode == "affine"
+    assert state.overlap_margin_um == -10.0
+    assert state.write_full_overview_canvas is False
+    updated = multires_form_to_raw(state, raw)
+    assert updated["multires"]["geometry_mode"] == "hybrid"
+    assert updated["multires"]["landmarks"]["fit_mode"] == "affine"
+    assert updated["multires"]["registration"]["overlap_margin_um"] == -10.0
+    assert updated["import"]["annotations"][0]["path"] == "/a.csv"
+
+
+def test_import_annotations_to_raw_clears_empty_rows() -> None:
+    raw = {"import": {"write_csv": True, "annotations": [{"format": "points_csv", "path": "/a.csv"}]}}
+    rows = import_annotations_from_raw(raw)
+    updated = import_annotations_to_raw(
+        [rows[0], rows[0].__class__(format="points_csv", path="", label="")],
+        raw,
+    )
+    assert len(updated["import"]["annotations"]) == 1

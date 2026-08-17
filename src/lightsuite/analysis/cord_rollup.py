@@ -14,7 +14,9 @@ RollupLevel = Literal["division", "structure", "horn"]
 
 _HORN_ACRONYMS = frozenset({"DH", "VH", "C"})
 _SUM_METRICS = frozenset({"cell_count", "volume_mm3"})
-_WEIGHTED_METRICS = frozenset({"median_intensity", "relative_median_intensity", "std"})
+_WEIGHTED_METRICS = frozenset(
+    {"median_intensity", "mean_intensity", "relative_median_intensity", "std", "variance"}
+)
 _REGION_ROLLUP_LEVEL = "region"
 
 

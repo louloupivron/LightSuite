@@ -141,8 +141,8 @@ class TransformParamsCheckpoint:
     use_multistep: bool
     use_dual_channel_mi: bool
     bspline_bending_weight: float = 0.0
-    dual_channel_mi_weight_autofluor: float | None = None
-    dual_channel_mi_weight_signal: float | None = None
+    dual_channel_mi_weight_primary: float | None = None
+    dual_channel_mi_weight_secondary: float | None = None
     channel_secondary: int | None = None
     # Legacy: set only by older Python registrations that VD-padded the sample grid.
     warp_canvas_pad_before: list[int] | None = None
@@ -547,8 +547,8 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
         n_histogram_bins=32,
         bspline_spatial_scale_mm=config.registration.bspline_spatial_scale_mm,
         use_multistep=use_multistep,
-        dual_weight_autofluor=config.registration.dual_channel_mi_weight_autofluor,
-        dual_weight_signal=config.registration.dual_channel_mi_weight_signal,
+        dual_weight_autofluor=config.registration.dual_channel_mi_weight_primary,
+        dual_weight_signal=config.registration.dual_channel_mi_weight_secondary,
         bending_energy_weight=config.registration.bspline_bending_weight,
     )
     bspline_elapsed = time.perf_counter() - t0
@@ -619,8 +619,8 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
         use_dual_channel_mi=use_dual,
         bspline_spatial_scale_mm=float(reg.bspline_spatial_scale_mm),
         bspline_bending_weight=float(reg.bspline_bending_weight),
-        dual_channel_mi_weight_autofluor=reg.dual_channel_mi_weight_autofluor if use_dual else None,
-        dual_channel_mi_weight_signal=reg.dual_channel_mi_weight_signal if use_dual else None,
+        dual_channel_mi_weight_primary=reg.dual_channel_mi_weight_primary if use_dual else None,
+        dual_channel_mi_weight_secondary=reg.dual_channel_mi_weight_secondary if use_dual else None,
         affine_median_error_vox=affine_diag.median_error_vox,
         affine_p95_error_vox=affine_diag.p95_error_vox,
         affine_max_error_vox=affine_diag.max_error_vox,
@@ -657,10 +657,10 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
         use_multistep=use_multistep,
         use_dual_channel_mi=use_dual,
         bspline_bending_weight=float(reg.bspline_bending_weight),
-        dual_channel_mi_weight_autofluor=reg.dual_channel_mi_weight_autofluor
+        dual_channel_mi_weight_primary=reg.dual_channel_mi_weight_primary
         if use_dual
         else None,
-        dual_channel_mi_weight_signal=reg.dual_channel_mi_weight_signal
+        dual_channel_mi_weight_secondary=reg.dual_channel_mi_weight_secondary
         if use_dual
         else None,
         channel_secondary=checkpoint.channel_secondary,

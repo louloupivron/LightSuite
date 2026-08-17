@@ -43,8 +43,8 @@ class RegistrationDiagnostics:
     use_dual_channel_mi: bool
     bspline_spatial_scale_mm: float
     bspline_bending_weight: float = 0.0
-    dual_channel_mi_weight_autofluor: float | None = None
-    dual_channel_mi_weight_signal: float | None = None
+    dual_channel_mi_weight_primary: float | None = None
+    dual_channel_mi_weight_secondary: float | None = None
     affine_median_error_vox: float = 0.0
     affine_p95_error_vox: float = 0.0
     affine_max_error_vox: float = 0.0
@@ -81,8 +81,8 @@ class RegistrationDiagnostics:
         ay, ax, az = self.atlas_shape
         schedule = "multistep" if self.use_multistep else "single-step"
         mi_mode = (
-            f"dual AF={self.dual_channel_mi_weight_autofluor:g} "
-            f"signal={self.dual_channel_mi_weight_signal:g}"
+            f"dual primary={self.dual_channel_mi_weight_primary:g} "
+            f"secondary={self.dual_channel_mi_weight_secondary:g}"
             if self.use_dual_channel_mi
             else "single-channel"
         )
