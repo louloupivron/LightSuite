@@ -235,12 +235,23 @@ def load_registration_control_point_session(
     save_path: Path,
     *,
     original_trans: list[list[float]] | np.ndarray,
+    prefer_matlab: bool = False,
 ) -> ControlPointSession:
-    """Load manual control points from JSON if present; otherwise an empty session."""
+    """Load manual control points if present; otherwise an empty session."""
+    from lightsuite.import_.matlab_control_points import (
+        find_matlab_control_point_session,
+        load_control_point_session_from_mat,
+    )
+
     save_path = save_path.expanduser()
     json_path = default_session_path(save_path)
+    mat_path = find_matlab_control_point_session(save_path)
     matrix = np.asarray(original_trans, dtype=float)
 
+    if prefer_matlab and mat_path is not None:
+        return load_control_point_session_from_mat(mat_path, original_trans=matrix)
     if json_path.is_file():
         return ControlPointSession.load(json_path)
+    if mat_path is not None:
+        return load_control_point_session_from_mat(mat_path, original_trans=matrix)
     return ControlPointSession.empty(matrix, n_slices=1)

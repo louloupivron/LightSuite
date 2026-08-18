@@ -31,6 +31,14 @@ Registered volumes are written as **multi-page TIFF** (`export.registered_volume
 
 ---
 
+## MATLAB interoperability (optional)
+
+If you still run legacy MATLAB registration elsewhere, conversion helpers live under
+[`devtools/matlab_interop/`](../devtools/matlab_interop/README.md) (control points and
+`regopts` export). Parity scratch scripts are in [`devtools/parity/`](../devtools/parity/README.md).
+
+---
+
 ## See also
 
 - [Home](index.md) — quick start and documentation map
