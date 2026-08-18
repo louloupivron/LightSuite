@@ -23,9 +23,6 @@ flowchart LR
 | 1. Overview ↔ ROI | `examples/config/multiresolution/marianna_multires.yaml` | `lightsuite multires` |
 | 2. Brain atlas | `examples/config/mesoSPIM/marianna_perens.yaml` | `lightsuite brain` |
 
-> **MATLAB parity only:** `examples/config/mesoSPIM/marianna_yosi_parity.yaml` uses pre-warped
-> `*_0p8x.*` segmentation files instead of `multires import-annotations` outputs.
-
 ---
 
 ## Step 1 — Multiresolution registration
@@ -72,7 +69,7 @@ Create a brain YAML (copy `examples/brain_lightsheet.yaml`) with:
   registered ROI intensity on the **20 µm sample grid** in `view-registration`
   (no segmentation required — reads `registered_roi_full_overview_path` from
   `multires_regopts.json`)
-- Atlas provider/resolution matching your project (Perens 20 µm in `marianna_yosi_parity.yaml`)
+- Atlas provider/resolution matching your project (Perens 20 µm in `marianna_perens.yaml`)
 
 ```bash
 lightsuite brain stages -c my_brain.yaml
@@ -92,15 +89,3 @@ Or run stages individually — see [Brain lightsheet usage](usage_lightsheet_bra
 | Multires import | `annotations_in_overview/` | `sample.save_path/` |
 | Brain | `regopts.json`, `transform_params.json` | `sample.save_path/` |
 | Brain export | `volume_registered/` | `sample.save_path/` |
-
----
-
-## MATLAB interoperability
-
-If step 1 or 2 was started in MATLAB:
-
-1. `export_python_config(savepath)` → YAML
-2. `lightsuite brain import-matlab-control-points` for legacy `.mat` control points
-3. Compare `registration_diagnostics.json` / overlay PNGs to MATLAB QA plots
-
-See [Python vs MATLAB](python_vs_matlab.md) and [Migrating from MATLAB](usage_lightsheet_brain.md#migrating-from-matlab).

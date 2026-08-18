@@ -527,7 +527,7 @@ uv run lightsuite multires inspect-registration -c examples/config/multiresoluti
 uv run lightsuite multires import-annotations   -c examples/config/multiresolution/marianna_multires.yaml
 ```
 
-Atlas registration for the 0.8× overview: [`marianna_yosi_parity.yaml`](../examples/config/mesoSPIM/marianna_yosi_parity.yaml). Point its `import.annotations` at the files written under `annotations_in_overview/` to quantify the 2.5× segmentation by atlas region.
+Atlas registration for the 0.8× overview: [`marianna_perens.yaml`](../examples/config/mesoSPIM/marianna_perens.yaml). Point its `import.annotations` at the files written under `annotations_in_overview/` to quantify the 2.5× segmentation by atlas region.
 
 ### SmartSPIM — hybrid (overview ↔ 9× cortex mosaic)
 

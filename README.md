@@ -67,24 +67,24 @@ Per-step bottlenecks, sizing formulas, and remediation options are in the [insta
 
 ---
 
-## Python vs original MATLAB LightSuite
+## Python vs legacy MATLAB LightSuite
 
-The [original LightSuite](https://lightsuite.readthedocs.io/en/latest/) is a MATLAB toolbox covering whole-brain lightsheet, spinal cord, widefield coronal slices, built-in cell detection, and probe/implant tracing. The Python release is a **focused port** of the registration core — not a full rewrite.
+The original MATLAB toolbox covered whole-brain lightsheet, spinal cord, widefield coronal slices, built-in cell detection, and probe/implant tracing. This release is a **focused Python port** of the registration core.
 
-| | **Python (`lightsuite`)** | **MATLAB (legacy)** |
+| | **Python (`lightsuite`)** | **Legacy MATLAB** |
 |---|---------------------------|---------------------|
 | **Runtime** | Python 3.11+, CLI + Napari GUIs | MATLAB R2022b+, MATLAB GUIs |
 | **Configuration** | YAML files | Script-based `opts` structs |
-| **Brain registration** | Yes | Yes |
+| **Brain registration** | Yes | Yes (not shipped in this repo) |
 | **Spinal cord registration** | Yes (per-sample stats) | Yes (+ cohort NNMF analysis) |
 | **Multiresolution overview ↔ ROI** | Yes (`lightsuite multires`) | Limited / vendor-specific paths |
-| **Built-in 3D cell detection** | No — import external spots | Yes (SNR band-pass + local maxima) |
-| **Widefield coronal slice module** | No | Yes (2D per-slice registration, CZI) |
-| **Probe & implant tracing** | No | Yes (`probe_ccf` export) |
+| **Built-in 3D cell detection** | No — import external spots | Yes |
+| **Widefield coronal slice module** | No | Yes |
+| **Probe & implant tracing** | No | Yes |
 | **GPU-accelerated detection** | No | Yes |
 | **CZI reader** | No — export to TIFF first | Yes |
 
-For features still MATLAB-only, use the legacy demos in `demos/` (`ls_analyze_lightsheet_volume.m`, `ls_analyze_spinal_cord.m`, `ls_analyze_slice_volume.m`). See the detailed parity table in [Python vs MATLAB](https://lightsuite.readthedocs.io/en/latest/python_vs_matlab/).
+See [Python vs MATLAB](https://lightsuite.readthedocs.io/en/latest/python_vs_matlab/) for the full gap list.
 
 ---
 

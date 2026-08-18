@@ -13,8 +13,6 @@
 #   uv run lightsuite brain validate-config         -c examples/config/mesoSPIM/marianna_perens.yaml
 #   uv run lightsuite brain run                     -c examples/config/mesoSPIM/marianna_perens.yaml --through match-points --resume
 #   uv run lightsuite brain run                     -c examples/config/mesoSPIM/marianna_perens.yaml --from register --resume --include-optional
-#
-# MATLAB parity run (pre-warped 0.8× annotations, no multires import): marianna_yosi_parity.yaml
 
 sample:
   name: Marianna

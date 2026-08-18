@@ -2,7 +2,7 @@
 
 This guide walks through the Python brain pipeline: from stitched TIFF stacks to atlas-space registered volumes and regional intensity tables.
 
-The workflow mirrors the MATLAB script `demos/ls_analyze_lightsheet_volume.m`, but uses a **YAML config file** and **`lightsuite brain`** CLI commands instead of editing an `opts` struct in MATLAB.
+Configuration is YAML-based; stages are run with the **`lightsuite brain`** CLI or the Napari GUI (`lightsuite gui -c config.yaml`).
 
 ---
 
@@ -20,17 +20,17 @@ You will need:
 
 ## Pipeline overview
 
-| Step | CLI command | Type | MATLAB equivalent |
-|:----:|-------------|------|-------------------|
-| 0 | `lightsuite doctor` | Check | `check_lightsuite_installation.m` |
-| 1 | `lightsuite brain preprocess` | Automated | `preprocessLightSheetVolume.m` |
-| 2 | `lightsuite brain check-orientation` | **Manual (GUI)** | `getBrainOrientation.m` |
-| 3 | `lightsuite brain init-registration` | Automated | `initializeRegistration.m` |
-| 4 | `lightsuite brain align-slices` | **Manual (GUI)** | *(new — AP slice correspondence)* |
-| 5 | `lightsuite brain match-points` | **Manual (GUI)** | `matchControlPoints_unified.m` |
-| 6 | `lightsuite brain register` | Automated | `multiobjRegistration.m` |
-| 7 | `lightsuite brain export` | Automated | `generateRegisteredBrainVolumes.m` |
-| 8 | `lightsuite brain import-annotations` | Automated | `transformPointsToAtlas.m` |
+| Step | CLI command | Type |
+|:----:|-------------|------|
+| 0 | `lightsuite doctor` | Check |
+| 1 | `lightsuite brain preprocess` | Automated |
+| 2 | `lightsuite brain check-orientation` | **Manual (GUI)** |
+| 3 | `lightsuite brain init-registration` | Automated |
+| 4 | `lightsuite brain align-slices` | **Manual (GUI)** |
+| 5 | `lightsuite brain match-points` | **Manual (GUI)** |
+| 6 | `lightsuite brain register` | Automated |
+| 7 | `lightsuite brain export` | Automated |
+| 8 | `lightsuite brain import-annotations` | Automated |
 | 9 | `lightsuite brain view-registration` | **Manual (GUI)** | *(Napari — registration review, divisions, import previews)* |
 
 Built-in cell detection is **not implemented in Python**; set `detection.enabled: false` and use `import-annotations` with external `points.csv` / `mask.tif` exports (see [Annotation import](annotation_import.md)). For other MATLAB-only features, see [Python vs MATLAB](python_vs_matlab.md).
@@ -557,37 +557,21 @@ analysis:
 See [Python vs MATLAB](python_vs_matlab.md) for the full comparison. Summary:
 
 - **Cell detection** — not implemented in Python; preprocessing warns if `detection.enabled: true`
-- **Slice module, CZI reader, spinal cohort analysis, GPU detection** — MATLAB only
+- **Widefield coronal slices, CZI reader, spinal cohort analysis, GPU detection** — not in Python
 - **Registered volume format** — TIFF only (`export.registered_volume_format: tiff`)
 - **Perens division names** — cross-atlas division grouping fills in only where Perens CCF ids match the Allen ontology
 
 ---
 
-## Migrating from MATLAB
+## B-spline registration tuning
 
-| MATLAB | Python |
-|--------|--------|
-| `opts` struct in demo script | YAML config file |
-| `regopts.mat` | `regopts.json` |
-| `atlas2histology_tform.mat` | `atlas2histology_tform.json` |
-| `transform_params.mat` | `transform_params.json` |
-| `matchControlPoints_unified` | `lightsuite brain match-points` (Napari) |
-| `check_lightsuite_installation.m` | `lightsuite doctor` |
-
-You can keep using the same TIFF layouts, atlas files, and Elastix version as the MATLAB pipeline.
-
-### Intentional differences in the B-spline step
-
-`build_bspline_params` otherwise mirrors `performMultObjBsplineRegistration.m` — same metrics,
-weights, transform, optimizer, pyramid schedule, iteration counts, spatial-sample count and
-`SampleRegionSize` formula. It deviates in three places:
+`build_bspline_params` uses the same metrics, weights, transform, optimizer, pyramid schedule,
+iteration counts, spatial-sample count and `SampleRegionSize` formula as the legacy toolbox.
+Notable Elastix parameters exposed in YAML:
 
 - **Bending energy.** `registration.bspline_bending_weight` appends a
-  `TransformBendingEnergyPenalty` metric that MATLAB does not have. Set it to `0` for parity.
-- **Histogram bins.** MATLAB inherits `NumberOfFixedHistogramBins`/`NumberOfMovingHistogramBins`
-  = 32 from `matlab_elastix`'s `elastix_default.yml`, and Mattes MI prefers those over
-  `NumberOfHistogramBins`. Python writes them explicitly at 32 rather than letting Elastix fall
-  back to its own default.
+  `TransformBendingEnergyPenalty` metric. Set it to `0` to disable the penalty.
+- **Histogram bins.** Python writes `NumberOfFixedHistogramBins`/`NumberOfMovingHistogramBins`
+  = 32 explicitly for Mattes MI.
 - **ASGD step estimation.** Python sets `ASGDParameterEstimationMethod` to
-  `DisplacementDistribution`; MATLAB leaves it at Elastix's built-in `Original`, whose larger
-  steps can fold the grid.
+  `DisplacementDistribution` for more stable B-spline grids on large brains.

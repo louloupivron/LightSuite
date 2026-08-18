@@ -23,12 +23,6 @@ multires
   Template: declare channels in YAML or build a manifest first.
   Run:      lightsuite multires run -c my.yaml
 
-Stay on MATLAB for
-  • Widefield coronal slices (demos/ls_analyze_slice_volume.m)
-  • Built-in cell detection
-  • CZI native reader
-  • Spinal cohort NNMF analysis
-
 Combined multires → brain
   See docs/usage_combined_multires_brain.md
 """

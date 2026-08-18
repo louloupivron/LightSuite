@@ -34,5 +34,4 @@ nav:
       - Annotation import: annotation_import.md
       - Registration spaces: registration_spaces.md
       - Spinal cord: usage_spinal_cord.md
-      - Slices (MATLAB): usage_slice.md
   - Configuration reference: config_reference.md

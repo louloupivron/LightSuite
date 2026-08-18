@@ -33,7 +33,7 @@ The YAML files under [`config/`](config/) are **machine-specific samples** from 
 Some mesoSPIM projects run multires registration first, then brain atlas registration on the overview-aligned data:
 
 1. [`config/multiresolution/marianna_multires.yaml`](config/multiresolution/marianna_multires.yaml) — overview ↔ ROI
-2. [`config/mesoSPIM/marianna_yosi_parity.yaml`](config/mesoSPIM/marianna_yosi_parity.yaml) — brain atlas on converted paths
+2. [`config/mesoSPIM/marianna_perens.yaml`](config/mesoSPIM/marianna_perens.yaml) — brain atlas on converted paths
 
 ## Notebooks (`notebooks/`)
 

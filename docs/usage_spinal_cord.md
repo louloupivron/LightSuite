@@ -250,6 +250,6 @@ uv run lightsuite spinal validate-parity --fixture-root tests/fixtures/spinal_co
 
 ---
 
-## MATLAB workflow (legacy)
+## Features not in Python
 
-The original MATLAB entry script `demos/ls_analyze_spinal_cord.m` remains available for **cohort analysis** (`example_analysis_spinal_cord.m`) and other scripts not ported to Python. See [Python vs MATLAB](python_vs_matlab.md).
+Cross-subject cohort analysis and other legacy MATLAB-only spinal workflows are described in [Python vs MATLAB](python_vs_matlab.md).

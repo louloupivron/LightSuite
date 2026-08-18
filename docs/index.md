@@ -9,7 +9,6 @@
 | **Brain lightsheet** (3D whole-brain volumes) | Preprocess → check orientation → init registration → match points → register → export |
 | **Multiresolution** (overview ↔ ROI) | Manifest → match points (optional) → check geometry → register ([usage guide](usage_multiresolution.md)) |
 | **Spinal cord lightsheet** | Preprocess → straighten → register → export → per-sample `region-stats` ([usage guide](usage_spinal_cord.md)) |
-| **Widefield coronal slices** | [MATLAB only](usage_slice.md) |
 
 See **[Python vs MATLAB](python_vs_matlab.md)** for features that are **not implemented in Python** (cell detection, slice module, CZI reader, spinal cohort analysis, GPU-accelerated detection).
 
@@ -77,7 +76,6 @@ Registered outputs are written as **TIFF** (not OME-Zarr).
 3. **[Brain lightsheet usage](usage_lightsheet_brain.md)** — YAML config, CLI stages, outputs, GUI
 4. **[Multiresolution registration](usage_multiresolution.md)** — overview ↔ ROI alignment (mesoSPIM, SmartSPIM)
 5. **[Spinal cord](usage_spinal_cord.md)** — Python spinal pipeline
-6. **[Slice module](usage_slice.md)** — MATLAB workflow (not in Python)
 
 ## Getting help
 
