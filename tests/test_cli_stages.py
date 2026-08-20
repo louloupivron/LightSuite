@@ -84,25 +84,39 @@ def test_brain_match_points_is_optional(tmp_path: Path) -> None:
     assert match_points.manual is True
 
 
-def test_brain_import_annotations_always_listed_as_optional(tmp_path: Path) -> None:
+def test_brain_import_segmentation_listed_when_configured(tmp_path: Path) -> None:
     cfg_path = tmp_path / "brain.yaml"
     _write_brain_config(cfg_path, tmp_path)
     cfg = load_config(cfg_path)
+    ids = [spec.id for spec in brain_stage_specs(cfg)]
+    assert "import-segmentation" not in ids
+    assert "convert-annotations" not in ids
+    assert "import-annotations" not in ids
+
+    raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+    raw["import"] = {
+        "converter": {
+            "suite": "smartspim",
+            "source": str(tmp_path / "points.json"),
+            "label": "cells",
+        }
+    }
+    cfg_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    (tmp_path / "points.json").write_text("[]", encoding="utf-8")
+    cfg = load_config(cfg_path)
     specs = brain_stage_specs(cfg)
     ids = [spec.id for spec in specs]
-    assert "convert-annotations" in ids
-    assert "import-annotations" in ids
-    assert ids.index("export") < ids.index("convert-annotations") < ids.index(
-        "import-annotations"
-    ) < ids.index("view-registration")
-    import_stage = next(spec for spec in specs if spec.id == "import-annotations")
-    assert import_stage.optional is True
+    assert "import-segmentation" in ids
+    assert "convert-annotations" not in ids
+    assert "import-annotations" not in ids
+    assert ids.index("export") < ids.index("import-segmentation") < ids.index("view-registration")
+    stage = next(spec for spec in specs if spec.id == "import-segmentation")
+    assert stage.optional is True
 
     statuses = brain_stage_statuses(cfg)
-    status = next(item for item in statuses if item.stage.id == "import-annotations")
+    status = next(item for item in statuses if item.stage.id == "import-segmentation")
     assert status.state == StageState.OPTIONAL
-    assert "Config" in status.detail
-
+    assert "Config" in status.detail or "register" in status.detail
 
 def test_brain_preprocess_status_done_with_regopts(tmp_path: Path) -> None:
     cfg_path = tmp_path / "brain.yaml"

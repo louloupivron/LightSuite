@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import re
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,6 +12,7 @@ from pathlib import Path
 import tifffile
 
 from lightsuite.config.models import TiffLayout
+from lightsuite.reporter import emit_pipeline_message, format_duration
 
 
 @dataclass(frozen=True)
@@ -29,10 +32,70 @@ class TiffStackDiscovery:
     channel_plane_files: tuple[tuple[Path, ...], ...] | None = None
 
 
-def _list_tiffs(folder: Path) -> list[Path]:
+_TIFF_SUFFIXES = {".tif", ".tiff"}
+_SLOW_STORAGE_MARKERS = ("gvfs", "smb-share", "fuse.gvfs")
+_LIST_HEARTBEAT_S = 2.0
+_SLOW_LOG_S = 2.0
+
+
+def _is_tiff_filename(name: str) -> bool:
+    return Path(name).suffix.lower() in _TIFF_SUFFIXES
+
+
+def looks_like_slow_storage(path: Path) -> bool:
+    """True when *path* is (or points at) GVFS/SMB, which makes listing/opens slow."""
+    try:
+        target = os.readlink(path) if path.is_symlink() else str(path)
+    except OSError:
+        target = str(path)
+    lowered = target.lower()
+    return any(marker in lowered for marker in _SLOW_STORAGE_MARKERS)
+
+
+def downsample_duration_hint(nz: int, nchans: int, sample_path: Path) -> str:
+    """Coarse per-run downsample estimate from plane count and storage kind."""
+    nplanes = max(nz, 1)
+    nch = max(nchans, 1)
+    if looks_like_slow_storage(sample_path):
+        lo = format_duration(nplanes * 0.5)
+        hi = format_duration(nplanes * 3.0)
+        return (
+            f"Downsampling {nplanes} planes × {nch} channel(s) over GVFS/SMB "
+            f"(typically {lo}–{hi} per channel)."
+        )
+    return f"Downsampling {nplanes} planes × {nch} channel(s)."
+
+
+def _list_tiffs(folder: Path, *, log_progress: bool = True) -> list[Path]:
+    """List TIFF paths in *folder* with a single directory scan (no 4× glob)."""
+    t0 = time.perf_counter()
+    last_log = t0
+    n_entries = 0
     paths: list[Path] = []
-    for pattern in ("*.tif", "*.tiff", "*.TIF", "*.TIFF"):
-        paths.extend(sorted(folder.glob(pattern)))
+    announced = False
+    with os.scandir(folder) as iterator:
+        for entry in iterator:
+            n_entries += 1
+            if _is_tiff_filename(entry.name):
+                paths.append(Path(entry.path))
+            now = time.perf_counter()
+            if log_progress and now - last_log >= _LIST_HEARTBEAT_S:
+                if not announced:
+                    emit_pipeline_message(f"Listing TIFFs in {folder} (slow directory)…")
+                    announced = True
+                elapsed = now - t0
+                rate = n_entries / elapsed if elapsed > 0 else 0.0
+                emit_pipeline_message(
+                    f"  {n_entries} entries, {len(paths)} TIFFs, "
+                    f"{format_duration(elapsed)} (~{rate:.0f}/s)"
+                )
+                last_log = now
+    paths.sort()
+    elapsed = time.perf_counter() - t0
+    if log_progress and elapsed >= _SLOW_LOG_S:
+        emit_pipeline_message(
+            f"Listed {len(paths)} TIFF files in {format_duration(elapsed)}"
+        )
     return paths
 
 
@@ -145,9 +208,17 @@ def _discover_planeperfile_folder(folder: Path) -> tuple[tuple[Path, ...], int, 
         raise FileNotFoundError(msg)
 
     nz = len(tfiles)
-    with tifffile.TiffFile(tfiles[0]) as tif:
+    first = tfiles[0]
+    t_open = time.perf_counter()
+    with tifffile.TiffFile(first) as tif:
         ny, nx = tif.pages[0].shape[:2]
         n_pages = len(tif.pages)
+    open_s = time.perf_counter() - t_open
+    if open_s >= _SLOW_LOG_S:
+        emit_pipeline_message(
+            f"Read plane header from {first.name} in {format_duration(open_s)}"
+            + (" (GVFS/SMB)" if looks_like_slow_storage(first) else "")
+        )
     if nz == 1 and n_pages > 1:
         msg = (
             f"planeperfile found one TIFF with {n_pages} pages in {folder}. "
@@ -185,6 +256,10 @@ def discover_tiff_stack(
             if not root.is_dir():
                 msg = f"Channel folder not found: {root}"
                 raise FileNotFoundError(msg)
+            if len(roots) > 1:
+                emit_pipeline_message(
+                    f"Channel folder {i + 1}/{len(roots)}: {root}"
+                )
             planes, cny, cnx, cnz = _discover_planeperfile_folder(root)
             channel_planes.append(planes)
             if i == 0:
@@ -210,11 +285,6 @@ def discover_tiff_stack(
             channel_plane_files=tuple(channel_planes),
         )
 
-    tfiles = _list_tiffs(folder)
-    if not tfiles:
-        msg = f"No TIFF files found in {folder}"
-        raise FileNotFoundError(msg)
-
     if tiff_type == TiffLayout.PLANE_PER_FILE:
         plane_files, ny, nx, nz = _discover_planeperfile_folder(folder)
         return TiffStackDiscovery(
@@ -230,7 +300,15 @@ def discover_tiff_stack(
             stack_read_mode="pages",
         )
 
-    # channelperfile
+    tfiles = _list_tiffs(folder)
+    if not tfiles:
+        msg = f"No TIFF files found in {folder}"
+        raise FileNotFoundError(msg)
+
+    if len(tfiles) > 1:
+        emit_pipeline_message(f"Inspecting {len(tfiles)} TIFF(s) as channelperfile…")
+
+    # channelperfile: one multi-page (or volumetric) TIFF per imaging channel.
     if len(tfiles) == 1:
         path = tfiles[0]
         ny, nx, nz, planes_in_time, use_native, stack_read_mode = _tiff_channel_stack_dims(path)
@@ -254,7 +332,16 @@ def discover_tiff_stack(
         )
 
     nchans = len(tfiles)
-    dims = [_tiff_channel_stack_dims(p) for p in tfiles]
+    first_probe = _tiff_channel_stack_dims(tfiles[0])
+    if first_probe[2] == 1 and nchans > 4:
+        msg = (
+            f"channelperfile found {nchans} TIFF files with 1 plane each in {folder}. "
+            "Each file would be treated as a separate imaging channel "
+            "(one slice per 'channel'). This folder is one TIFF per Z plane — "
+            "set tiff_type: planeperfile."
+        )
+        raise ValueError(msg)
+    dims = [first_probe, *(_tiff_channel_stack_dims(p) for p in tfiles[1:])]
     first = dims[0]
     if not all(d[:3] == first[:3] for d in dims[1:]):
         msg = "Channel TIFF files have mismatched dimensions."

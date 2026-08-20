@@ -234,10 +234,14 @@ def run_brain_import_annotations(
 ) -> list[AnnotationImportResult]:
     """Import native sample-space annotations into atlas space."""
     require_transformix()
-    specs = resolve_annotation_specs(config.import_config, annotations)
+    save_path = config.sample.save_path.expanduser()
+    specs = resolve_annotation_specs(
+        config.import_config,
+        annotations,
+        save_path=save_path,
+    )
     write_csv_resolved = resolve_write_csv(config.import_config, write_csv)
 
-    save_path = config.sample.save_path.expanduser()
     regopts_path = save_path / "regopts.json"
     if not regopts_path.is_file():
         msg = f"Missing {regopts_path}. Run preprocess and register first."

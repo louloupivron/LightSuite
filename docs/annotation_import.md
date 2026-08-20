@@ -111,6 +111,9 @@ Run convert (after preprocess) then warp (after register):
 ```bash
 uv run lightsuite brain convert-annotations -c my_mouse.yaml
 uv run lightsuite brain import-annotations -c my_mouse.yaml
+
+# Or one checklist stage (GUI / pipeline) after register:
+#   Import segmentation  →  convert + import
 ```
 
 | Key | Description |

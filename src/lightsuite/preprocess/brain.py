@@ -15,7 +15,11 @@ from rich.console import Console
 
 from lightsuite.config.models import BrainPipelineConfig, TiffLayout
 from lightsuite.reporter import emit_pipeline_message, report_step_progress
-from lightsuite.io.discover import TiffStackDiscovery, discover_tiff_stack
+from lightsuite.io.discover import (
+    TiffStackDiscovery,
+    discover_tiff_stack,
+    downsample_duration_hint,
+)
 from lightsuite.io.readers.tiff_stack import TiffStackReader
 from lightsuite.preprocess.checkpoint import (
     RegOptsCheckpoint,
@@ -118,12 +122,6 @@ def _effective_preprocess_workers(
     """Many small TIFFs (planeperfile) are faster sequentially — parallel reads thrash disk."""
     if discovery.tiff_type != TiffLayout.PLANE_PER_FILE:
         return max(1, requested)
-    if requested <= 1:
-        return 1
-    console.print(
-        "[yellow]planeperfile: using 1 worker "
-        f"(requested {requested}; parallel reads slow on many TIFF files).[/yellow]"
-    )
     return 1
 
 
@@ -206,6 +204,7 @@ def _process_channel_to_registration_tiff(
                 label=label,
                 t0=t0,
                 workers=workers,
+                every=max(20, nz // 10) if nz >= 20 else 1,
                 unit="slice",
             )
     finally:
@@ -239,21 +238,24 @@ def _process_channel_to_registration_tiff(
     )
 
 
-def _registration_volume_matches(
+def _registration_volume_status(
     path: Path,
     *,
     expected_shape: tuple[int, int],
     expected_pages: int,
-) -> bool:
+) -> tuple[bool, str]:
+    want = f"{expected_pages} pages at {expected_shape[0]}×{expected_shape[1]}"
     if not path.is_file():
-        return False
+        return False, f"{path.name} not found (need {want})"
     try:
         with tifffile.TiffFile(path) as tif:
-            if len(tif.pages) != expected_pages:
-                return False
-            return tuple(int(v) for v in tif.pages[0].shape) == expected_shape
-    except (OSError, ValueError, tifffile.TiffFileError):
-        return False
+            n_pages = len(tif.pages)
+            shape = tuple(int(v) for v in tif.pages[0].shape)
+    except (OSError, ValueError, tifffile.TiffFileError) as exc:
+        return False, f"{path.name} could not be read ({exc})"
+    if n_pages != expected_pages or shape != expected_shape:
+        return False, f"{path.name} is {n_pages} pages at {shape[0]}×{shape[1]}, expected {want}"
+    return True, f"{path.name} matches cache ({want})"
 
 
 def _registration_tiff_path(save_path: Path, channel: int, registres_um: float) -> Path:
@@ -332,8 +334,10 @@ def preprocess_lightsheet_volume(
     config.sample.scratch.mkdir(parents=True, exist_ok=True)
     config.sample.save_path.mkdir(parents=True, exist_ok=True)
 
-    emit_pipeline_message(f"Discovering TIFF stack at {config.sample.source.path}…")
-    t_discover = time.perf_counter()
+    emit_pipeline_message(
+        f"Discovering TIFF stack at {config.sample.source.path} "
+        f"({config.sample.source.tiff_type.value})…"
+    )
     discovery = discover_tiff_stack(
         config.sample.source.path,
         tiff_type=config.sample.source.tiff_type,
@@ -344,9 +348,8 @@ def preprocess_lightsheet_volume(
 
     ny, nx, nz, nchans = discovery.ny, discovery.nx, discovery.nz, discovery.nchans
     emit_pipeline_message(
-        f"Stack: {ny}×{nx} pixels, {nz} planes, {nchans} channel(s) "
-        f"({discovery.tiff_type.value}); target resolution {registres:g} µm "
-        f"(discovered in {time.perf_counter() - t_discover:.1f}s)"
+        f"Stack: {ny}×{nx}, {nz} planes, {nchans} channel(s) "
+        f"({discovery.tiff_type.value}) → {registres:g} µm"
     )
     regvolpaths: dict[int, Path] = {}
     cell_channel = _channel_for_cells(config)
@@ -369,24 +372,22 @@ def preprocess_lightsheet_volume(
         existing.preprocess_fingerprint if existing is not None else None,
         fingerprint,
     )
-    cached_tiffs_valid = all(
-        _registration_volume_matches(
+    cache_statuses = [
+        _registration_volume_status(
             _registration_tiff_path(config.sample.save_path, ichannel, registres),
             expected_shape=expected_shape,
             expected_pages=expected_pages,
         )
         for ichannel in range(1, nchans + 1)
-    )
-    skip_downsample = (
-        not force
-        and cached_tiffs_valid
-        and (fingerprint_unchanged or existing is None or existing.preprocess_fingerprint is None)
-    )
-    if skip_downsample:
-        console.print(
-            "[green]Using existing registration TIFFs[/green] "
-            "(downsampling inputs unchanged). Refreshing regopts.json from config."
+    ]
+    cached_tiffs_valid = all(ok for ok, _reason in cache_statuses)
+    skip_downsample = not force and cached_tiffs_valid
+    if force and cached_tiffs_valid:
+        emit_pipeline_message(
+            "force=True: ignoring matching registration TIFFs and downsampling again."
         )
+    elif skip_downsample:
+        console.print("[green]Using cached registration TIFFs.[/green]")
         if existing is not None and (
             existing.channel_primary != config.registration.channel_primary
             or existing.channel_secondary != config.registration.channel_secondary
@@ -395,23 +396,29 @@ def preprocess_lightsheet_volume(
                 "[yellow]channel_primary / channel_secondary changed — "
                 "re-run init-registration if you switch the primary channel.[/yellow]"
             )
+    else:
+        for _ok, reason in cache_statuses:
+            if not _ok:
+                emit_pipeline_message(f"Not reusing cache: {reason}")
+        sample_file = discovery.tfiles[0] if discovery.tfiles else config.sample.source.path
+        emit_pipeline_message(downsample_duration_hint(nz, nchans, sample_file))
 
     scratch_bytes = out_h * out_w * nz * 2
     max_ram_bytes = int(config.compute.max_in_memory_scratch_gb * (1024**3))
     scratch_in_ram = scratch_bytes <= max_ram_bytes
-    if discovery.stack_read_mode != "pages":
-        console.print(
-            f"Single-file volumetric TIFF: {nz} Z planes "
-            f"({discovery.stack_read_mode}, channelperfile)."
-        )
-    elif discovery.tiff_type == TiffLayout.PLANE_PER_FILE and nchans >= 1:
-        est_xy_gb = scratch_bytes / (1024**3)
-        where = "RAM" if scratch_in_ram else f"disk memmap on {config.sample.scratch}"
-        channel_note = f", {nchans} channels" if nchans > 1 else ""
-        console.print(
-            f"planeperfile: {nz} planes{channel_note}, XY scratch ~{est_xy_gb:.1f} GB in {where} "
-            f"(workers={workers})."
-        )
+    if not skip_downsample:
+        if discovery.stack_read_mode != "pages":
+            console.print(
+                f"Single-file volumetric TIFF: {nz} Z planes "
+                f"({discovery.stack_read_mode}, channelperfile)."
+            )
+        elif discovery.tiff_type == TiffLayout.PLANE_PER_FILE and nchans >= 1:
+            est_xy_gb = scratch_bytes / (1024**3)
+            where = "RAM" if scratch_in_ram else f"disk memmap on {config.sample.scratch}"
+            channel_note = f", {nchans} channels" if nchans > 1 else ""
+            console.print(
+                f"Downsampling {nz} planes{channel_note}; XY scratch ~{est_xy_gb:.1f} GB in {where}."
+            )
 
     for ichannel in range(1, nchans + 1):
         chan0 = ichannel - 1
@@ -419,11 +426,11 @@ def preprocess_lightsheet_volume(
         regvolpaths[ichannel] = sample_path
 
         if skip_downsample:
-            console.print(f"Channel {ichannel}/{nchans}: skipped (cached).")
             continue
 
         has_cells = cell_channel is not None and ichannel == cell_channel
-        console.print(f"Channel {ichannel}/{nchans}.")
+        if nchans > 1:
+            console.print(f"Channel {ichannel}/{nchans}.")
 
         jobs = _slice_jobs_for_channel(
             discovery,
@@ -496,7 +503,6 @@ def preprocess_lightsheet_volume(
         checkpoint.native_crop_offset_yxz = native_off
     regopts_path = config.sample.save_path / "regopts.json"
     checkpoint.save(regopts_path)
-    console.print(f"Wrote checkpoint [bold]{regopts_path}[/bold]")
 
     from lightsuite.import_.sample_reference import write_sample_reference
 
@@ -508,9 +514,6 @@ def preprocess_lightsheet_volume(
         nz=nz,
         voxel_um=[vx, vy, vz],
     )
-    console.print(
-        f"Wrote native sample-space reference [bold]{ref_path}[/bold] "
-        "(use for external segmentation exports)"
-    )
+    console.print(f"Wrote {regopts_path.name} and {ref_path.name}")
 
     return PreprocessResult(checkpoint=checkpoint, regvolpaths=regvolpaths)

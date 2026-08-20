@@ -89,20 +89,28 @@ _BRAIN: dict[str, str] = {
         "Adjust the Elastix working grid before registration: None keeps MATLAB parity "
         "(atlas warped to sample shape); Pad/Crop/Union reconcile sample and atlas extents."
     ),
+    "import_segmentation": (
+        "Turn on when you have external cell/spot segmentation. Shows the Import segmentation "
+        "stage (convert vendor export → Sample Space, then warp after register)."
+    ),
     "import_annotations": (
-        "Native Sample Space layers (points_csv / mask_tiff) warped after register. "
-        "Prefer Segmentation suite + Convert annotations for vendor exports; keep these "
-        "rows for already-converted files or extra layers."
+        "Already-converted Sample Space layers (points_csv / mask_tiff). Use with suite=Native "
+        "for multi-channel Imaris CSVs (one row per component label) or other pre-converted files. "
+        "Vendor suites write layers under <save_path>/converted/ automatically."
     ),
     "segmentation_suite": (
-        "Vendor used for cell/spot detection. Run the Convert annotations stage after "
-        "preprocess to write Sample Space files and validate them. Custom requires a "
-        ".py module defining convert_to_lightsuite(source, output, *, reference)."
+        "Where segmentation came from. Native = list annotation layers below. Vendor suites run "
+        "Convert annotations after preprocess. Imaris splits Component Name into one layer each "
+        "(label is the filename prefix). Custom needs convert_to_lightsuite(source, output, *, reference)."
     ),
     "converter_source": "Raw vendor export path (JSON / CSV / XLSX / …).",
-    "converter_output": (
-        "Optional destination for converted points.csv. Defaults to "
-        "<save_path>/converted/<label>_points.csv."
+    "converter_label": (
+        "Single-layer name for SmartSPIM/FIJI/Arivis, or Imaris filename prefix "
+        "(components become <label>_<component>_points.csv)."
+    ),
+    "converter_voxel_um": (
+        "Imaris/FIJI calibration [x, y, z] µm — same units as Position columns in the export "
+        "(often 1,1,1 for Imaris; not always sample.voxel_um)."
     ),
     "converter_custom": (
         "Python file for suite=custom. Must define convert_to_lightsuite; output is "
@@ -113,9 +121,10 @@ _BRAIN: dict[str, str] = {
         "median, mean, std, variance, and/or region volume. Imported points are "
         "always counted into region_stats when present."
     ),
-    "detection": (
-        "Built-in cell detection is not implemented in Python yet — leave disabled and use "
-        "Segmentation suite + Convert annotations, then Import annotations."
+    "stats_spaces": (
+        "Coordinate spaces for region counts and intensity tables. Atlas = points/volumes "
+        "on the atlas grid; Sample = counts on the registration/template grid with atlas "
+        "labels warped to the sample (often fewer outside-brain assignments)."
     ),
 }
 
@@ -151,12 +160,20 @@ _SPINAL: dict[str, str] = {
         "matched control points from match-points."
     ),
     "import_annotations": (
-        "External annotations warped after cord registration: points_csv or mask_tiff. "
-        "Convert vendor exports first, add paths here, then run Import annotations."
+        "Native Sample Space layers — one row per Imaris component (or other channel). "
+        "Prefer suite=Imaris + Convert annotations to auto-split; use Native + these rows "
+        "when CSVs were converted offline."
+    ),
+    "import_segmentation": (
+        "Enable when importing Imaris/other spot lists after registration."
     ),
     "intensity_metrics": (
         "Per-region intensity statistics in region_stats.csv: median, mean, std, variance, "
         "and/or volume per segment. Imported points are always counted when present."
+    ),
+    "stats_spaces": (
+        "Coordinate spaces for region counts and intensity tables. Atlas = Fiederling grid; "
+        "Sample = straightened registration grid with atlas labels warped to the sample."
     ),
     "parcellate_intensities": (
         "Compute intensity region stats from exported channel volumes during export/region-stats."

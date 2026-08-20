@@ -38,3 +38,11 @@ def test_report_step_progress_forwards_to_reporter() -> None:
     assert "slice 1/10" in messages[0]
     assert "elapsed" in messages[0]
     assert "left" in messages[0]
+
+
+def test_format_duration() -> None:
+    from lightsuite.reporter import format_duration
+
+    assert format_duration(12) == "12s"
+    assert format_duration(65) == "1m 05s"
+    assert format_duration(3725) == "1h 02m"

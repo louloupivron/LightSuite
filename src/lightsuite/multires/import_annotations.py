@@ -249,10 +249,14 @@ def run_multires_import_annotations(
 ) -> list[AnnotationImportResult]:
     """Warp ROI-native annotations into overview-native space."""
     require_transformix()
-    specs = resolve_annotation_specs(config.import_config, annotations)
+    save_path = config.sample.save_path.expanduser()
+    specs = resolve_annotation_specs(
+        config.import_config,
+        annotations,
+        save_path=save_path,
+    )
     write_csv_resolved = resolve_write_csv(config.import_config, write_csv)
 
-    save_path = config.sample.save_path.expanduser()
     checkpoint_path = multires_checkpoint_path(save_path)
     if not checkpoint_path.is_file():
         msg = f"Missing {checkpoint_path}. Run 'lightsuite multires register' first."

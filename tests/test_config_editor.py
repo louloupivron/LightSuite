@@ -344,13 +344,35 @@ def test_brain_form_roundtrip_analysis_metrics() -> None:
         "registration": {"resolution_um": 20, "channel_primary": 1},
         "analysis": {
             "intensity_metrics": ["mean_intensity", "std"],
+            "stats_spaces": ["sample"],
         },
     }
     state = brain_form_from_raw(raw)
     assert state.intensity_metrics == ["mean_intensity", "std"]
+    assert state.stats_spaces == ["sample"]
     updated = brain_form_to_raw(state, raw)
     assert updated["analysis"]["intensity_metrics"] == ["mean_intensity", "std"]
+    assert updated["analysis"]["stats_spaces"] == ["sample"]
     assert updated["analysis"]["count_points"] is True
+
+
+def test_brain_form_stats_spaces_defaults_to_atlas() -> None:
+    raw = {
+        "sample": {
+            "name": "mouse",
+            "source": {"format": "tiff_stack", "path": "/data", "tiff_type": "channelperfile"},
+            "scratch": "/scratch",
+            "save_path": "/out",
+            "voxel_um": [1.0, 1.0, 1.0],
+        },
+        "atlas": {"provider": "allen", "resolution_um": 10, "atlas_dir": "/atlas"},
+        "registration": {"resolution_um": 20, "channel_primary": 1},
+    }
+    state = brain_form_from_raw(raw)
+    assert state.stats_spaces == ["atlas"]
+    state.stats_spaces = ["atlas", "sample"]
+    updated = brain_form_to_raw(state, raw)
+    assert updated["analysis"]["stats_spaces"] == ["atlas", "sample"]
 
 
 def test_spinal_form_roundtrip_control_point_and_import() -> None:

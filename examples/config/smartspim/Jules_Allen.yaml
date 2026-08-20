@@ -1,5 +1,5 @@
 # Jules SmartSPIM (rAAV_hSyn_GFP_HC_5) — machine-specific paths.
-# Registration uses 640 nm only (Ch1). 488 detection → Convert annotations → Import.
+# Registration uses 640 nm only (Ch1). 488 detection → Import segmentation (after register).
 #
 # Channel folder (local symlinks → SMB; prefer a real NVME copy for preprocess):
 #   uv run lightsuite brain split-smartspim-channels \
@@ -7,9 +7,9 @@
 #     -o /media/gbm/NVME2/ALICe-pipelines-data/Jules/All_Channels \
 #     -m symlink
 #
-# After preprocess:
+# After register (GUI stage "Import segmentation", or CLI):
 #   uv run lightsuite brain convert-annotations -c examples/config/smartspim/Jules_Allen.yaml
-#   uv run lightsuite doctor -c examples/config/smartspim/Jules_Allen.yaml
+#   uv run lightsuite brain import-annotations -c examples/config/smartspim/Jules_Allen.yaml
 
 sample:
   name: Jules
@@ -58,14 +58,12 @@ import:
   converter:
     suite: smartspim
     source: /run/user/1002/gvfs/smb-share:server=h1data1.wysscenter.ch,share=computingdata/Alice/0003_CBT_WYSS_LIGHTSHEET/DATA/SMARTSPIM/Jules/cell_detection/488_points_Endogenous.json
-    output: /media/gbm/NVME2/ALICe-pipelines-data/Jules/segmentation/converted/smartspim_488_points.csv
     label: smartspim_488
-  annotations:
-    - format: points_csv
-      path: /media/gbm/NVME2/ALICe-pipelines-data/Jules/segmentation/converted/smartspim_488_points.csv
-      label: smartspim_488
+  # After convert-annotations, layers land in <save_path>/converted/;
+  # import-annotations uses that summary (annotations list optional for vendor suites).
 
 analysis:
+  stats_spaces: [sample]
   intensity_metrics:
     - median_intensity
     - std

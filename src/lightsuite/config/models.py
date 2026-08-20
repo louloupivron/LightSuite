@@ -458,13 +458,16 @@ class AnnotationConverterConfig(BaseModel):
     output: Path | None = Field(
         default=None,
         description=(
-            "Destination points.csv (or mask.tif for custom). "
-            "Defaults to <save_path>/converted/<label>_points.csv."
+            "Optional override for converted points.csv. "
+            "GUI omits this; default is <save_path>/converted/<label>_points.csv."
         ),
     )
     label: str = Field(
         default="",
-        description="Output stem / import.label; defaults to source file stem.",
+        description=(
+            "Layer name for single-file suites, or Imaris filename prefix when the CSV "
+            "has multiple Component Name values."
+        ),
     )
     voxel_um: Annotated[list[float], Field(min_length=3, max_length=3)] | None = Field(
         default=None,
@@ -516,8 +519,8 @@ class ImportConfig(BaseModel):
     converter: AnnotationConverterConfig | None = Field(
         default=None,
         description=(
-            "Optional vendor→LSS conversion. Run `convert-annotations` after preprocess; "
-            "then `import-annotations` warps the validated native files."
+            "Optional vendor→LSS conversion. The Import segmentation stage runs convert "
+            "then warps after register; CLI: `convert-annotations` / `import-annotations`."
         ),
     )
 

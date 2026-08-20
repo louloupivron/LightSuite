@@ -9,8 +9,14 @@ import pytest
 import tifffile
 
 from lightsuite.config.models import TiffLayout
-from lightsuite.io.discover import discover_tiff_stack
+from lightsuite.io.discover import (
+    _list_tiffs,
+    discover_tiff_stack,
+    downsample_duration_hint,
+    looks_like_slow_storage,
+)
 from lightsuite.io.readers.tiff_stack import TiffStackReader
+from lightsuite.reporter import CallbackReporter, capture_pipeline_output
 
 
 def _write_multipage_tiff(path: Path, arrays: list[np.ndarray]) -> None:
@@ -112,6 +118,16 @@ def test_discover_rat_stitched_zyx_stack() -> None:
     assert discovery.nz == 2121
 
 
+def test_channelperfile_rejects_many_single_plane_tiffs(tmp_path: Path) -> None:
+    folder = tmp_path / "ch1"
+    folder.mkdir()
+    for z in range(6):
+        tifffile.imwrite(folder / f"Z{z:06d}_Ch1.tif", np.zeros((4, 5), dtype=np.uint16))
+
+    with pytest.raises(ValueError, match="tiff_type: planeperfile"):
+        discover_tiff_stack(folder, tiff_type=TiffLayout.CHANNEL_PER_FILE)
+
+
 def test_planeperfile_rejects_multipage_stack(tmp_path: Path) -> None:
     folder = tmp_path / "sample"
     folder.mkdir()
@@ -166,6 +182,35 @@ def test_discover_planeperfile_multi_channel_mismatched_nz(tmp_path: Path) -> No
             tiff_type=TiffLayout.PLANE_PER_FILE,
             channel_folders=(ch1, ch2),
         )
+
+
+def test_list_tiffs_is_quiet_when_fast(tmp_path: Path) -> None:
+    folder = tmp_path / "planes"
+    folder.mkdir()
+    for z in range(3):
+        tifffile.imwrite(folder / f"z_{z:03d}.tif", np.zeros((4, 5), dtype=np.uint16))
+
+    messages: list[str] = []
+    reporter = CallbackReporter(on_message=messages.append)
+    with capture_pipeline_output(reporter):
+        paths = _list_tiffs(folder)
+    assert len(paths) == 3
+    assert messages == []
+
+
+def test_looks_like_slow_storage_detects_gvfs_symlink(tmp_path: Path) -> None:
+    target = tmp_path / "Z000000_Ch1.tif"
+    tifffile.imwrite(target, np.zeros((4, 5), dtype=np.uint16))
+    link = tmp_path / "Ch1" / "Z000000_Ch1.tif"
+    link.parent.mkdir()
+    link.symlink_to(
+        "/run/user/1002/gvfs/smb-share:server=example/share/Z000000_Ch1.tif"
+    )
+    assert looks_like_slow_storage(link) is True
+    assert looks_like_slow_storage(target) is False
+    hint = downsample_duration_hint(1571, 1, link)
+    assert "GVFS/SMB" in hint
+    assert "per channel" in hint
 
 
 def test_tiff_reader_get_slice(tmp_path: Path) -> None:

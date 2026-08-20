@@ -19,7 +19,10 @@ from lightsuite.config.models import (
 from lightsuite.import_.arivis import convert_arivis_features_to_points_csv
 from lightsuite.import_.custom import run_custom_converter
 from lightsuite.import_.fiji import convert_fiji_points_to_csv
-from lightsuite.import_.imaris import convert_imaris_spots_to_points_csv
+from lightsuite.import_.imaris import (
+    convert_imaris_spots_to_points_csv,
+    list_imaris_component_names,
+)
 from lightsuite.import_.sample_reference import SampleReference, load_sample_reference
 from lightsuite.import_.smartspim_detection import convert_smartspim_points_json_to_csv
 from lightsuite.import_.validate import (
@@ -75,38 +78,70 @@ def _voxel_um_or_reference(
     return [float(v) for v in reference.voxel_um]
 
 
+def _slug_component(name: str) -> str:
+    return "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in name)
+
+
 def _run_vendor_convert(
     converter: AnnotationConverterConfig,
     *,
     output: Path,
     reference: SampleReference,
-) -> tuple[AnnotationFormat, int]:
+) -> tuple[list[AnnotationImportConfig], int]:
+    """Run vendor conversion; return annotation specs written and total item count."""
     suite = converter.suite
     source = converter.source
     if source is None:
         msg = "converter.source is required"
         raise ValueError(msg)
 
+    label = _label_for(converter)
+
     if suite == SegmentationSuite.SMARTSPIM:
         n = convert_smartspim_points_json_to_csv(source, output)
-        return AnnotationFormat.POINTS_CSV, n
+        return [AnnotationImportConfig(format=AnnotationFormat.POINTS_CSV, path=output, label=label)], n
     if suite == SegmentationSuite.FIJI:
         n = convert_fiji_points_to_csv(
             source,
             output,
             voxel_um=_voxel_um_or_reference(converter, reference),
         )
-        return AnnotationFormat.POINTS_CSV, n
+        return [AnnotationImportConfig(format=AnnotationFormat.POINTS_CSV, path=output, label=label)], n
     if suite == SegmentationSuite.IMARIS:
-        n = convert_imaris_spots_to_points_csv(
-            source,
-            output,
-            voxel_um=_voxel_um_or_reference(converter, reference),
-        )
-        return AnnotationFormat.POINTS_CSV, n
+        voxel_um = _voxel_um_or_reference(converter, reference)
+        components = list_imaris_component_names(source)
+        if len(components) > 1:
+            # Multi-spot Imaris: one Sample Space CSV per Component Name (spinal multi-channel).
+            prefix = label or "imaris"
+            output.parent.mkdir(parents=True, exist_ok=True)
+            annotations: list[AnnotationImportConfig] = []
+            n_total = 0
+            for component in components:
+                slug = _slug_component(component)
+                layer_label = f"{prefix}_{slug}"
+                out_path = output.parent / f"{layer_label}_points.csv"
+                n_comp = convert_imaris_spots_to_points_csv(
+                    source,
+                    out_path,
+                    voxel_um=voxel_um,
+                    component_name=component,
+                )
+                if n_comp <= 0:
+                    continue
+                n_total += n_comp
+                annotations.append(
+                    AnnotationImportConfig(
+                        format=AnnotationFormat.POINTS_CSV,
+                        path=out_path,
+                        label=layer_label,
+                    )
+                )
+            return annotations, n_total
+        n = convert_imaris_spots_to_points_csv(source, output, voxel_um=voxel_um)
+        return [AnnotationImportConfig(format=AnnotationFormat.POINTS_CSV, path=output, label=label)], n
     if suite == SegmentationSuite.ARIVIS:
         n = convert_arivis_features_to_points_csv(source, output)
-        return AnnotationFormat.POINTS_CSV, n
+        return [AnnotationImportConfig(format=AnnotationFormat.POINTS_CSV, path=output, label=label)], n
     if suite == SegmentationSuite.CUSTOM:
         if converter.custom_entry is None:
             msg = "suite=custom requires converter.custom_entry"
@@ -127,7 +162,7 @@ def _run_vendor_convert(
             msg = f"custom converter returned unknown format {fmt_raw!r}"
             raise ValueError(msg) from exc
         n = int(meta.get("n_points") or meta.get("n") or 0)
-        return fmt, n
+        return [AnnotationImportConfig(format=fmt, path=output, label=label)], n
 
     msg = f"Unsupported suite for conversion: {suite}"
     raise ValueError(msg)
@@ -173,18 +208,15 @@ def run_convert_annotations(
 
     if converter is not None and suite != SegmentationSuite.NATIVE:
         output_path = resolve_converter_output(converter, save_path)
-        fmt, n_converted = _run_vendor_convert(
+        annotations, n_converted = _run_vendor_convert(
             converter, output=output_path, reference=reference
         )
-        label = _label_for(converter)
         console.print(
-            f"[green]Converted[/green] {suite.value} → {output_path} "
-            f"({n_converted} item(s), format={fmt.value})"
+            f"[green]Converted[/green] {suite.value} → {len(annotations)} layer(s) "
+            f"({n_converted} item(s))"
         )
-        # Prefer converted file as the sole annotation layer for this run
-        annotations = [
-            AnnotationImportConfig(format=fmt, path=output_path, label=label)
-        ]
+        for spec in annotations:
+            console.print(f"  • {spec.label or spec.path.stem}: {spec.path}")
     elif not annotations:
         msg = (
             "Nothing to convert or validate. Set import.converter.suite to a vendor "

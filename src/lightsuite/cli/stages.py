@@ -74,11 +74,43 @@ def _load_multires_checkpoint(save_path: Path) -> MultiresRegOptsCheckpoint | No
 
 
 def _has_import_annotations(config: _Config) -> bool:
-    import_cfg = getattr(config, "import_", None)
+    import_cfg = getattr(config, "import_config", None)
+    if import_cfg is None:
+        import_cfg = getattr(config, "import_", None)
     if import_cfg is None:
         return False
     annotations = getattr(import_cfg, "annotations", None)
     return bool(annotations)
+
+
+def _has_segmentation_import(config: _Config) -> bool:
+    """True when convert/import stages should appear (vendor suite or native layers)."""
+    import_cfg = getattr(config, "import_config", None)
+    if import_cfg is None:
+        import_cfg = getattr(config, "import_", None)
+    if import_cfg is None:
+        return False
+    if _has_import_annotations(config):
+        return True
+    converter = getattr(import_cfg, "converter", None)
+    if converter is None:
+        return False
+    suite = getattr(converter, "suite", None)
+    suite_value = getattr(suite, "value", suite)
+    if suite_value is None:
+        return False
+    return str(suite_value).lower() != "native" or bool(getattr(converter, "source", None))
+
+
+def _annotation_stage_specs() -> list[StageSpec]:
+    return [
+        StageSpec(
+            "import-segmentation",
+            "Import segmentation",
+            "convert → Sample Space, then warp to atlas/overview (Config: Import segmentation)",
+            optional=True,
+        ),
+    ]
 
 
 @dataclass
@@ -143,17 +175,10 @@ def brain_stage_specs(config: BrainPipelineConfig) -> list[StageSpec]:
         ),
         StageSpec("register", "Register", "transform_params.json"),
         StageSpec("export", "Export", "volume_registered/"),
-        StageSpec(
-            "convert-annotations",
-            "Convert annotations",
-            "converted/ + Sample Space validation (configure suite in Config)",
-            optional=True,
-        ),
-        StageSpec(
-            "import-annotations",
-            "Import annotations",
-            "imports/*_atlas_coords.csv (configure paths in Config)",
-            optional=True,
+        *(
+            _annotation_stage_specs()
+            if _has_segmentation_import(config)
+            else ()
         ),
         StageSpec(
             "view-registration",
@@ -191,17 +216,10 @@ def spinal_stage_specs(config: SpinalCordPipelineConfig) -> list[StageSpec]:
         ),
         StageSpec("register", "Register", "transform_params.json"),
         StageSpec("export", "Export", "volume_registered/ (+ region stats)"),
-        StageSpec(
-            "convert-annotations",
-            "Convert annotations",
-            "converted/ + Sample Space validation (configure suite in Config)",
-            optional=True,
-        ),
-        StageSpec(
-            "import-annotations",
-            "Import annotations",
-            "volume_registered/import_annotations_summary.json (configure in Config)",
-            optional=True,
+        *(
+            _annotation_stage_specs()
+            if _has_segmentation_import(config)
+            else ()
         ),
         StageSpec(
             "view-registration",
@@ -248,17 +266,10 @@ def multires_stage_specs(config: _Config) -> list[StageSpec]:
         [
             StageSpec("check-geometry", "Check geometry", "geometry/ overlap QA"),
             StageSpec("register", "Register", "multires_regopts.json → transform_paths"),
-            StageSpec(
-                "convert-annotations",
-                "Convert annotations",
-                "converted/ + Sample Space validation (configure suite in Config)",
-                optional=True,
-            ),
-            StageSpec(
-                "import-annotations",
-                "Import annotations",
-                "annotations_in_overview/ (configure in Config)",
-                optional=True,
+            *(
+                _annotation_stage_specs()
+                if _has_segmentation_import(config)
+                else ()
             ),
             StageSpec(
                 "inspect-registration",
@@ -335,26 +346,20 @@ def _brain_stage_done(stage_id: str, save_path: Path, config: BrainPipelineConfi
         imports = iter_brain_import_paths(save_path, "*_atlas_coords.npz")
         if atlas_tiffs or ss_manifest.is_file() or imports:
             return True, "open Napari after export"
-        return False, "run export and/or import-annotations first"
-    if stage_id == "convert-annotations":
-        summary = save_path / "converted" / "convert_annotations_summary.json"
-        if summary.is_file():
-            return True, str(summary)
-        import_cfg = getattr(config, "import_config", None)
-        converter = getattr(import_cfg, "converter", None) if import_cfg else None
-        if converter is None and not _has_import_annotations(config):
-            return False, "set import.converter suite or import.annotations in Config"
-        return False, "run after preprocess (converted/convert_annotations_summary.json)"
-    if stage_id == "import-annotations":
+        return False, "run export and/or import-segmentation first"
+    if stage_id == "import-segmentation":
         summary = resolve_brain_imports_file(save_path, IMPORT_SUMMARY_FILENAME)
         if summary.is_file():
             return True, str(summary)
         csvs = iter_brain_import_paths(save_path, "*_atlas_coords.csv")
         if csvs:
             return True, f"{len(csvs)} atlas-space CSV layer(s)"
-        if not _has_import_annotations(config):
-            return False, "add points_csv / mask_tiff under Import annotations in Config"
-        return False, "run after register (imports/*_atlas_coords.csv)"
+        convert_summary = save_path / "converted" / "convert_annotations_summary.json"
+        if convert_summary.is_file() and not (save_path / "transform_params.json").is_file():
+            return False, "converted; run register, then Import segmentation again"
+        if not _has_segmentation_import(config):
+            return False, "enable Import segmentation in Config"
+        return False, "run after register (imports/*_atlas_coords)"
     return False, "unknown stage"
 
 
@@ -426,23 +431,25 @@ def _spinal_stage_done(
                 else f"{len(tiffs)} TIFF(s)"
             )
             return True, detail
-        return False, "run export and/or import-annotations first"
-    if stage_id == "convert-annotations":
-        summary = save_path / "converted" / "convert_annotations_summary.json"
+        return False, "run export and/or import-segmentation first"
+    if stage_id == "import-segmentation":
+        from lightsuite.registration.brain_paths import (
+            IMPORT_SUMMARY_FILENAME,
+            resolve_brain_imports_file,
+        )
+
+        summary = resolve_brain_imports_file(save_path, IMPORT_SUMMARY_FILENAME)
         if summary.is_file():
             return True, str(summary)
-        if not _has_import_annotations(config) and not getattr(
-            getattr(config, "import_config", None), "converter", None
-        ):
-            return False, "set import.converter suite or import.annotations in Config"
-        return False, str(summary)
-    if stage_id == "import-annotations":
-        summary = save_path / "volume_registered" / "import_annotations_summary.json"
-        if summary.is_file():
-            return True, str(summary)
-        if not _has_import_annotations(config):
-            return False, "add points_csv / mask_tiff under Import annotations in Config"
-        return False, str(summary)
+        legacy = save_path / "volume_registered" / "import_annotations_summary.json"
+        if legacy.is_file():
+            return True, str(legacy)
+        convert_summary = save_path / "converted" / "convert_annotations_summary.json"
+        if convert_summary.is_file() and not (save_path / "transform_params.json").is_file():
+            return False, "converted; run register, then Import segmentation again"
+        if not _has_segmentation_import(config):
+            return False, "enable Import segmentation in Config"
+        return False, "run after register (imports/)"
     if stage_id == "plot-stats":
         plots = save_path / "plots"
         stats = save_path / "volume_registered" / "region_stats.csv"
@@ -493,23 +500,23 @@ def _multires_stage_done(stage_id: str, save_path: Path, config: Any) -> tuple[b
             return False, "run multires register first"
         path = Path(checkpoint.registered_roi_path).expanduser()
         return path.is_file(), str(path)
-    if stage_id == "convert-annotations":
-        summary = save_path / "converted" / "convert_annotations_summary.json"
-        if summary.is_file():
-            return True, str(summary)
-        if not _has_import_annotations(config) and not getattr(
-            getattr(config, "import_config", None), "converter", None
-        ):
-            return False, "set import.converter suite or import.annotations in Config"
-        return False, str(summary)
-    if stage_id == "import-annotations":
+    if stage_id == "import-segmentation":
         out = save_path / "annotations_in_overview"
         if out.is_dir():
             artifacts = list(out.glob("*.csv")) + list(out.glob("*.tif")) + list(out.glob("*.tiff"))
             if artifacts:
                 return True, f"{len(artifacts)} file(s)"
-        if not _has_import_annotations(config):
-            return False, "add points_csv / mask_tiff under Import annotations in Config"
+        convert_summary = save_path / "converted" / "convert_annotations_summary.json"
+        from lightsuite.multires.checkpoint import MultiresRegOptsCheckpoint, multires_checkpoint_path
+
+        ck_path = multires_checkpoint_path(save_path)
+        registered = False
+        if ck_path.is_file():
+            registered = bool(MultiresRegOptsCheckpoint.load(ck_path).transform_paths)
+        if convert_summary.is_file() and not registered:
+            return False, "converted; run multires register, then Import segmentation again"
+        if not _has_segmentation_import(config):
+            return False, "enable Import segmentation in Config"
         return False, str(out)
     return False, "unknown stage"
 
@@ -529,8 +536,7 @@ def evaluate_stage_statuses(
             "inspect-geometry",
             "inspect-registration",
             "view-registration",
-            "import-annotations",
-            "convert-annotations",
+            "import-segmentation",
             "plot-stats",
         }:
             done, detail = done_fn(spec.id, save_path, config)
@@ -580,6 +586,23 @@ def slice_stages(
     through_stage: str | None,
 ) -> list[StageSpec]:
     ids = [spec.id for spec in specs]
+    aliases = {
+        "convert-annotations": "import-segmentation",
+        "import-annotations": "import-segmentation",
+    }
+
+    def _resolve(name: str | None) -> str | None:
+        if name is None:
+            return None
+        if name in ids:
+            return name
+        mapped = aliases.get(name)
+        if mapped is not None and mapped in ids:
+            return mapped
+        return name
+
+    from_stage = _resolve(from_stage)
+    through_stage = _resolve(through_stage)
     start = 0
     end = len(specs)
     if from_stage is not None:

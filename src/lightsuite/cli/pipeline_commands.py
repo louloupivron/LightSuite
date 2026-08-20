@@ -88,7 +88,7 @@ def register_brain_commands(app: typer.Typer) -> None:
         include_optional: bool = typer.Option(
             False,
             "--include-optional",
-            help="Run optional stages (align-slices, import-annotations).",
+            help="Run optional stages (align-slices, import-segmentation).",
         ),
         headless: bool = typer.Option(
             False,
@@ -132,7 +132,7 @@ def register_spinal_commands(app: typer.Typer) -> None:
         include_optional: bool = typer.Option(
             True,
             "--include-optional/--no-include-optional",
-            help="Run optional import-annotations when configured (region stats run with export/import).",
+            help="Run optional import-segmentation when configured (region stats run with export/import).",
         ),
         headless: bool = typer.Option(
             False,
@@ -170,7 +170,7 @@ def register_multires_commands(app: typer.Typer) -> None:
         include_optional: bool = typer.Option(
             True,
             "--include-optional/--no-include-optional",
-            help="Run optional match-points and import-annotations when configured.",
+            help="Run optional match-points and import-segmentation when configured.",
         ),
         headless: bool = typer.Option(
             False,

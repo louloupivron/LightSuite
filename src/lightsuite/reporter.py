@@ -25,6 +25,18 @@ def get_active_reporter() -> Reporter | None:
     return _current_reporter.get()
 
 
+def format_duration(seconds: float) -> str:
+    """Format a duration for progress logs (e.g. ``12s``, ``3m 05s``, ``1h 02m``)."""
+    total = max(0, int(round(seconds)))
+    if total < 60:
+        return f"{total}s"
+    minutes, sec = divmod(total, 60)
+    if minutes < 60:
+        return f"{minutes}m {sec:02d}s"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h {minutes:02d}m"
+
+
 def emit_pipeline_message(text: str) -> None:
     """Send a status line to the active reporter, or Rich console when none is set."""
     reporter = get_active_reporter()
@@ -55,7 +67,7 @@ def report_step_progress(
     prefix = f"[{label}] " if label else ""
     emit_pipeline_message(
         f"{prefix}{unit} {current}/{total} ({pct:.0f}%) — "
-        f"{elapsed:.0f}s elapsed, ~{eta:.0f}s left{worker_note}"
+        f"{format_duration(elapsed)} elapsed, ~{format_duration(eta)} left{worker_note}"
     )
 
 

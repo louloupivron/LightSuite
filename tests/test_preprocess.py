@@ -158,6 +158,49 @@ def test_preprocess_skips_cached_tiffs_when_yaml_metadata_changes(tmp_path: Path
     assert (save / "chan_2_sample_register_20um.tif").stat().st_mtime == ch2_mtime
 
 
+def test_preprocess_reuses_matching_volume_when_fingerprint_differs(tmp_path: Path) -> None:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    scratch = tmp_path / "scratch"
+    save = tmp_path / "results"
+    save.mkdir()
+
+    slice_a = (np.arange(24, dtype=np.uint16).reshape(4, 6) * 10 + 100)
+    _write_channel_stack(data_dir / "ch1.tif", [slice_a, slice_a + 1])
+
+    config_data = {
+        "sample": {
+            "name": "test",
+            "source": {
+                "format": "tiff_stack",
+                "path": str(data_dir),
+                "tiff_type": "channelperfile",
+            },
+            "scratch": str(scratch),
+            "save_path": str(save),
+            "voxel_um": [10.0, 10.0, 10.0],
+        },
+        "registration": {"resolution_um": 20, "channel_primary": 1},
+        "detection": {"enabled": False},
+    }
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.dump(config_data), encoding="utf-8")
+    cfg = load_config(config_path)
+    preprocess_lightsheet_volume(cfg)
+    cached = save / "chan_1_sample_register_20um.tif"
+    mtime = cached.stat().st_mtime
+
+    import json
+
+    regopts = json.loads((save / "regopts.json").read_text(encoding="utf-8"))
+    regopts["preprocess_fingerprint"]["tiff_type"] = "planeperfile"
+    (save / "regopts.json").write_text(json.dumps(regopts), encoding="utf-8")
+
+    result = preprocess_lightsheet_volume(load_config(config_path))
+    assert cached.stat().st_mtime == mtime
+    assert Path(result.checkpoint.regvolpath) == cached
+
+
 def test_preprocess_force_redoes_downsample(tmp_path: Path) -> None:
     data_dir = tmp_path / "data"
     data_dir.mkdir()

@@ -239,6 +239,24 @@ def _multires_import_annotations(config: Any, ctx: StageContext) -> Any:
     return run_multires_import_annotations(config)
 
 
+def _brain_import_segmentation(config: Any, ctx: StageContext) -> Any:
+    from lightsuite.import_.segmentation_pipeline import run_import_segmentation_brain
+
+    return run_import_segmentation_brain(config)
+
+
+def _spinal_import_segmentation(config: Any, ctx: StageContext) -> Any:
+    from lightsuite.import_.segmentation_pipeline import run_import_segmentation_spinal
+
+    return run_import_segmentation_spinal(config)
+
+
+def _multires_import_segmentation(config: Any, ctx: StageContext) -> Any:
+    from lightsuite.import_.segmentation_pipeline import run_import_segmentation_multires
+
+    return run_import_segmentation_multires(config)
+
+
 _BRAIN_RUNNERS: dict[str, StageRunner] = {
     "preprocess": _brain_preprocess,
     "check-orientation": _brain_check_orientation,
@@ -248,6 +266,8 @@ _BRAIN_RUNNERS: dict[str, StageRunner] = {
     "register": _brain_register,
     "export": _brain_export,
     "view-registration": _brain_view_registration,
+    "import-segmentation": _brain_import_segmentation,
+    # CLI / resume aliases (still runnable; not listed as separate checklist stages)
     "convert-annotations": _brain_convert_annotations,
     "import-annotations": _brain_import_annotations,
 }
@@ -262,6 +282,7 @@ _SPINAL_RUNNERS: dict[str, StageRunner] = {
     "register": _spinal_register,
     "export": _spinal_export,
     "view-registration": _spinal_view_registration,
+    "import-segmentation": _spinal_import_segmentation,
     "convert-annotations": _spinal_convert_annotations,
     "import-annotations": _spinal_import_annotations,
     "region-stats": _spinal_region_stats,
@@ -274,6 +295,7 @@ _MULTIRES_RUNNERS: dict[str, StageRunner] = {
     "check-geometry": _multires_check_geometry,
     "register": _multires_register,
     "inspect-registration": _multires_inspect_registration,
+    "import-segmentation": _multires_import_segmentation,
     "convert-annotations": _multires_convert_annotations,
     "import-annotations": _multires_import_annotations,
 }
@@ -320,6 +342,15 @@ def stage_kind(spec: StageSpec) -> StageKind:
 
 def run_stage(workflow: str, stage_id: str, config: Any, ctx: StageContext) -> Any:
     """Execute one registered stage for the given workflow."""
+    # Legacy checklist IDs → merged Import segmentation stage.
+    aliases = {
+        "convert-annotations": "import-segmentation",
+        "import-annotations": "import-segmentation",
+    }
+    resolved_id = aliases.get(stage_id, stage_id)
+    # Prefer the merged runner when resolving aliases from pipeline --from/--through.
+    if stage_id in aliases and resolved_id in get_workflow(workflow).runners:
+        stage_id = resolved_id
     spec = get_workflow(workflow)
     try:
         runner = spec.runners[stage_id]

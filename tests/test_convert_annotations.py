@@ -124,6 +124,44 @@ def test_validate_points_rejects_out_of_bounds(tmp_path: Path) -> None:
     assert result.ok is False
 
 
+def test_convert_imaris_splits_components(tmp_path: Path) -> None:
+    cfg_path = tmp_path / "brain.yaml"
+    results = tmp_path / "results"
+    source = tmp_path / "imaris.csv"
+    source.write_text(
+        "\n".join(
+            [
+                "Some preamble",
+                "Position X,Position Y,Position Z,Component Name",
+                "10,20,30,TA",
+                "11,21,31,Virus",
+                "12,22,32,TA",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    _write_brain_config(
+        cfg_path,
+        tmp_path,
+        import_block={
+            "converter": {
+                "suite": "imaris",
+                "source": str(source),
+                "label": "imaris",
+                "voxel_um": [1.0, 1.0, 1.0],
+            }
+        },
+    )
+    _write_reference(tmp_path)
+    cfg = load_config(cfg_path)
+    result = run_convert_annotations(import_config=cfg.import_config, save_path=results)
+    assert result.n_converted == 3
+    assert len(result.annotations) == 2
+    labels = {a.label for a in result.annotations}
+    assert labels == {"imaris_TA", "imaris_Virus"}
+    assert all(a.path.is_file() for a in result.annotations)
+
+
 def test_converter_custom_missing_entry_fails_load(tmp_path: Path) -> None:
     cfg_path = tmp_path / "brain.yaml"
     with pytest.raises(Exception):
