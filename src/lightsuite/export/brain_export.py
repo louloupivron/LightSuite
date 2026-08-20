@@ -36,7 +36,10 @@ from lightsuite.io.tiff_write import save_registration_volume
 from lightsuite.preprocess.checkpoint import RegOptsCheckpoint
 from lightsuite.registration.brain_paths import (
     TRANSFORMIX_EXPORT_TEMP,
+    brain_stats_dir,
+    brain_volume_registered_dir,
     brain_work_dir,
+    cleanup_brain_qc_audit_json,
     cleanup_brain_work,
     cleanup_legacy_brain_work,
 )
@@ -109,7 +112,8 @@ def export_registered_brain_volumes(
     export_spaces = _normalize_spaces(spaces, config)
     save_sample_vol = config.export.save_sample_space_volume
 
-    register_path = save_path / "volume_registered"
+    register_path = brain_volume_registered_dir(save_path)
+    stats_path = brain_stats_dir(save_path)
     if save_vol and "atlas" in export_spaces:
         register_path.mkdir(parents=True, exist_ok=True)
 
@@ -192,8 +196,8 @@ def export_registered_brain_volumes(
                 console.print(f"[yellow]Skipping parcellation for channel {ichan}:[/yellow] {exc}")
                 continue
 
-            register_path.mkdir(parents=True, exist_ok=True)
-            json_path = register_path / f"chan{ichan:02d}_intensities.json"
+            stats_path.mkdir(parents=True, exist_ok=True)
+            json_path = stats_path / f"chan{ichan:02d}_intensities.json"
             json_path.write_text(
                 json.dumps(
                     {
@@ -206,7 +210,7 @@ def export_registered_brain_volumes(
                 ),
                 encoding="utf-8",
             )
-            csv_path = register_path / f"chan{ichan:02d}_intensities.csv"
+            csv_path = stats_path / f"chan{ichan:02d}_intensities.csv"
             write_parcellation_csv(csv_path, result)
             parcellation_paths[ichan] = csv_path
 
@@ -219,7 +223,7 @@ def export_registered_brain_volumes(
                     atlas=atlas.brain_atlas,
                     intensity_metrics=config.analysis.intensity_metrics,
                 )
-                tidy_path = register_path / f"chan{ichan:02d}_region_stats.csv"
+                tidy_path = stats_path / f"chan{ichan:02d}_region_stats.csv"
                 write_region_stats_csv(tidy_path, tidy)
                 region_stats_paths[ichan] = tidy_path
                 tidy_frames.append(tidy)
@@ -233,16 +237,17 @@ def export_registered_brain_volumes(
             annotation = np.asarray(load_atlas_volume(atlas.annotation_path)).astype(np.int32)
             stats_result = finalize_brain_region_stats(
                 config,
-                register_path,
+                stats_path,
                 tidy_frames,
                 annotation=annotation,
                 region_table=region_table,
                 atlas=atlas,
                 transform_params=transform_params,
+                save_path=save_path,
             )
             region_stats_combined_path = stats_result.combined_path
         elif tidy_frames:
-            region_stats_combined_path = register_path / "region_stats.csv"
+            region_stats_combined_path = stats_path / "region_stats.csv"
             write_region_stats_csv(region_stats_combined_path, concat_tidy(tidy_frames))
     elif write_csv and "atlas" not in export_spaces:
         console.print("[dim]Skipping atlas-space parcellation CSV (export.spaces).[/dim]")
@@ -262,6 +267,7 @@ def export_registered_brain_volumes(
         )
 
     cleanup_legacy_brain_work(save_path)
+    cleanup_brain_qc_audit_json(save_path)
     console.print(f"[green]Export complete.[/green] Output under {save_path}")
     return BrainExportResult(
         registered_volumes=registered_paths,

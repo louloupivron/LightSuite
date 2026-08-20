@@ -45,8 +45,10 @@ from lightsuite.preprocess.checkpoint import RegOptsCheckpoint
 from lightsuite.registration.brain_paths import (
     REGISTRATION_DIAGNOSTICS_FILENAME,
     TRANSFORMIX_VIEW_TEMP,
+    brain_volume_registered_dir,
     brain_work_dir,
     cleanup_brain_work,
+    iter_brain_import_paths,
     resolve_brain_qc_file,
 )
 from lightsuite.registration.points import volume_indices_to_cloud_xyz
@@ -101,7 +103,7 @@ BrainImportInspectVolumes = BrainViewVolumes
 
 
 def _volume_registered_dir(config: BrainPipelineConfig) -> Path:
-    return config.sample.save_path.expanduser() / "volume_registered"
+    return brain_volume_registered_dir(config.sample.save_path.expanduser())
 
 
 def _label_from_stem(stem: str, suffix: str) -> str:
@@ -212,16 +214,15 @@ def _discover_brain_view_paths_atlas(config: BrainPipelineConfig) -> BrainViewPa
 
     point_npz_paths: dict[str, Path] = {}
     mask_paths: dict[str, Path] = {}
-    if vr.is_dir():
-        for path in sorted(vr.glob("*_atlas_coords.npz")):
-            label = _label_from_stem(path.stem, "_atlas_coords")
-            point_npz_paths[label] = path.resolve()
+    for path in iter_brain_import_paths(save_path, "*_atlas_coords.npz"):
+        label = _label_from_stem(path.stem, "_atlas_coords")
+        point_npz_paths[label] = path
 
-        for path in sorted(vr.glob("*_registered_atlas.tif")):
-            if path.name.startswith("chan_"):
-                continue
-            label = _label_from_stem(path.stem, "_registered_atlas")
-            mask_paths[label] = path.resolve()
+    for path in iter_brain_import_paths(save_path, "*_registered_atlas.tif"):
+        if path.name.startswith("chan_"):
+            continue
+        label = _label_from_stem(path.stem, "_registered_atlas")
+        mask_paths[label] = path
 
     has_on_disk_exports = bool(registered_channels or point_npz_paths or mask_paths)
     if not has_on_disk_exports and not _can_warp_registration_channels_to_atlas(config):
@@ -672,7 +673,8 @@ def _load_brain_view_volumes_atlas(
     point_layers: dict[str, np.ndarray] = {}
     for label, npz_path in paths.point_npz_paths.items():
         point_layers[label] = _load_points_npz(npz_path)
-    for path in sorted(paths.volume_registered_dir.glob("*_atlas_coords.csv")):
+    save_path = paths.volume_registered_dir.parent
+    for path in iter_brain_import_paths(save_path, "*_atlas_coords.csv"):
         label = _label_from_stem(path.stem, "_atlas_coords")
         if label in point_layers:
             continue

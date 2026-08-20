@@ -7,7 +7,11 @@ from pathlib import Path
 
 WORK_DIRNAME = "_work"
 QC_DIRNAME = "qc"
+STATS_DIRNAME = "stats"
+IMPORTS_DIRNAME = "imports"
+VOLUME_REGISTERED_DIRNAME = "volume_registered"
 PREVIEWS_DIRNAME = "previews"
+SAMPLE_SPACE_SUBDIR = "sample_space"
 
 # Ephemeral workspaces under ``save_path/_work/``.
 ELASTIX_TEMP = "elastix"
@@ -24,6 +28,15 @@ INIT_DIAGNOSTICS_FILENAME = "init_registration_diagnostics.json"
 AFFINE_FIT_STATS_FILENAME = "affine_fit_stats.json"
 CORRESPONDENCE_AFFINE_STATS_FILENAME = "correspondence_affine_stats.json"
 CORRESPONDENCE_LANDMARK_STATS_FILENAME = "correspondence_landmark_stats.json"
+IMPORT_SUMMARY_FILENAME = "import_annotations_summary.json"
+
+_QC_AUDIT_JSON_FILES = (
+    REGISTRATION_DIAGNOSTICS_FILENAME,
+    INIT_DIAGNOSTICS_FILENAME,
+    AFFINE_FIT_STATS_FILENAME,
+    CORRESPONDENCE_AFFINE_STATS_FILENAME,
+    CORRESPONDENCE_LANDMARK_STATS_FILENAME,
+)
 
 # Legacy flat-root temp directory names (pre-_work layout).
 _LEGACY_WORK_DIRS = (
@@ -89,6 +102,91 @@ def resolve_brain_qc_file(save_path: Path, filename: str) -> Path:
     return resolve_brain_artifact(save_path, QC_DIRNAME, filename)
 
 
+def brain_stats_dir(save_path: Path) -> Path:
+    """Return ``save_path/stats`` (created)."""
+    path = Path(save_path).expanduser() / STATS_DIRNAME
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def brain_imports_dir(save_path: Path) -> Path:
+    """Return ``save_path/imports`` (created)."""
+    path = Path(save_path).expanduser() / IMPORTS_DIRNAME
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def brain_volume_registered_dir(save_path: Path) -> Path:
+    """Return ``save_path/volume_registered`` (created)."""
+    path = Path(save_path).expanduser() / VOLUME_REGISTERED_DIRNAME
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def resolve_brain_stats_file(save_path: Path, filename: str) -> Path:
+    """Read-path for a stats CSV/JSON: ``stats/`` then legacy ``volume_registered/``."""
+    save_path = Path(save_path).expanduser()
+    nested = save_path / STATS_DIRNAME / filename
+    if nested.is_file():
+        return nested
+    legacy_vr = save_path / VOLUME_REGISTERED_DIRNAME / filename
+    if legacy_vr.is_file():
+        return legacy_vr
+    legacy_ss = save_path / VOLUME_REGISTERED_DIRNAME / SAMPLE_SPACE_SUBDIR / filename
+    if legacy_ss.is_file():
+        return legacy_ss
+    return nested
+
+
+def resolve_brain_imports_file(save_path: Path, filename: str) -> Path:
+    """Read-path for an import artifact: ``imports/`` then legacy ``volume_registered/``."""
+    save_path = Path(save_path).expanduser()
+    nested = save_path / IMPORTS_DIRNAME / filename
+    if nested.is_file():
+        return nested
+    legacy = save_path / VOLUME_REGISTERED_DIRNAME / filename
+    if legacy.is_file():
+        return legacy
+    return nested
+
+
+def iter_brain_import_paths(save_path: Path, pattern: str) -> list[Path]:
+    """Glob import artifacts in ``imports/`` and legacy ``volume_registered/``."""
+    root = Path(save_path).expanduser()
+    seen: set[Path] = set()
+    ordered: list[Path] = []
+    for base in (root / IMPORTS_DIRNAME, root / VOLUME_REGISTERED_DIRNAME):
+        if not base.is_dir():
+            continue
+        for path in sorted(base.glob(pattern)):
+            resolved = path.resolve()
+            if resolved not in seen:
+                seen.add(resolved)
+                ordered.append(resolved)
+    return ordered
+
+
+def iter_brain_stats_paths(save_path: Path, pattern: str) -> list[Path]:
+    """Glob stats tables in ``stats/`` and legacy export locations."""
+    root = Path(save_path).expanduser()
+    seen: set[Path] = set()
+    ordered: list[Path] = []
+    bases = [
+        root / STATS_DIRNAME,
+        root / VOLUME_REGISTERED_DIRNAME,
+        root / VOLUME_REGISTERED_DIRNAME / SAMPLE_SPACE_SUBDIR,
+    ]
+    for base in bases:
+        if not base.is_dir():
+            continue
+        for path in sorted(base.glob(pattern)):
+            resolved = path.resolve()
+            if resolved not in seen:
+                seen.add(resolved)
+                ordered.append(resolved)
+    return ordered
+
+
 def remove_path(path: Path) -> None:
     """Remove a file or directory tree; ignore missing paths."""
     path = Path(path).expanduser()
@@ -119,3 +217,11 @@ def cleanup_legacy_brain_work(save_path: Path) -> None:
     work_root = root / WORK_DIRNAME
     if work_root.is_dir() and not any(work_root.iterdir()):
         remove_path(work_root)
+
+
+def cleanup_brain_qc_audit_json(save_path: Path) -> None:
+    """Remove QC diagnostic JSON checkpoints (preview PNGs under qc/previews/ are kept)."""
+    root = Path(save_path).expanduser()
+    for name in _QC_AUDIT_JSON_FILES:
+        remove_path(root / QC_DIRNAME / name)
+        remove_path(root / name)

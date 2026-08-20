@@ -34,8 +34,11 @@ from lightsuite.io.tiff_write import save_registration_volume
 from lightsuite.preprocess.checkpoint import RegOptsCheckpoint
 from lightsuite.registration.brain_paths import (
     TRANSFORMIX_SAMPLE_EXPORT_TEMP,
+    brain_stats_dir,
+    brain_volume_registered_dir,
     brain_work_dir,
     cleanup_brain_work,
+    iter_brain_import_paths,
 )
 from lightsuite.registration.brain_register import TransformParamsCheckpoint
 from lightsuite.registration.plots import boundary_volume_from_annotation
@@ -59,7 +62,7 @@ MANIFEST_NAME = "sample_space_manifest.json"
 
 
 def sample_space_dir(save_path: Path) -> Path:
-    return save_path / "volume_registered" / SAMPLE_SPACE_SUBDIR
+    return brain_volume_registered_dir(save_path) / SAMPLE_SPACE_SUBDIR
 
 
 def atlas_volumes_permuted_on_disk(sample_dir: Path | None) -> bool:
@@ -98,6 +101,7 @@ def export_brain_sample_space(
     """Warp atlas labels onto the registration grid and write sample-space stats."""
     save_path = config.sample.save_path.expanduser()
     out_dir = sample_space_dir(save_path)
+    stats_path = brain_stats_dir(save_path)
     if save_volume or write_csv:
         out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -225,7 +229,7 @@ def export_brain_sample_space(
                 atlas=atlas.brain_atlas,
                 intensity_metrics=config.analysis.intensity_metrics,
             )
-            tidy_path = out_dir / f"chan{ichan:02d}_region_stats_sample.csv"
+            tidy_path = stats_path / f"chan{ichan:02d}_region_stats_sample.csv"
             write_region_stats_csv(tidy_path, tidy)
             if region_stats_paths is None:
                 region_stats_paths = {}
@@ -233,7 +237,6 @@ def export_brain_sample_space(
             tidy_frames.append(tidy)
 
         if tidy_frames:
-            register_path = save_path / "volume_registered"
             maybe_write_brain_sample_region_stats(
                 config,
                 tidy_frames=tidy_frames,
@@ -242,7 +245,8 @@ def export_brain_sample_space(
                 atlas=atlas,
                 registres_um=registres_um,
                 transform_params=transform_params,
-                register_path=register_path,
+                stats_path=stats_path,
+                save_path=save_path,
             )
 
     console.print(
@@ -277,8 +281,7 @@ def discover_brain_sample_space_inspect_paths(
     from lightsuite.preprocess.checkpoint import RegOptsCheckpoint
 
     save_path = config.sample.save_path.expanduser()
-    vr = save_path / "volume_registered"
-    out_dir = sample_space_dir(save_path)
+    vr = brain_volume_registered_dir(save_path)
 
     regopts_path = save_path / "regopts.json"
     if not regopts_path.is_file():
@@ -294,14 +297,14 @@ def discover_brain_sample_space_inspect_paths(
 
     point_npz_paths: dict[str, Path] = {}
     mask_paths: dict[str, Path] = {}
-    if vr.is_dir():
-        for path in sorted(vr.glob("*_sample_coords.npz")):
-            label = _label_from_stem(path.stem, "_sample_coords")
-            point_npz_paths[label] = path.resolve()
-        for path in sorted(vr.glob("*_in_sample_20um.tif")):
-            label = _label_from_stem(path.stem, "_in_sample_20um")
-            mask_paths[label] = path.resolve()
+    for path in iter_brain_import_paths(save_path, "*_sample_coords.npz"):
+        label = _label_from_stem(path.stem, "_sample_coords")
+        point_npz_paths[label] = path
+    for path in iter_brain_import_paths(save_path, "*_in_sample_20um.tif"):
+        label = _label_from_stem(path.stem, "_in_sample_20um")
+        mask_paths[label] = path
 
+    out_dir = sample_space_dir(save_path)
     template_path: Path | None = None
     annotation_path: Path | None = None
     sample_space_dir_resolved: Path | None = out_dir.resolve() if out_dir.is_dir() else None

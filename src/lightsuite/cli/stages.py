@@ -15,6 +15,11 @@ from lightsuite.preprocess.checkpoint import RegOptsCheckpoint
 from lightsuite.preprocess.cord_checkpoint import CordRegOptsCheckpoint
 from lightsuite.registration.cord_longitudinal import default_longitudinal_correspondence_path
 from lightsuite.registration.cord_orientation import CORD_ORIENTATION_FILENAME
+from lightsuite.registration.brain_paths import (
+    IMPORT_SUMMARY_FILENAME,
+    iter_brain_import_paths,
+    resolve_brain_imports_file,
+)
 from lightsuite.registration.orientation import orientation_path
 
 
@@ -151,7 +156,7 @@ def brain_stage_specs(config: BrainPipelineConfig) -> list[StageSpec]:
             StageSpec(
                 "import-annotations",
                 "Import annotations",
-                "volume_registered/*_atlas_coords.csv",
+                "imports/*_atlas_coords.csv",
                 optional=True,
             )
         )
@@ -320,14 +325,15 @@ def _brain_stage_done(stage_id: str, save_path: Path, config: BrainPipelineConfi
             return False, str(vr)
         atlas_tiffs = list(vr.glob("chan_*_registered_atlas.tif"))
         ss_manifest = vr / "sample_space" / "sample_space_manifest.json"
-        if atlas_tiffs or ss_manifest.is_file():
+        imports = iter_brain_import_paths(save_path, "*_atlas_coords.npz")
+        if atlas_tiffs or ss_manifest.is_file() or imports:
             return True, "open Napari after export"
         return False, "run export and/or import-annotations first"
     if stage_id == "import-annotations":
-        summary = save_path / "volume_registered" / "import_annotations_summary.json"
+        summary = resolve_brain_imports_file(save_path, IMPORT_SUMMARY_FILENAME)
         if summary.is_file():
             return True, str(summary)
-        csvs = list((save_path / "volume_registered").glob("*_atlas_coords.csv"))
+        csvs = iter_brain_import_paths(save_path, "*_atlas_coords.csv")
         return bool(csvs), f"{len(csvs)} atlas-space CSV layer(s)"
     return False, "unknown stage"
 

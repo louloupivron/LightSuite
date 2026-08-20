@@ -51,8 +51,11 @@ export:
 
 def test_finalize_brain_region_stats_merges_point_counts(tmp_path: Path) -> None:
     config = _brain_config(tmp_path)
-    register_path = tmp_path / "results" / "volume_registered"
-    register_path.mkdir(parents=True)
+    save_path = tmp_path / "results"
+    stats_path = save_path / "stats"
+    stats_path.mkdir(parents=True)
+    imports_path = save_path / "imports"
+    imports_path.mkdir(parents=True)
 
     result = ParcellationResult(
         area_ids=np.array([7, 9], dtype=np.int64),
@@ -75,7 +78,7 @@ def test_finalize_brain_region_stats_merges_point_counts(tmp_path: Path) -> None
     annotation[:, :, :2] = 7
     annotation[:, :, 2:] = 9
     np.savez_compressed(
-        register_path / "cells_atlas_coords.npz",
+        imports_path / "cells_atlas_coords.npz",
         atlasptcoords=np.array([[1.0, 1.0, 1.0], [4.0, 4.0, 4.0]], dtype=np.float32),
     )
 
@@ -87,12 +90,13 @@ def test_finalize_brain_region_stats_merges_point_counts(tmp_path: Path) -> None
 
     stats = finalize_brain_region_stats(
         config,
-        register_path,
+        stats_path,
         [tidy],
         annotation=annotation,
         region_table=None,
         atlas=atlas,
         transform_params=transform_params,
+        save_path=save_path,
     )
     assert stats.combined_path is not None
     combined = pd.read_csv(stats.combined_path)

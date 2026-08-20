@@ -16,6 +16,11 @@ from lightsuite.analysis.region_stats import concat_tidy, write_region_stats_csv
 from lightsuite.atlas.io import load_atlas_volume
 from lightsuite.atlas.registry import AtlasPaths
 from lightsuite.config.models import BrainPipelineConfig
+from lightsuite.registration.brain_paths import (
+    brain_stats_dir,
+    iter_brain_import_paths,
+    iter_brain_stats_paths,
+)
 
 console = Console()
 
@@ -47,12 +52,13 @@ def _load_brain_annotation(atlas: AtlasPaths, shape: tuple[int, ...]) -> np.ndar
 
 def collect_brain_point_count_frames(
     config: BrainPipelineConfig,
-    register_path: Path,
+    stats_path: Path,
     *,
     annotation: np.ndarray,
     region_table: RegionTable | None,
     atlas: AtlasPaths,
     transform_params: object,
+    save_path: Path | None = None,
 ) -> list[pd.DataFrame]:
     """Return tidy cell_count / cell_density rows for atlas-space imports."""
     if not config.analysis.count_points:
@@ -61,7 +67,12 @@ def collect_brain_point_count_frames(
     frames: list[pd.DataFrame] = []
     ml_axis = 2
     brainglobe_name = atlas.brainglobe_name
-    for npz_path in sorted(register_path.glob("*_atlas_coords.npz")):
+    npz_paths = (
+        iter_brain_import_paths(save_path, "*_atlas_coords.npz")
+        if save_path is not None
+        else sorted(stats_path.glob("*_atlas_coords.npz"))
+    )
+    for npz_path in npz_paths:
         label = npz_path.stem.replace("_atlas_coords", "")
         if wanted is not None and label not in wanted:
             continue
@@ -78,7 +89,7 @@ def collect_brain_point_count_frames(
             brainglobe_name=brainglobe_name,
         )
         if len(tidy):
-            per_label_path = register_path / f"{label}_region_counts.csv"
+            per_label_path = stats_path / f"{label}_region_counts.csv"
             write_region_stats_csv(per_label_path, tidy)
             frames.append(tidy)
     return frames
@@ -86,7 +97,7 @@ def collect_brain_point_count_frames(
 
 def collect_brain_sample_point_count_frames(
     config: BrainPipelineConfig,
-    register_path: Path,
+    save_path: Path,
     *,
     annotation_sample: np.ndarray,
     region_table: RegionTable | None,
@@ -101,7 +112,7 @@ def collect_brain_sample_point_count_frames(
         return []
     wanted = _wanted_point_labels(config)
     frames: list[pd.DataFrame] = []
-    for npz_path in sorted(register_path.glob("*_sample_coords.npz")):
+    for npz_path in iter_brain_import_paths(save_path, "*_sample_coords.npz"):
         label = npz_path.stem.replace("_sample_coords", "")
         if wanted is not None and label not in wanted:
             continue
@@ -124,13 +135,14 @@ def collect_brain_sample_point_count_frames(
 
 def finalize_brain_region_stats(
     config: BrainPipelineConfig,
-    register_path: Path,
+    stats_path: Path,
     tidy_frames: list[pd.DataFrame],
     *,
     annotation: np.ndarray | None = None,
     region_table: RegionTable | None = None,
     atlas: AtlasPaths | None = None,
     transform_params: object | None = None,
+    save_path: Path | None = None,
 ) -> BrainRegionStatsRunResult:
     """Filter intensity metrics, append point counts, and write combined region_stats.csv."""
     metrics = config.analysis.intensity_metrics
@@ -145,11 +157,12 @@ def finalize_brain_region_stats(
     ):
         count_frames = collect_brain_point_count_frames(
             config,
-            register_path,
+            stats_path,
             annotation=annotation,
             region_table=region_table,
             atlas=atlas,
             transform_params=transform_params,
+            save_path=save_path,
         )
         filtered.extend(count_frames)
         count_labels.extend(
@@ -161,7 +174,7 @@ def finalize_brain_region_stats(
     n_rows = 0
     if usable:
         combined = concat_tidy(usable)
-        combined_path = register_path / "region_stats.csv"
+        combined_path = stats_path / "region_stats.csv"
         write_region_stats_csv(combined_path, combined)
         n_rows = len(combined)
         console.print(
@@ -186,9 +199,7 @@ def maybe_refresh_brain_region_stats(
     if "atlas" not in {str(s).strip().lower() for s in export_spaces}:
         return None
     save_path = config.sample.save_path.expanduser()
-    register_path = save_path / "volume_registered"
-    if not register_path.is_dir():
-        return None
+    stats_path = brain_stats_dir(save_path)
 
     from lightsuite.atlas.registry import resolve_brain_atlas_from_config
     from lightsuite.export.brain_export import _load_transform_params
@@ -196,12 +207,12 @@ def maybe_refresh_brain_region_stats(
     atlas = resolve_brain_atlas_from_config(config.atlas)
     transform_params = _load_transform_params(save_path)
     tidy_frames: list[pd.DataFrame] = []
-    for path in sorted(register_path.glob("chan*_region_stats.csv")):
+    for path in iter_brain_stats_paths(save_path, "chan*_region_stats.csv"):
         frame = pd.read_csv(path)
         if len(frame):
             tidy_frames.append(frame)
 
-    if not tidy_frames and not list(register_path.glob("*_atlas_coords.npz")):
+    if not tidy_frames and not iter_brain_import_paths(save_path, "*_atlas_coords.npz"):
         return None
 
     try:
@@ -221,12 +232,13 @@ def maybe_refresh_brain_region_stats(
 
     return finalize_brain_region_stats(
         config,
-        register_path,
+        stats_path,
         tidy_frames,
         annotation=annotation,
         region_table=region_table,
         atlas=atlas,
         transform_params=transform_params,
+        save_path=save_path,
     )
 
 
@@ -239,7 +251,8 @@ def maybe_write_brain_sample_region_stats(
     atlas: AtlasPaths,
     registres_um: float,
     transform_params: object,
-    register_path: Path,
+    stats_path: Path,
+    save_path: Path,
 ) -> Path | None:
     """Write sample-space region_stats_sample.csv with optional point counts."""
     metrics = config.analysis.intensity_metrics
@@ -248,7 +261,7 @@ def maybe_write_brain_sample_region_stats(
         filtered.extend(
             collect_brain_sample_point_count_frames(
                 config,
-                register_path,
+                save_path,
                 annotation_sample=annotation_sample,
                 region_table=region_table,
                 atlas=atlas,
@@ -259,9 +272,6 @@ def maybe_write_brain_sample_region_stats(
     usable = [frame for frame in filtered if frame is not None and len(frame) > 0]
     if not usable:
         return None
-    from lightsuite.export.brain_sample_space import sample_space_dir
-
-    out_dir = sample_space_dir(config.sample.save_path.expanduser())
-    combined_path = out_dir / "region_stats_sample.csv"
+    combined_path = stats_path / "region_stats_sample.csv"
     write_region_stats_csv(combined_path, concat_tidy(usable))
     return combined_path

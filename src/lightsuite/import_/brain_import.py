@@ -37,6 +37,7 @@ from lightsuite.preprocess.checkpoint import RegOptsCheckpoint
 from lightsuite.preprocess.slice_ops import output_xy_shape, output_z_count
 from lightsuite.registration.brain_paths import (
     IMPORT_ANNOTATIONS_TEMP,
+    brain_imports_dir,
     brain_work_dir,
     cleanup_brain_work,
 )
@@ -240,7 +241,7 @@ def run_brain_import_annotations(
         msg = f"Missing {regopts_path}. Run preprocess and register first."
         raise FileNotFoundError(msg)
 
-    output_dir = save_path / "volume_registered"
+    output_dir = brain_imports_dir(save_path)
     temp_root = brain_work_dir(save_path, IMPORT_ANNOTATIONS_TEMP)
 
     importer = BrainAnnotationImporter(
