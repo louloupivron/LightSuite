@@ -74,8 +74,11 @@ def sample_points_to_registration_voxels(
 ) -> np.ndarray:
     """Map native sample ``x,y,z`` (1-based) to permuted registration ``y,x,z`` (0-based).
 
-    Matches the registration / export volume grid: downsample native indices, then apply
-    ``permute_brain_volume`` before B-spline warping.
+    Matches the registration / sample-space display grid (``regvolsize``): downsample
+    native indices, apply content/canvas crops, then ``permute_brain_volume``.
+
+    Does **not** apply elastix working-canvas ``pad_before`` — that offset belongs only
+    on the B-spline displacement grid used by :func:`transform_points_to_atlas`.
     """
     pts = np.asarray(points_xyz_1based, dtype=np.float64)
     if pts.ndim != 2 or pts.shape[1] < 3:
@@ -100,9 +103,6 @@ def sample_points_to_registration_voxels(
     canvas = RegistrationCanvas.from_checkpoint_dict(transform_params.registration_canvas)
     if canvas is not None and canvas.sample_crop_start != (0, 0, 0):
         reg_yxz = registration_indices_uncropped_to_cropped(reg_yxz, canvas.sample_crop_start)
-    pad_before = canvas_pad_before(transform_params)
-    if pad_before is not None:
-        reg_yxz = offset_volume_indices(reg_yxz, pad_before)
     return reg_yxz
 
 
@@ -182,6 +182,7 @@ def transform_points_to_atlas(
     *,
     registres_um: float,
     temp_dir: Path,
+    content_crop_start: list[int] | None = None,
 ) -> np.ndarray:
     """Transform sample-space cell coordinates to 1-based atlas ``x,y,z`` voxel indices."""
     pts = np.asarray(points_xyz_1based, dtype=np.float64)
@@ -189,16 +190,23 @@ def transform_points_to_atlas(
         pts,
         transform_params,
         registres_um=registres_um,
+        content_crop_start=content_crop_start,
     )
+    pad_before = canvas_pad_before(transform_params)
+    reg_for_field = reg_yxz
+    if pad_before is not None:
+        # Displacement field is on the padded elastix working grid.
+        reg_for_field = offset_volume_indices(reg_yxz, pad_before)
     displacement = _displacement_field_registration_voxels(
         transform_params,
         cache_dir=temp_dir / "deformation_field",
         registres_um=registres_um,
     )
-    warped_yxz = reg_yxz + interpolate_bspline_displacement(reg_yxz, displacement)
-    pad_before = canvas_pad_before(transform_params)
+    warped_yxz = reg_for_field + interpolate_bspline_displacement(
+        reg_for_field, displacement
+    )
     if pad_before is not None:
-        # The affine expects sample indices, warped_yxz is on the padded working grid.
+        # The affine expects unpadded registration-grid indices.
         warped_yxz = warped_yxz - np.asarray(pad_before, dtype=np.float64)
     affine = np.asarray(transform_params.tform_affine_samp20um_to_atlas_10um_px, dtype=np.float64)
     atlas_yxz = transform_points(warped_yxz, affine)

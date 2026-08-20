@@ -116,6 +116,7 @@ class BrainAnnotationImporter:
             self.transform_params,
             registres_um=self.checkpoint.registres_um,
             temp_dir=self.temp_dir / slug,
+            content_crop_start=self.checkpoint.content_crop_start,
         )
 
         reg_yxz = sample_points_to_registration_voxels(
@@ -124,7 +125,8 @@ class BrainAnnotationImporter:
             registres_um=self.checkpoint.registres_um,
             content_crop_start=self.checkpoint.content_crop_start,
         )
-        reg_coords = volume_indices_to_cloud_xyz(reg_yxz)
+        # Sample-space overlays / Napari expect 1-based registration-grid xyz.
+        reg_coords = volume_indices_to_cloud_xyz(reg_yxz) + 1.0
 
         npz_path = self.output_dir / f"{slug}_atlas_coords.npz"
         sample_npz_path = self.output_dir / f"{slug}_sample_coords.npz"

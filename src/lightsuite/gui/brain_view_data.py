@@ -424,19 +424,23 @@ def _warp_registration_channels_for_atlas_inspect(
     return registered_channels
 
 
-def _already_imported(output_dir: Path, slug: str) -> bool:
-    return (output_dir / f"{slug}_in_sample_20um.tif").is_file() or (
-        output_dir / f"{slug}_sample_coords.npz"
-    ).is_file()
+def _already_imported(save_path: Path, slug: str) -> bool:
+    """True when import-annotations already wrote sample-space artifacts for ``slug``."""
+    from lightsuite.registration.brain_paths import resolve_brain_imports_file
+
+    return resolve_brain_imports_file(save_path, f"{slug}_in_sample_20um.tif").is_file() or (
+        resolve_brain_imports_file(save_path, f"{slug}_sample_coords.npz").is_file()
+    )
 
 
 def load_resampled_config_annotations(
     config: BrainPipelineConfig,
     *,
     expected_shape: tuple[int, int, int],
-    output_dir: Path,
+    output_dir: Path | None = None,
 ) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
     """Preview native / overview-grid ROIs from import.annotations on the registration grid."""
+    del output_dir  # kept for call-site compatibility; imports live under save_path/imports
     import_cfg = config.import_config
     if import_cfg is None or not import_cfg.annotations:
         return {}, {}
@@ -459,7 +463,7 @@ def load_resampled_config_annotations(
     for spec in import_cfg.annotations:
         label = spec.label or Path(spec.path).stem
         slug = slug_for_label(label)
-        if _already_imported(output_dir, slug):
+        if _already_imported(save_path, slug):
             continue
         try:
             loaded = load_annotation(spec)
@@ -495,7 +499,8 @@ def load_resampled_config_annotations(
                 registres_um=registres_um,
                 content_crop_start=checkpoint.content_crop_start,
             )
-            point_layers[f"ROI: {label}"] = volume_indices_to_cloud_xyz(reg_yxz)
+            # Match imported ``regptcoords``: 1-based registration-grid xyz.
+            point_layers[f"ROI: {label}"] = volume_indices_to_cloud_xyz(reg_yxz) + 1.0
 
     return mask_layers, point_layers
 

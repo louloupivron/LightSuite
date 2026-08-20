@@ -57,12 +57,13 @@ def test_sample_points_to_registration_with_flip() -> None:
     assert np.isfinite(reg).all()
 
 
-def test_sample_points_to_registration_with_legacy_warp_canvas_pad() -> None:
+def test_sample_points_to_registration_ignores_warp_canvas_pad() -> None:
+    """Sample/display grid coords must not include elastix working-canvas pad."""
     params = _transform_params()
     params.warp_canvas_pad_before = [0, 0, 10]
     pts = np.array([[1.0, 1.0, 1.0]])
     reg = sample_points_to_registration_voxels(pts, params, registres_um=20.0)
-    assert np.allclose(reg[0], [0.0, 0.0, 10.0])
+    assert np.allclose(reg[0], [0.0, 0.0, 0.0])
 
 
 def test_permute_registration_indices_matches_volume() -> None:
