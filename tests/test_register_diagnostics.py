@@ -13,7 +13,7 @@ from lightsuite.registration.register_diagnostics import (
 )
 
 
-def test_register_print_summary_is_status_only() -> None:
+def test_register_print_summary_warnings_only() -> None:
     diag = RegistrationDiagnostics(
         sample_shape=[10, 10, 10],
         atlas_shape=[8, 8, 8],
@@ -33,9 +33,10 @@ def test_register_print_summary_is_status_only() -> None:
     buf = StringIO()
     diag.print_summary(console=Console(file=buf, force_terminal=False, width=80, color_system=None))
     text = buf.getvalue()
-    assert "POOR" in text
-    assert "Registration quality is low" in text
+    assert "POOR" not in text
+    assert "Registration quality is low" not in text
     assert "Warning:" in text
+    assert "Auto-only landmarks" in text
     assert "Control points" not in text
     assert "Affine fit" not in text
 

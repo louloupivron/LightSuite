@@ -14,7 +14,7 @@ from lightsuite.registration.init_diagnostics import (
 )
 
 
-def test_init_print_summary_is_status_only() -> None:
+def test_init_print_summary_warnings_only() -> None:
     diag = InitRegistrationDiagnostics(
         sample_shape=[10, 10, 10],
         atlas_shape=[8, 8, 8],
@@ -47,12 +47,16 @@ def test_init_print_summary_is_status_only() -> None:
     )
     buf = StringIO()
     diag.print_summary(console=Console(file=buf, force_terminal=False, width=80, color_system=None))
+    assert buf.getvalue() == ""
+
+    diag.warnings = ["Sparse sample cloud — try lowering registration.cloud_threshold."]
+    buf = StringIO()
+    diag.print_summary(console=Console(file=buf, force_terminal=False, width=80, color_system=None))
     text = buf.getvalue()
-    assert "GOOD" in text
-    assert "Coarse alignment ready" in text
-    assert "Point clouds" not in text
-    assert "Sample extract stages" not in text
-    assert "2,307,391" not in text
+    assert "GOOD" not in text
+    assert "Coarse alignment ready" not in text
+    assert "Warning:" in text
+    assert "Sparse sample cloud" in text
 
 
 def test_coarse_alignment_metrics_bidirectional() -> None:

@@ -11,20 +11,6 @@ from rich.console import Console
 
 InitRegistrationStatus = Literal["good", "moderate", "poor", "failed"]
 
-_STATUS_STYLE: dict[InitRegistrationStatus, str] = {
-    "good": "green",
-    "moderate": "yellow",
-    "poor": "red",
-    "failed": "bold red",
-}
-
-_STATUS_LABEL: dict[InitRegistrationStatus, str] = {
-    "good": "GOOD",
-    "moderate": "MODERATE",
-    "poor": "POOR",
-    "failed": "FAILED",
-}
-
 
 @dataclass
 class InitRegistrationDiagnostics:
@@ -74,11 +60,10 @@ class InitRegistrationDiagnostics:
         return cls(**raw)
 
     def print_summary(self, *, console: Console | None = None) -> None:
-        """Log GOOD/MODERATE/POOR/FAILED plus the status comment (metrics stay in JSON)."""
+        """Log warnings only (status/metrics stay in the diagnostics JSON)."""
+        if not self.warnings:
+            return
         out = console or Console()
-        style = _STATUS_STYLE[self.status]
-        label = _STATUS_LABEL[self.status]
-        out.print(f"[{style}]{label}[/{style}] — {self.status_message}")
         for warning in self.warnings:
             out.print(f"[yellow]Warning:[/yellow] {warning}")
 
