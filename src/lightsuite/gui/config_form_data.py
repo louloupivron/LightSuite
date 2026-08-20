@@ -42,6 +42,82 @@ class AnnotationImportRow:
     label: str = ""
 
 
+@dataclass
+class AnnotationConverterState:
+    suite: str = "native"
+    source: str = ""
+    output: str = ""
+    label: str = ""
+    voxel_um: str = ""  # "x, y, z" or empty
+    custom_entry: str = ""
+
+
+def import_converter_from_raw(raw: dict[str, Any]) -> AnnotationConverterState:
+    import_block = raw.get("import") or {}
+    conv = import_block.get("converter") or {}
+    if not isinstance(conv, dict):
+        return AnnotationConverterState()
+    voxel = conv.get("voxel_um")
+    voxel_text = ""
+    if isinstance(voxel, list) and len(voxel) == 3:
+        voxel_text = f"{voxel[0]}, {voxel[1]}, {voxel[2]}"
+    return AnnotationConverterState(
+        suite=str(conv.get("suite") or "native"),
+        source=_path_str(conv.get("source")),
+        output=_path_str(conv.get("output")),
+        label=str(conv.get("label") or ""),
+        voxel_um=voxel_text,
+        custom_entry=_path_str(conv.get("custom_entry")),
+    )
+
+
+def import_converter_to_raw(
+    state: AnnotationConverterState,
+    raw: dict[str, Any],
+) -> dict[str, Any]:
+    """Merge converter fields into the raw YAML mapping (preserves annotations)."""
+    out = dict(raw)
+    import_block = dict(out.get("import") or {})
+    suite = (state.suite or "native").strip().lower()
+    empty = (
+        suite == "native"
+        and not state.source.strip()
+        and not state.output.strip()
+        and not state.custom_entry.strip()
+        and not state.label.strip()
+        and not state.voxel_um.strip()
+    )
+    if empty:
+        import_block.pop("converter", None)
+        if import_block:
+            out["import"] = import_block
+        else:
+            out.pop("import", None)
+        return out
+
+    converter: dict[str, Any] = {"suite": suite}
+    if state.source.strip():
+        converter["source"] = state.source.strip()
+    if state.output.strip():
+        converter["output"] = state.output.strip()
+    if state.label.strip():
+        converter["label"] = state.label.strip()
+    if state.custom_entry.strip():
+        converter["custom_entry"] = state.custom_entry.strip()
+    cleaned = state.voxel_um.strip().replace("[", "").replace("]", "")
+    if cleaned:
+        parts = [p.strip() for p in cleaned.split(",")]
+        if len(parts) == 3:
+            try:
+                converter["voxel_um"] = [float(parts[0]), float(parts[1]), float(parts[2])]
+            except ValueError:
+                pass
+    import_block["converter"] = converter
+    import_block.setdefault("write_csv", True)
+    out["import"] = import_block
+    return out
+
+
 def _parse_orientation(raw: Any) -> tuple[int, int, int] | None:
     if not isinstance(raw, list) or len(raw) != 3:
         return None
@@ -246,6 +322,7 @@ class BrainFormState:
     dual_channel_mi_weight_secondary: float = 0.4
     orientation: tuple[int, int, int] | None = None
     canvas_mode: str = "off"
+    import_converter: AnnotationConverterState = field(default_factory=AnnotationConverterState)
     import_annotations: list[AnnotationImportRow] = field(default_factory=list)
     intensity_metrics: list[str] = field(default_factory=lambda: list(DEFAULT_INTENSITY_METRICS))
     workers: int = 4
@@ -266,6 +343,7 @@ class SpinalFormState:
     channel_primary: int = 1
     registration_resolution_um: float = 20.0
     control_point_weight: float = 0.2
+    import_converter: AnnotationConverterState = field(default_factory=AnnotationConverterState)
     import_annotations: list[AnnotationImportRow] = field(default_factory=list)
     intensity_metrics: list[str] = field(default_factory=lambda: list(DEFAULT_INTENSITY_METRICS))
     parcellate_intensities: bool = True
@@ -285,6 +363,7 @@ class MultiresFormState:
     landmark_fit_mode: str = "similarity"
     overlap_margin_um: float = 0.0
     write_full_overview_canvas: bool = True
+    import_converter: AnnotationConverterState = field(default_factory=AnnotationConverterState)
     import_annotations: list[AnnotationImportRow] = field(default_factory=list)
 
 
@@ -411,6 +490,7 @@ def brain_form_from_raw(raw: dict[str, Any]) -> BrainFormState:
         ),
         orientation=_parse_orientation(registration.get("orientation")),
         canvas_mode=str(registration.get("canvas_mode") or "off").lower(),
+        import_converter=import_converter_from_raw(raw),
         import_annotations=import_annotations_from_raw(raw),
         intensity_metrics=_analysis_intensity_metrics_from_raw(raw),
         workers=int(compute.get("workers") or 4),
@@ -504,7 +584,8 @@ def brain_form_to_raw(state: BrainFormState, raw: dict[str, Any]) -> dict[str, A
         out,
         intensity_metrics=state.intensity_metrics,
     )
-    return import_annotations_to_raw(state.import_annotations, out)
+    out = import_annotations_to_raw(state.import_annotations, out)
+    return import_converter_to_raw(state.import_converter, out)
 
 
 def spinal_form_from_raw(raw: dict[str, Any]) -> SpinalFormState:
@@ -529,6 +610,7 @@ def spinal_form_from_raw(raw: dict[str, Any]) -> SpinalFormState:
         channel_primary=int(registration.get("channel_primary") or 1),
         registration_resolution_um=float(registration.get("resolution_um") or 20.0),
         control_point_weight=float(registration.get("control_point_weight") or 0.2),
+        import_converter=import_converter_from_raw(raw),
         import_annotations=import_annotations_from_raw(raw),
         intensity_metrics=_analysis_intensity_metrics_from_raw(raw),
         parcellate_intensities=bool(analysis.get("parcellate_intensities", True)),
@@ -580,7 +662,8 @@ def spinal_form_to_raw(state: SpinalFormState, raw: dict[str, Any]) -> dict[str,
         intensity_metrics=state.intensity_metrics,
         parcellate_intensities=state.parcellate_intensities,
     )
-    return import_annotations_to_raw(state.import_annotations, out)
+    out = import_annotations_to_raw(state.import_annotations, out)
+    return import_converter_to_raw(state.import_converter, out)
 
 
 def multires_form_from_raw(raw: dict[str, Any]) -> MultiresFormState:
@@ -613,6 +696,7 @@ def multires_form_from_raw(raw: dict[str, Any]) -> MultiresFormState:
         landmark_fit_mode=str(landmarks.get("fit_mode") or "similarity"),
         overlap_margin_um=float(registration.get("overlap_margin_um") or 0.0),
         write_full_overview_canvas=bool(registration.get("write_full_overview_canvas", True)),
+        import_converter=import_converter_from_raw(raw),
         import_annotations=import_annotations_from_raw(raw),
     )
 
@@ -669,7 +753,8 @@ def multires_form_to_raw(state: MultiresFormState, raw: dict[str, Any]) -> dict[
     registration["write_full_overview_canvas"] = state.write_full_overview_canvas
     multires["registration"] = registration
     out["multires"] = multires
-    return import_annotations_to_raw(state.import_annotations, out)
+    out = import_annotations_to_raw(state.import_annotations, out)
+    return import_converter_to_raw(state.import_converter, out)
 
 
 def try_validate_config_dict(data: dict[str, Any]) -> tuple[str, Any] | LightsuiteConfigError:

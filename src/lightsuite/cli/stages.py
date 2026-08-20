@@ -144,6 +144,18 @@ def brain_stage_specs(config: BrainPipelineConfig) -> list[StageSpec]:
         StageSpec("register", "Register", "transform_params.json"),
         StageSpec("export", "Export", "volume_registered/"),
         StageSpec(
+            "convert-annotations",
+            "Convert annotations",
+            "converted/ + Sample Space validation (configure suite in Config)",
+            optional=True,
+        ),
+        StageSpec(
+            "import-annotations",
+            "Import annotations",
+            "imports/*_atlas_coords.csv (configure paths in Config)",
+            optional=True,
+        ),
+        StageSpec(
             "view-registration",
             "View registration",
             "registration review (Napari)",
@@ -151,15 +163,6 @@ def brain_stage_specs(config: BrainPipelineConfig) -> list[StageSpec]:
             manual=True,
         ),
     ]
-    if _has_import_annotations(config):
-        stages.append(
-            StageSpec(
-                "import-annotations",
-                "Import annotations",
-                "imports/*_atlas_coords.csv",
-                optional=True,
-            )
-        )
     return stages
 
 
@@ -189,31 +192,32 @@ def spinal_stage_specs(config: SpinalCordPipelineConfig) -> list[StageSpec]:
         StageSpec("register", "Register", "transform_params.json"),
         StageSpec("export", "Export", "volume_registered/ (+ region stats)"),
         StageSpec(
+            "convert-annotations",
+            "Convert annotations",
+            "converted/ + Sample Space validation (configure suite in Config)",
+            optional=True,
+        ),
+        StageSpec(
+            "import-annotations",
+            "Import annotations",
+            "volume_registered/import_annotations_summary.json (configure in Config)",
+            optional=True,
+        ),
+        StageSpec(
             "view-registration",
             "View registration",
             "channels + annotation + imports (Napari)",
             optional=True,
             manual=True,
         ),
-    ]
-    if _has_import_annotations(config):
-        stages.append(
-            StageSpec(
-                "import-annotations",
-                "Import annotations",
-                "volume_registered/import_annotations_summary.json",
-                optional=True,
-            )
-        )
-    stages.append(
         StageSpec(
             "plot-stats",
             "Stats / plots",
             "plots/cord_heatmap_*.png",
             optional=True,
             manual=True,
-        )
-    )
+        ),
+    ]
     return stages
 
 
@@ -245,6 +249,18 @@ def multires_stage_specs(config: _Config) -> list[StageSpec]:
             StageSpec("check-geometry", "Check geometry", "geometry/ overlap QA"),
             StageSpec("register", "Register", "multires_regopts.json → transform_paths"),
             StageSpec(
+                "convert-annotations",
+                "Convert annotations",
+                "converted/ + Sample Space validation (configure suite in Config)",
+                optional=True,
+            ),
+            StageSpec(
+                "import-annotations",
+                "Import annotations",
+                "annotations_in_overview/ (configure in Config)",
+                optional=True,
+            ),
+            StageSpec(
                 "inspect-registration",
                 "Inspect registration",
                 "registered ROI vs overview (Napari)",
@@ -253,15 +269,6 @@ def multires_stage_specs(config: _Config) -> list[StageSpec]:
             ),
         ]
     )
-    if _has_import_annotations(config):
-        stages.append(
-            StageSpec(
-                "import-annotations",
-                "Import annotations",
-                "annotations_in_overview/",
-                optional=True,
-            )
-        )
     return stages
 
 
@@ -329,12 +336,25 @@ def _brain_stage_done(stage_id: str, save_path: Path, config: BrainPipelineConfi
         if atlas_tiffs or ss_manifest.is_file() or imports:
             return True, "open Napari after export"
         return False, "run export and/or import-annotations first"
+    if stage_id == "convert-annotations":
+        summary = save_path / "converted" / "convert_annotations_summary.json"
+        if summary.is_file():
+            return True, str(summary)
+        import_cfg = getattr(config, "import_config", None)
+        converter = getattr(import_cfg, "converter", None) if import_cfg else None
+        if converter is None and not _has_import_annotations(config):
+            return False, "set import.converter suite or import.annotations in Config"
+        return False, "run after preprocess (converted/convert_annotations_summary.json)"
     if stage_id == "import-annotations":
         summary = resolve_brain_imports_file(save_path, IMPORT_SUMMARY_FILENAME)
         if summary.is_file():
             return True, str(summary)
         csvs = iter_brain_import_paths(save_path, "*_atlas_coords.csv")
-        return bool(csvs), f"{len(csvs)} atlas-space CSV layer(s)"
+        if csvs:
+            return True, f"{len(csvs)} atlas-space CSV layer(s)"
+        if not _has_import_annotations(config):
+            return False, "add points_csv / mask_tiff under Import annotations in Config"
+        return False, "run after register (imports/*_atlas_coords.csv)"
     return False, "unknown stage"
 
 
@@ -407,9 +427,22 @@ def _spinal_stage_done(
             )
             return True, detail
         return False, "run export and/or import-annotations first"
+    if stage_id == "convert-annotations":
+        summary = save_path / "converted" / "convert_annotations_summary.json"
+        if summary.is_file():
+            return True, str(summary)
+        if not _has_import_annotations(config) and not getattr(
+            getattr(config, "import_config", None), "converter", None
+        ):
+            return False, "set import.converter suite or import.annotations in Config"
+        return False, str(summary)
     if stage_id == "import-annotations":
         summary = save_path / "volume_registered" / "import_annotations_summary.json"
-        return summary.is_file(), str(summary)
+        if summary.is_file():
+            return True, str(summary)
+        if not _has_import_annotations(config):
+            return False, "add points_csv / mask_tiff under Import annotations in Config"
+        return False, str(summary)
     if stage_id == "plot-stats":
         plots = save_path / "plots"
         stats = save_path / "volume_registered" / "region_stats.csv"
@@ -460,12 +493,24 @@ def _multires_stage_done(stage_id: str, save_path: Path, config: Any) -> tuple[b
             return False, "run multires register first"
         path = Path(checkpoint.registered_roi_path).expanduser()
         return path.is_file(), str(path)
+    if stage_id == "convert-annotations":
+        summary = save_path / "converted" / "convert_annotations_summary.json"
+        if summary.is_file():
+            return True, str(summary)
+        if not _has_import_annotations(config) and not getattr(
+            getattr(config, "import_config", None), "converter", None
+        ):
+            return False, "set import.converter suite or import.annotations in Config"
+        return False, str(summary)
     if stage_id == "import-annotations":
         out = save_path / "annotations_in_overview"
-        if not out.is_dir():
-            return False, str(out)
-        artifacts = list(out.glob("*.csv")) + list(out.glob("*.tif")) + list(out.glob("*.tiff"))
-        return bool(artifacts), f"{len(artifacts)} file(s)"
+        if out.is_dir():
+            artifacts = list(out.glob("*.csv")) + list(out.glob("*.tif")) + list(out.glob("*.tiff"))
+            if artifacts:
+                return True, f"{len(artifacts)} file(s)"
+        if not _has_import_annotations(config):
+            return False, "add points_csv / mask_tiff under Import annotations in Config"
+        return False, str(out)
     return False, "unknown stage"
 
 
@@ -484,6 +529,9 @@ def evaluate_stage_statuses(
             "inspect-geometry",
             "inspect-registration",
             "view-registration",
+            "import-annotations",
+            "convert-annotations",
+            "plot-stats",
         }:
             done, detail = done_fn(spec.id, save_path, config)
             state = StageState.DONE if done else StageState.OPTIONAL

@@ -183,6 +183,22 @@ def brain_import_annotations(
         typer.echo(f"{item.label}: {item.kind} — {item.n_atlas} atlas features")
 
 
+@brain_app.command("convert-annotations")
+def brain_convert_annotations_cmd(
+    config: str = typer.Option(..., "--config", "-c", help="Pipeline YAML config."),
+) -> None:
+    """Convert vendor segmentation exports to Sample Space and validate."""
+    from lightsuite.config.loader import load_config
+    from lightsuite.import_.convert import run_convert_annotations_for_pipeline
+
+    cfg = load_config(config)
+    result = run_convert_annotations_for_pipeline(cfg)
+    typer.echo(
+        f"suite={result.suite} converted={result.n_converted} "
+        f"layers={len(result.annotations)} → {result.summary_path}"
+    )
+
+
 @brain_app.command("convert-fiji-points")
 def brain_convert_fiji_points(
     source: str = typer.Option(..., "--source", "-s", help="FIJI point-tool Results.csv export."),
@@ -217,6 +233,97 @@ def brain_convert_fiji_points(
     output_path = Path(output).expanduser()
     n = convert_fiji_points_to_csv(source_path, output_path, voxel_um=voxel)
     typer.echo(f"Wrote {n} points → {output_path}")
+
+
+@brain_app.command("convert-smartspim-points")
+def brain_convert_smartspim_points(
+    source: str = typer.Option(
+        ...,
+        "--source",
+        "-s",
+        help="SmartSPIM / LCT detection JSON ([[z,y,x],…] 0-based native voxels).",
+    ),
+    output: str = typer.Option(..., "--output", "-o", help="Output points.csv path."),
+) -> None:
+    """Convert SmartSPIM cell-detection points JSON to LightSuite points.csv."""
+    from pathlib import Path
+
+    from lightsuite.import_.smartspim_detection import convert_smartspim_points_json_to_csv
+
+    source_path = Path(source).expanduser()
+    if not source_path.is_file():
+        msg = f"Source JSON not found: {source_path}"
+        raise typer.BadParameter(msg)
+
+    output_path = Path(output).expanduser()
+    n = convert_smartspim_points_json_to_csv(source_path, output_path)
+    typer.echo(f"Wrote {n} points → {output_path}")
+
+
+@brain_app.command("split-smartspim-channels")
+def brain_split_smartspim_channels(
+    source: str = typer.Option(
+        ...,
+        "--source",
+        "-s",
+        help="Flat SmartSPIM All_Channels folder (interleaved Z*_ChN.tif planes).",
+    ),
+    output: str | None = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Parent for Ch0/Ch1/Ch2 folders (default: create inside --source).",
+    ),
+    mode: str = typer.Option(
+        "symlink",
+        "--mode",
+        "-m",
+        help="How to place files into ChN folders: symlink, hardlink, copy, or move.",
+    ),
+    max_channels: int = typer.Option(
+        3,
+        "--max-channels",
+        help="Maximum channel count (1–3). Channels Ch0…Ch{N-1} are written.",
+        min=1,
+        max=3,
+    ),
+    allow_unequal: bool = typer.Option(
+        False,
+        "--allow-unequal",
+        help="Allow channels with different plane counts (default: require equal).",
+    ),
+) -> None:
+    """Split flat SmartSPIM All_Channels TIFFs into Ch0/Ch1/Ch2 for planeperfile."""
+    from pathlib import Path
+
+    from lightsuite.io.smartspim_channels import SplitMode, split_smartspim_all_channels
+
+    source_path = Path(source).expanduser()
+    if not source_path.is_dir():
+        msg = f"Source folder not found: {source_path}"
+        raise typer.BadParameter(msg)
+
+    try:
+        mode_enum = SplitMode(mode.lower())
+    except ValueError as exc:
+        msg = "--mode must be one of: symlink, hardlink, copy, move"
+        raise typer.BadParameter(msg) from exc
+
+    output_path = Path(output).expanduser() if output else None
+    result = split_smartspim_all_channels(
+        source_path,
+        output_dir=output_path,
+        mode=mode_enum,
+        max_channels=max_channels,
+        require_equal_plane_counts=not allow_unequal,
+    )
+    for channel, ch_dir in sorted(result.channel_dirs.items()):
+        n = result.plane_counts[channel]
+        typer.echo(f"Ch{channel}: {n} planes → {ch_dir}")
+    typer.echo(
+        f"Split complete ({result.mode.value}). "
+        "Point sample.source.channels at the ChN folders for preprocess."
+    )
 
 
 @brain_app.command("import-matlab-control-points")

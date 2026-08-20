@@ -90,8 +90,23 @@ _BRAIN: dict[str, str] = {
         "(atlas warped to sample shape); Pad/Crop/Union reconcile sample and atlas extents."
     ),
     "import_annotations": (
-        "External annotations to register after the main volume: points_csv (Imaris/Fiji "
-        "CSV) or mask_tiff. Each entry needs a path; label sets the output filename stem."
+        "Native Sample Space layers (points_csv / mask_tiff) warped after register. "
+        "Prefer Segmentation suite + Convert annotations for vendor exports; keep these "
+        "rows for already-converted files or extra layers."
+    ),
+    "segmentation_suite": (
+        "Vendor used for cell/spot detection. Run the Convert annotations stage after "
+        "preprocess to write Sample Space files and validate them. Custom requires a "
+        ".py module defining convert_to_lightsuite(source, output, *, reference)."
+    ),
+    "converter_source": "Raw vendor export path (JSON / CSV / XLSX / …).",
+    "converter_output": (
+        "Optional destination for converted points.csv. Defaults to "
+        "<save_path>/converted/<label>_points.csv."
+    ),
+    "converter_custom": (
+        "Python file for suite=custom. Must define convert_to_lightsuite; output is "
+        "always validated against sample_reference.json."
     ),
     "intensity_metrics": (
         "Per-region intensity statistics written to region_stats.csv during export: "
@@ -100,7 +115,7 @@ _BRAIN: dict[str, str] = {
     ),
     "detection": (
         "Built-in cell detection is not implemented in Python yet — leave disabled and use "
-        "import-annotations with external points.csv / mask.tif."
+        "Segmentation suite + Convert annotations, then Import annotations."
     ),
 }
 
@@ -136,8 +151,8 @@ _SPINAL: dict[str, str] = {
         "matched control points from match-points."
     ),
     "import_annotations": (
-        "External annotations to register after cord registration: points_csv or mask_tiff. "
-        "Each entry needs a path; label sets the output filename stem."
+        "External annotations warped after cord registration: points_csv or mask_tiff. "
+        "Convert vendor exports first, add paths here, then run Import annotations."
     ),
     "intensity_metrics": (
         "Per-region intensity statistics in region_stats.csv: median, mean, std, variance, "
@@ -182,8 +197,8 @@ _MULTIRES: dict[str, str] = {
         "to overlap crops (needed for some import-annotations workflows)."
     ),
     "import_annotations": (
-        "External annotations to warp with the overview↔ROI transform: points_csv or "
-        "mask_tiff. Each entry needs a path; label sets the output filename stem."
+        "ROI-native points_csv / mask_tiff to warp onto the overview grid. Convert "
+        "vendor exports first, add paths here, then run Import annotations."
     ),
 }
 

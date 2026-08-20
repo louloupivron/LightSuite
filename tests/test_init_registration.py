@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import nibabel as nib
@@ -80,8 +79,6 @@ def test_initialize_brain_registration(tmp_path: Path) -> None:
     assert preview.is_file()
     assert preview.stat().st_size > 10_000
     diag_path = save / "qc" / "init_registration_diagnostics.json"
-    assert diag_path.is_file()
-    diag = json.loads(diag_path.read_text(encoding="utf-8"))
-    assert diag["status"] in {"good", "moderate", "poor", "failed"}
-    assert diag["auto_pairs"] >= 0
-    assert "median_error_vox" in diag
+    assert not diag_path.is_file()
+    legacy_diag = save / "init_registration_diagnostics.json"
+    assert not legacy_diag.is_file()

@@ -103,6 +103,24 @@ def _brain_import_annotations(config: Any, ctx: StageContext) -> Any:
     return run_brain_import_annotations(config)
 
 
+def _brain_convert_annotations(config: Any, ctx: StageContext) -> Any:
+    from lightsuite.import_.convert import run_convert_annotations_for_pipeline
+
+    return run_convert_annotations_for_pipeline(config)
+
+
+def _spinal_convert_annotations(config: Any, ctx: StageContext) -> Any:
+    from lightsuite.import_.convert import run_convert_annotations_for_pipeline
+
+    return run_convert_annotations_for_pipeline(config)
+
+
+def _multires_convert_annotations(config: Any, ctx: StageContext) -> Any:
+    from lightsuite.import_.convert import run_convert_annotations_for_pipeline
+
+    return run_convert_annotations_for_pipeline(config)
+
+
 def _brain_view_registration(config: Any, ctx: StageContext) -> Any:
     from lightsuite.gui.view_registration_brain import run_brain_view_registration
 
@@ -230,6 +248,7 @@ _BRAIN_RUNNERS: dict[str, StageRunner] = {
     "register": _brain_register,
     "export": _brain_export,
     "view-registration": _brain_view_registration,
+    "convert-annotations": _brain_convert_annotations,
     "import-annotations": _brain_import_annotations,
 }
 
@@ -243,6 +262,7 @@ _SPINAL_RUNNERS: dict[str, StageRunner] = {
     "register": _spinal_register,
     "export": _spinal_export,
     "view-registration": _spinal_view_registration,
+    "convert-annotations": _spinal_convert_annotations,
     "import-annotations": _spinal_import_annotations,
     "region-stats": _spinal_region_stats,
     "plot-stats": _spinal_plot_stats,
@@ -254,6 +274,7 @@ _MULTIRES_RUNNERS: dict[str, StageRunner] = {
     "check-geometry": _multires_check_geometry,
     "register": _multires_register,
     "inspect-registration": _multires_inspect_registration,
+    "convert-annotations": _multires_convert_annotations,
     "import-annotations": _multires_import_annotations,
 }
 

@@ -13,6 +13,7 @@ from lightsuite.atlas.brainglobe_backend import brainglobe_name_key
 from lightsuite.gui.config_form_tooltips import tooltips_for_workflow
 from lightsuite.analysis.intensity_metrics import DEFAULT_INTENSITY_METRICS
 from lightsuite.gui.config_form_data import (
+    AnnotationConverterState,
     AnnotationImportRow,
     BrainFormState,
     ChannelPaths,
@@ -316,6 +317,44 @@ class ConfigEditorDock:
         self._write_full_overview_canvas = QCheckBox("Write full overview canvas")
         self._write_full_overview_canvas.stateChanged.connect(self._mark_dirty)
         self._config_form.addRow(self._write_full_overview_canvas)
+        self._converter_suite_combo = QComboBox()
+        for value, label in (
+            ("native", "Native (already points_csv / mask_tiff)"),
+            ("smartspim", "SmartSPIM / LCT detection JSON"),
+            ("fiji", "FIJI / ImageJ Results.csv"),
+            ("imaris", "Imaris spots CSV"),
+            ("arivis", "Arivis features CSV/XLSX"),
+            ("custom", "Custom Python converter"),
+        ):
+            self._converter_suite_combo.addItem(label, value)
+        self._converter_suite_combo.currentIndexChanged.connect(self._on_converter_suite_changed)
+        self._config_form.addRow("Segmentation suite", self._converter_suite_combo)
+        self._converter_source = _PathField(
+            parent=self._config_block,
+            browse_label="Vendor export",
+            browse_mode="file",
+            on_change=self._mark_dirty,
+        )
+        self._config_form.addRow("Converter source", self._converter_source.widget)
+        self._converter_output = _PathField(
+            parent=self._config_block,
+            browse_label="Converted points.csv",
+            browse_mode="file",
+            on_change=self._mark_dirty,
+        )
+        self._config_form.addRow("Converter output", self._converter_output.widget)
+        self._converter_label_edit = self._line_edit(self._mark_dirty)
+        self._config_form.addRow("Converter label", self._converter_label_edit)
+        self._converter_voxel_edit = self._line_edit(self._mark_dirty)
+        self._converter_voxel_edit.setPlaceholderText("x, y, z µm (Imaris / FIJI)")
+        self._config_form.addRow("Converter voxel_um", self._converter_voxel_edit)
+        self._converter_custom_entry = _PathField(
+            parent=self._config_block,
+            browse_label="Custom converter .py",
+            browse_mode="file",
+            on_change=self._mark_dirty,
+        )
+        self._config_form.addRow("Custom converter", self._converter_custom_entry.widget)
         self._import_annotations_host = QWidget()
         self._import_annotations_layout = QVBoxLayout(self._import_annotations_host)
         self._import_annotations_layout.setContentsMargins(0, 0, 0, 0)
@@ -546,11 +585,20 @@ class ConfigEditorDock:
         self._set_form_row_visible(form, self._landmark_fit_mode_combo, is_multires)
         self._set_form_row_visible(form, self._overlap_margin_um, is_multires)
         self._set_form_row_visible(form, self._write_full_overview_canvas, is_multires)
+        show_import = is_brain or is_spinal or is_multires
+        self._set_form_row_visible(form, self._converter_suite_combo, show_import)
+        self._set_form_row_visible(form, self._converter_source.widget, show_import)
+        self._set_form_row_visible(form, self._converter_output.widget, show_import)
+        self._set_form_row_visible(form, self._converter_label_edit, show_import)
+        self._set_form_row_visible(form, self._converter_voxel_edit, show_import)
+        self._set_form_row_visible(form, self._converter_custom_entry.widget, show_import)
         self._set_form_row_visible(
             form,
             self._import_annotations_wrapper,
-            is_brain or is_spinal or is_multires,
+            show_import,
         )
+        if show_import:
+            self._update_converter_field_visibility()
         self._set_form_row_visible(form, self._analysis_metrics_wrapper, is_brain or is_spinal)
         self._set_form_row_visible(form, self._parcellate_intensities_check, is_spinal)
 
@@ -604,6 +652,10 @@ class ConfigEditorDock:
                 (self._landmark_fit_mode_combo, "landmark_fit_mode"),
                 (self._overlap_margin_um, "overlap_margin_um"),
                 (self._write_full_overview_canvas, "write_full_overview_canvas"),
+                (self._converter_suite_combo, "segmentation_suite"),
+                (self._converter_source, "converter_source"),
+                (self._converter_output, "converter_output"),
+                (self._converter_custom_entry, "converter_custom"),
                 (self._import_annotations_wrapper, "import_annotations"),
             ]
             for field, key in multires_fields:
@@ -648,6 +700,10 @@ class ConfigEditorDock:
                 (self._dual_channel_mi_secondary, "dual_channel_mi_weight_secondary"),
                 (self._orientation_edit, "orientation"),
                 (self._canvas_mode_combo, "canvas_mode"),
+                (self._converter_suite_combo, "segmentation_suite"),
+                (self._converter_source, "converter_source"),
+                (self._converter_output, "converter_output"),
+                (self._converter_custom_entry, "converter_custom"),
                 (self._import_annotations_wrapper, "import_annotations"),
                 (self._detection_check, "detection"),
             ]
@@ -657,6 +713,10 @@ class ConfigEditorDock:
             spinal_fields: list[tuple[Any, str]] = [
                 (self._atlas_dir, "atlas_dir"),
                 (self._control_point_weight, "control_point_weight"),
+                (self._converter_suite_combo, "segmentation_suite"),
+                (self._converter_source, "converter_source"),
+                (self._converter_output, "converter_output"),
+                (self._converter_custom_entry, "converter_custom"),
                 (self._import_annotations_wrapper, "import_annotations"),
                 (self._parcellate_intensities_check, "parcellate_intensities"),
             ]
@@ -780,6 +840,7 @@ class ConfigEditorDock:
                 "" if state.orientation is None else f"{state.orientation[0]}, {state.orientation[1]}, {state.orientation[2]}"
             )
             self._set_combo_value(self._canvas_mode_combo, state.canvas_mode)
+            self._fill_import_converter(state.import_converter)
             self._fill_import_annotations(state.import_annotations)
             self._fill_intensity_metrics(state.intensity_metrics)
             self._workers.setValue(state.workers)
@@ -800,6 +861,7 @@ class ConfigEditorDock:
             self._channel_primary.setValue(state.channel_primary)
             self._registration_resolution.setValue(state.registration_resolution_um)
             self._control_point_weight.setValue(state.control_point_weight)
+            self._fill_import_converter(state.import_converter)
             self._fill_import_annotations(state.import_annotations)
             self._fill_intensity_metrics(state.intensity_metrics)
             self._parcellate_intensities_check.setChecked(state.parcellate_intensities)
@@ -816,6 +878,7 @@ class ConfigEditorDock:
             self._set_combo_value(self._landmark_fit_mode_combo, state.landmark_fit_mode)
             self._overlap_margin_um.setValue(state.overlap_margin_um)
             self._write_full_overview_canvas.setChecked(state.write_full_overview_canvas)
+            self._fill_import_converter(state.import_converter)
             self._fill_import_annotations(state.import_annotations)
             compute = raw.get("compute") or {}
             self._workers.setValue(int(compute.get("workers") or 4))
@@ -850,6 +913,41 @@ class ConfigEditorDock:
                 self._add_import_annotation_row(row.format, row.path, row.label)
         else:
             self._add_import_annotation_row()
+
+    def _fill_import_converter(self, state: AnnotationConverterState) -> None:
+        self._set_combo_value(self._converter_suite_combo, state.suite or "native")
+        self._converter_source.set_text(state.source)
+        self._converter_output.set_text(state.output)
+        self._converter_label_edit.setText(state.label)
+        self._converter_voxel_edit.setText(state.voxel_um)
+        self._converter_custom_entry.set_text(state.custom_entry)
+        self._update_converter_field_visibility()
+
+    def _collect_import_converter(self) -> AnnotationConverterState:
+        return AnnotationConverterState(
+            suite=str(self._converter_suite_combo.currentData() or "native"),
+            source=self._converter_source.text(),
+            output=self._converter_output.text(),
+            label=self._converter_label_edit.text().strip(),
+            voxel_um=self._converter_voxel_edit.text().strip(),
+            custom_entry=self._converter_custom_entry.text(),
+        )
+
+    def _on_converter_suite_changed(self, _index: int = 0) -> None:
+        self._update_converter_field_visibility()
+        self._mark_dirty()
+
+    def _update_converter_field_visibility(self) -> None:
+        suite = str(self._converter_suite_combo.currentData() or "native")
+        is_custom = suite == "custom"
+        needs_source = suite not in {"native", ""}
+        needs_voxel = suite in {"imaris", "fiji"}
+        # Keep rows visible when import section is shown; enable/disable instead
+        self._converter_source.line.setEnabled(needs_source or is_custom)
+        self._converter_output.line.setEnabled(needs_source or is_custom)
+        self._converter_label_edit.setEnabled(needs_source or is_custom)
+        self._converter_voxel_edit.setEnabled(needs_voxel)
+        self._converter_custom_entry.line.setEnabled(is_custom)
 
     def _collect_import_annotations(self) -> list[AnnotationImportRow]:
         rows: list[AnnotationImportRow] = []
@@ -1102,6 +1200,7 @@ class ConfigEditorDock:
                 dual_channel_mi_weight_secondary=self._dual_channel_mi_secondary.value(),
                 orientation=parse_orientation_text(self._orientation_edit.text()),
                 canvas_mode=str(self._canvas_mode_combo.currentData() or "off"),
+                import_converter=self._collect_import_converter(),
                 import_annotations=self._collect_import_annotations(),
                 intensity_metrics=self._collect_intensity_metrics(),
                 workers=self._workers.value(),
@@ -1126,6 +1225,7 @@ class ConfigEditorDock:
                 channel_primary=self._channel_primary.value(),
                 registration_resolution_um=self._registration_resolution.value(),
                 control_point_weight=self._control_point_weight.value(),
+                import_converter=self._collect_import_converter(),
                 import_annotations=self._collect_import_annotations(),
                 intensity_metrics=self._collect_intensity_metrics(),
                 parcellate_intensities=self._parcellate_intensities_check.isChecked(),
@@ -1152,6 +1252,7 @@ class ConfigEditorDock:
             landmark_fit_mode=str(self._landmark_fit_mode_combo.currentData() or "similarity"),
             overlap_margin_um=self._overlap_margin_um.value(),
             write_full_overview_canvas=self._write_full_overview_canvas.isChecked(),
+            import_converter=self._collect_import_converter(),
             import_annotations=self._collect_import_annotations(),
         )
         raw = multires_form_to_raw(state, self._raw)

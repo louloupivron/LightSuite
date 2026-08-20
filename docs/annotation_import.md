@@ -93,27 +93,34 @@ Example: segment on a native-resolution export of the structural channel, save a
 ```yaml
 import:
   write_csv: true
+  converter:
+    suite: smartspim   # native | smartspim | fiji | imaris | arivis | custom
+    source: /data/Jules/cell_detection/488_points_Endogenous.json
+    output: /data/Jules/converted/smartspim_488_points.csv   # optional
+    label: smartspim_488
+    # custom_entry: /path/to/my_converter.py   # required when suite: custom
+    # voxel_um: [1.0, 1.0, 1.0]                # Imaris / FIJI calibration
   annotations:
     - format: points_csv
-      path: /data/annotations/cfos_cells.csv
-      label: cfos_cells
-    - format: mask_tiff
-      path: /data/annotations/region_mask.tif
-      label: hippocampus
+      path: /data/Jules/converted/smartspim_488_points.csv
+      label: smartspim_488
+```
+
+Run convert (after preprocess) then warp (after register):
+
+```bash
+uv run lightsuite brain convert-annotations -c my_mouse.yaml
+uv run lightsuite brain import-annotations -c my_mouse.yaml
 ```
 
 | Key | Description |
 |-----|-------------|
-| `format` | `points_csv` or `mask_tiff` |
+| `converter.suite` | Vendor prepare step; `native` only validates existing `annotations` |
+| `converter.source` | Vendor export path |
+| `converter.custom_entry` | Required for `custom` — Python module with `convert_to_lightsuite` |
+| `format` | `points_csv` or `mask_tiff` (post-conversion Sample Space) |
 | `path` | Path to the CSV or TIFF file |
 | `label` | Output filename stem (defaults to file stem) |
-
-Run:
-
-```bash
-uv run lightsuite brain import-annotations -c my_mouse.yaml
-uv run lightsuite spinal import-annotations -c my_spinal.yaml
-```
 
 ---
 
@@ -150,7 +157,9 @@ Each site maintains a small converter script. Common translations:
 | **FIJI point tool `Results.csv`** | Columns `X`, `Y`, `Slice` (or `Z`). When ImageJ spatial calibration is set, XY are in calibrated units (typically µm) — run `lightsuite brain convert-fiji-points --voxel-um <x,y,z>` matching the stack you segmented on. `Slice` is already 1-based; use it directly as `z`. Omit `--voxel-um` only when X/Y are raw pixel coordinates. |
 | **Imaris Spot_OnePageMultiComponent_Detailed.csv** | Filter by `Component Name`; use `lightsuite spinal convert-imaris-spots`. Set `--voxel-um` from **Imaris** Image Properties voxel size (not blindly from `sample.voxel_um`). Use `1,1,1` when the `.ims` is 1 µm isotropic on the same grid; use hybrid values (e.g. `1,1,1.8`) when XY matches LightSuite indices but Z plane counts differ — see [Spinal cord usage](usage_spinal_cord.md) |
 | **Imaris mask TIFF series** | One label slice per Z (`*_Z####.tif`, 0-based in filename); binarize `(plane > 0)` and stack to multi-page TIFF |
-| **LCT JSON** `[[z,y,x],…]` | Reorder to `x,y,z`; add 1 |
+| **SmartSPIM / LCT detection JSON** `[[z,y,x],…]` | Set `import.converter.suite: smartspim` and run `lightsuite brain convert-annotations` (or `convert-smartspim-points`). Do **not** import `*_projected_points.json`. |
+| **Custom tool** | Provide a `.py` file with `convert_to_lightsuite(source, output, *, reference) -> dict` (`import.converter.suite: custom`). Convert-annotations **always validates** the written Sample Space file. Example: [`examples/annotation_sample/custom_converter_example.py`](../examples/annotation_sample/custom_converter_example.py). |
+| **LCT JSON** `[[z,y,x],…]` (generic) | Reorder to `x,y,z`; add 1 |
 | **Downsampled segmentation** | Resample mask/coordinates to native `shape_yxz` before import |
 
 Validate against `sample_reference.json` before import:

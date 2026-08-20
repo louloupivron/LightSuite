@@ -488,7 +488,7 @@ def load_resampled_config_annotations(
             if loaded.coordinates.size:
                 from lightsuite.import_.adapters import prepare_points_for_sample
 
-                prepared = prepare_points_for_sample(loaded, sample_reference)
+                prepared = prepare_points_for_sample(loaded, reference=sample_reference)
             reg_yxz = sample_points_to_registration_voxels(
                 prepared.coordinates,
                 transform_params,

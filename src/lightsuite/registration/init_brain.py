@@ -28,6 +28,7 @@ from lightsuite.registration.brain_paths import (
     INIT_DIAGNOSTICS_FILENAME,
     brain_qc_file,
     brain_qc_previews_dir,
+    cleanup_brain_qc_audit_json,
 )
 from lightsuite.registration.init_diagnostics import (
     InitRegistrationDiagnostics,
@@ -199,6 +200,7 @@ def initialize_brain_registration(config: BrainPipelineConfig) -> RegOptsCheckpo
     diag_path = brain_qc_file(save_path, INIT_DIAGNOSTICS_FILENAME)
     diagnostics.save(diag_path)
     diagnostics.print_summary(console=console)
+    cleanup_brain_qc_audit_json(save_path)
     console.print(
         f"[dim]Checkpoint {regopts_path.name} · diagnostics {diag_path.relative_to(save_path)} · "
         f"cloud extraction {sample_cloud_elapsed + atlas_cloud_elapsed:.1f}s[/dim]"

@@ -43,6 +43,7 @@ from lightsuite.registration.brain_paths import (
     brain_qc_file,
     brain_qc_previews_dir,
     brain_work_dir,
+    cleanup_brain_qc_audit_json,
     cleanup_brain_work,
     cleanup_legacy_brain_work,
 )
@@ -700,6 +701,7 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
     cleanup_brain_work(save_path, ELASTIX_TEMP)
     cleanup_brain_work(save_path, ELASTIX_INVERSE_TEMP)
     cleanup_brain_work(save_path, TRANSFORMIX_ANNOTATION_TEMP)
+    cleanup_brain_qc_audit_json(save_path)
     cleanup_legacy_brain_work(save_path)
     console.print(
         f"[dim]Checkpoint {out_json.name} · diagnostics {diag_path.relative_to(save_path)} · "

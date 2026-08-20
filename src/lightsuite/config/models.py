@@ -405,6 +405,69 @@ class AnnotationFormat(str, Enum):
     MASK_TIFF = "mask_tiff"
 
 
+class SegmentationSuite(str, Enum):
+    """Vendor (or custom) source for the convert-annotations prepare stage."""
+
+    NATIVE = "native"
+    SMARTSPIM = "smartspim"
+    FIJI = "fiji"
+    IMARIS = "imaris"
+    ARIVIS = "arivis"
+    CUSTOM = "custom"
+
+
+class AnnotationConverterConfig(BaseModel):
+    """Convert vendor segmentation exports into LightSuite Sample Space v1.
+
+    Built-in suites write ``points_csv`` (and optionally fill ``import.annotations``).
+    ``custom`` requires ``custom_entry``: a ``.py`` file exposing
+    ``convert_to_lightsuite(source, output, *, reference) -> dict``.
+    """
+
+    suite: SegmentationSuite = SegmentationSuite.NATIVE
+    source: Path | None = Field(
+        default=None,
+        description="Vendor export path (JSON / CSV / XLSX / …). Required unless suite=native.",
+    )
+    output: Path | None = Field(
+        default=None,
+        description=(
+            "Destination points.csv (or mask.tif for custom). "
+            "Defaults to <save_path>/converted/<label>_points.csv."
+        ),
+    )
+    label: str = Field(
+        default="",
+        description="Output stem / import.label; defaults to source file stem.",
+    )
+    voxel_um: Annotated[list[float], Field(min_length=3, max_length=3)] | None = Field(
+        default=None,
+        description="Imaris/FIJI calibration [x,y,z] in the same units as the export.",
+    )
+    custom_entry: Path | None = Field(
+        default=None,
+        description="Python module path for suite=custom (must define convert_to_lightsuite).",
+    )
+
+    @field_validator("source", "output", "custom_entry")
+    @classmethod
+    def expand_converter_paths(cls, value: Path | None) -> Path | None:
+        if value is None:
+            return None
+        return value.expanduser()
+
+    @model_validator(mode="after")
+    def require_custom_entry(self) -> AnnotationConverterConfig:
+        if self.suite == SegmentationSuite.CUSTOM and self.custom_entry is None:
+            msg = "import.converter.custom_entry is required when suite is 'custom'"
+            raise ValueError(msg)
+        if self.suite not in (SegmentationSuite.NATIVE, SegmentationSuite.CUSTOM):
+            if self.source is None:
+                msg = f"import.converter.source is required when suite is '{self.suite.value}'"
+                raise ValueError(msg)
+        return self
+
+
 class AnnotationImportConfig(BaseModel):
     """Native sample-space annotation to register after brain register."""
 
@@ -424,6 +487,13 @@ class AnnotationImportConfig(BaseModel):
 class ImportConfig(BaseModel):
     annotations: list[AnnotationImportConfig] = Field(default_factory=list)
     write_csv: bool = True
+    converter: AnnotationConverterConfig | None = Field(
+        default=None,
+        description=(
+            "Optional vendor→LSS conversion. Run `convert-annotations` after preprocess; "
+            "then `import-annotations` warps the validated native files."
+        ),
+    )
 
 
 class BrainMultiresLinkConfig(BaseModel):

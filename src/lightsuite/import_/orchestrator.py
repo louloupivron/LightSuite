@@ -59,8 +59,11 @@ def resolve_annotation_specs(
         return annotations
     if import_config is None or not import_config.annotations:
         msg = (
-            "No import.annotations configured. Add an 'import' section to the YAML "
-            "or pass annotations explicitly."
+            "No import.annotations configured. In the GUI Config panel, add rows under "
+            "Import annotations (points_csv or mask_tiff), or add an 'import' section to "
+            "the YAML. Convert vendor exports first "
+            "(e.g. `lightsuite brain convert-smartspim-points`, or the Imaris / Arivis / "
+            "SmartSPIM notebooks under examples/notebooks/)."
         )
         raise ValueError(msg)
     return import_config.annotations

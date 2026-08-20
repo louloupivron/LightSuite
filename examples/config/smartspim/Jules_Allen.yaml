@@ -1,0 +1,73 @@
+# Jules SmartSPIM (rAAV_hSyn_GFP_HC_5) — machine-specific paths.
+# Registration uses 640 nm only (Ch1). 488 detection → Convert annotations → Import.
+#
+# Channel folder (local symlinks → SMB; prefer a real NVME copy for preprocess):
+#   uv run lightsuite brain split-smartspim-channels \
+#     -s "/run/user/1002/gvfs/smb-share:server=h1data1.wysscenter.ch,share=computingdata/Alice/0003_CBT_WYSS_LIGHTSHEET/DATA/SMARTSPIM/Jules/All_Channels" \
+#     -o /media/gbm/NVME2/ALICe-pipelines-data/Jules/All_Channels \
+#     -m symlink
+#
+# After preprocess:
+#   uv run lightsuite brain convert-annotations -c examples/config/smartspim/Jules_Allen.yaml
+#   uv run lightsuite doctor -c examples/config/smartspim/Jules_Allen.yaml
+
+sample:
+  name: Jules
+  source:
+    format: tiff_stack
+    tiff_type: planeperfile
+    # 640 nm structural / autofluo only (Ch1 from the flat All_Channels export)
+    path: /media/gbm/NVME2/ALICe-pipelines-data/Jules/All_Channels/Ch1
+  scratch: /media/gbm/NVME2/lightsuite_scratch
+  save_path: /media/gbm/NVME2/ALICe-pipelines-data/Jules/registration_allen
+  voxel_um: [1.8, 1.8, 4.0]
+
+atlas:
+  provider: allen
+  resolution_um: 10.0
+  atlas_dir: /home/gbm/ALICe-pipelines/LightSuite/atlas/allen_CCF3_10um
+  content_trim: auto
+
+registration:
+  channel_primary: 1
+  resolution_um: 20.0
+  channel_secondary: null
+  bspline_spatial_scale_mm: 0.64
+  augment_points: false
+  control_point_weight: 0.2
+  # Leave unset and run check-orientation in the GUI, or set after QC:
+  # orientation: [1, 3, 2]
+  bcpd_path: /home/gbm/ALICe-pipelines/LightSuite/softwares/bcpd-master/
+  canvas_mode: pad
+
+detection:
+  enabled: false
+
+compute:
+  use_gpu: false
+  workers: 8
+
+export:
+  save_registered_volume: false
+  write_cells_csv: false
+  registered_volume_format: tiff
+  write_pyramid: true
+
+import:
+  write_csv: true
+  converter:
+    suite: smartspim
+    source: /run/user/1002/gvfs/smb-share:server=h1data1.wysscenter.ch,share=computingdata/Alice/0003_CBT_WYSS_LIGHTSHEET/DATA/SMARTSPIM/Jules/cell_detection/488_points_Endogenous.json
+    output: /media/gbm/NVME2/ALICe-pipelines-data/Jules/segmentation/converted/smartspim_488_points.csv
+    label: smartspim_488
+  annotations:
+    - format: points_csv
+      path: /media/gbm/NVME2/ALICe-pipelines-data/Jules/segmentation/converted/smartspim_488_points.csv
+      label: smartspim_488
+
+analysis:
+  intensity_metrics:
+    - median_intensity
+    - std
+    - volume_mm3
+  count_points: true

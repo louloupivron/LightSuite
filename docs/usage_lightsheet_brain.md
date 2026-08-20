@@ -505,6 +505,17 @@ registration:
 
 All channel folders must have the same `(ny, nx, nz)` and matching slice ordering (files sorted by name). Export applies the same transform to every preprocessed channel.
 
+### SmartSPIM flat `All_Channels` (interleaved `Z*_ChN.tif`)
+
+Some SmartSPIM exports keep all channels in one folder (`Z000000_Ch0.tif`, `Z000000_Ch1.tif`, …). Split into per-channel folders (up to **Ch0–Ch2**) before preprocess:
+
+```bash
+uv run lightsuite brain split-smartspim-channels -s /data/Jules/All_Channels
+# creates All_Channels/Ch0, Ch1, … (symlinks by default)
+```
+
+Then point `source.channels` at those `ChN` directories. Cell-detection JSON → `points.csv`: see [`convert_smartspim_detection_to_lightsuite.ipynb`](../examples/notebooks/convert_smartspim_detection_to_lightsuite.ipynb) or `lightsuite brain convert-smartspim-points`.
+
 ---
 
 ## Import external annotations

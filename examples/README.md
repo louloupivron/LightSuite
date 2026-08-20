@@ -37,4 +37,4 @@ Some mesoSPIM projects run multires registration first, then brain atlas registr
 
 ## Notebooks (`notebooks/`)
 
-Jupyter notebooks for vendor-specific conversion (Arivis, mesoSPIM, SmartSPIM) live in [`notebooks/`](notebooks/). Prefer the CLI manifest builders once available (`lightsuite multires build-manifest`); until then, see [multires usage](../docs/usage_multiresolution.md).
+Jupyter notebooks for vendor-specific conversion (Arivis, Imaris, mesoSPIM, SmartSPIM) live in [`notebooks/`](notebooks/). SmartSPIM cell detection → LightSuite: [`notebooks/convert_smartspim_detection_to_lightsuite.ipynb`](notebooks/convert_smartspim_detection_to_lightsuite.ipynb) (also `lightsuite brain split-smartspim-channels` / `convert-smartspim-points`). Prefer the CLI manifest builders for multires (`lightsuite multires build-manifest`); see [multires usage](../docs/usage_multiresolution.md).
