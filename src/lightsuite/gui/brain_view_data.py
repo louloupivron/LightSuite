@@ -163,12 +163,29 @@ def _discover_brain_view_paths_sample(config: BrainPipelineConfig) -> BrainViewP
     )
 
 
+def _can_warp_registration_channels_to_atlas(config: BrainPipelineConfig) -> bool:
+    """True when registration channels can be warped to atlas space for QC on demand."""
+    import shutil
+
+    if shutil.which("transformix") is None:
+        return False
+    save_path = config.sample.save_path.expanduser()
+    if not (save_path / "transform_params.json").is_file():
+        return False
+    regopts_path = save_path / "regopts.json"
+    if not regopts_path.is_file():
+        return False
+    from lightsuite.preprocess.checkpoint import RegOptsCheckpoint
+
+    checkpoint = RegOptsCheckpoint.load(regopts_path)
+    if not checkpoint.regvolpaths:
+        return False
+    return any(Path(v).expanduser().is_file() for v in checkpoint.regvolpaths.values())
+
+
 def _discover_brain_view_paths_atlas(config: BrainPipelineConfig) -> BrainViewPaths:
     save_path = config.sample.save_path.expanduser()
     vr = _volume_registered_dir(config)
-    if not vr.is_dir():
-        msg = f"Missing {vr}. Run 'lightsuite brain export' first."
-        raise FileNotFoundError(msg)
 
     transform_params_path = save_path / "transform_params.json"
     if not transform_params_path.is_file():
@@ -181,34 +198,38 @@ def _discover_brain_view_paths_atlas(config: BrainPipelineConfig) -> BrainViewPa
     division = ensure_division_map(atlas_resolved)
 
     registered_channels: dict[int, Path] = {}
-    for path in sorted(vr.glob("chan_*_registered_atlas.tif")):
-        match = re.fullmatch(r"chan_(\d+)_registered_atlas\.tif", path.name)
-        if match is None:
-            continue
-        registered_channels[int(match.group(1))] = path.resolve()
+    if vr.is_dir():
+        for path in sorted(vr.glob("chan_*_registered_atlas.tif")):
+            match = re.fullmatch(r"chan_(\d+)_registered_atlas\.tif", path.name)
+            if match is None:
+                continue
+            registered_channels[int(match.group(1))] = path.resolve()
 
     point_npz_paths: dict[str, Path] = {}
-    for path in sorted(vr.glob("*_atlas_coords.npz")):
-        label = _label_from_stem(path.stem, "_atlas_coords")
-        point_npz_paths[label] = path.resolve()
-
     mask_paths: dict[str, Path] = {}
-    for path in sorted(vr.glob("*_registered_atlas.tif")):
-        if path.name.startswith("chan_"):
-            continue
-        label = _label_from_stem(path.stem, "_registered_atlas")
-        mask_paths[label] = path.resolve()
+    if vr.is_dir():
+        for path in sorted(vr.glob("*_atlas_coords.npz")):
+            label = _label_from_stem(path.stem, "_atlas_coords")
+            point_npz_paths[label] = path.resolve()
 
-    if not registered_channels and not point_npz_paths and not mask_paths:
+        for path in sorted(vr.glob("*_registered_atlas.tif")):
+            if path.name.startswith("chan_"):
+                continue
+            label = _label_from_stem(path.stem, "_registered_atlas")
+            mask_paths[label] = path.resolve()
+
+    has_on_disk_exports = bool(registered_channels or point_npz_paths or mask_paths)
+    if not has_on_disk_exports and not _can_warp_registration_channels_to_atlas(config):
         msg = (
-            f"No inspectable layers found in {vr}. "
-            "Expected chan_*_registered_atlas.tif and/or import outputs."
+            f"No atlas-space exports found under {vr}. "
+            "Run export with Atlas enabled, or keep registration channel TIFFs "
+            "and transformix available for on-the-fly warping."
         )
         raise FileNotFoundError(msg)
 
     diagnostics_path = save_path / "registration_diagnostics.json"
     return BrainViewPaths(
-        volume_registered_dir=vr.resolve(),
+        volume_registered_dir=vr.resolve() if vr.is_dir() else save_path,
         template_path=atlas.template_path.resolve(),
         annotation_path=atlas.annotation_path.resolve(),
         boundary_path=None,
@@ -513,6 +534,18 @@ def _load_brain_view_volumes_sample(
         registered_channels[ichan] = vol
 
     template: np.ndarray | None = None
+    if paths.template_path is not None and paths.template_path.is_file():
+        template = load_sample_space_atlas_volume(
+            paths.template_path,
+            permute,
+            permuted_on_disk=atlas_permuted,
+        )
+        if tuple(template.shape) != expected_shape:
+            msg = (
+                f"Template shape {template.shape} != expected registration shape {expected_shape}. "
+                "Re-run sample-space export."
+            )
+            raise ValueError(msg)
 
     annotation: np.ndarray | None = None
     if paths.annotation_path is not None and paths.annotation_path.is_file():
@@ -662,6 +695,81 @@ def _load_brain_view_volumes_atlas(
         mask_layers=mask_layers,
         channels_warped_on_the_fly=channels_warped_on_the_fly,
         diagnostics=diagnostics,
+    )
+
+
+def brain_view_spaces_available(config: BrainPipelineConfig) -> dict[ViewSpace, bool]:
+    """Return which coordinate spaces can be opened in view-registration."""
+    available: dict[ViewSpace, bool] = {"sample": False, "atlas": False}
+    save_path = config.sample.save_path.expanduser()
+    vr = save_path / "volume_registered"
+
+    if (save_path / "transform_params.json").is_file():
+        try:
+            resolve_brain_atlas_from_config(config.atlas)
+        except (FileNotFoundError, OSError, ValueError):
+            pass
+        else:
+            if vr.is_dir() and any(vr.glob("chan_*_registered_atlas.tif")):
+                available["atlas"] = True
+            elif _can_warp_registration_channels_to_atlas(config):
+                available["atlas"] = True
+
+    try:
+        sample_paths = discover_brain_sample_space_inspect_paths(config)
+        available["sample"] = bool(sample_paths.registered_channels)
+        if sample_paths.sample_space_dir is not None and sample_paths.sample_space_dir.is_dir():
+            available["sample"] = True
+    except FileNotFoundError:
+        pass
+
+    return available
+
+
+def resolve_brain_view_space(
+    config: BrainPipelineConfig,
+    *,
+    preferred: ViewSpace = "sample",
+) -> ViewSpace:
+    """Pick sample- or atlas-space review when the preferred export is missing."""
+    available = brain_view_spaces_available(config)
+    if not any(available.values()):
+        msg = (
+            f"Missing view-registration exports under {config.sample.save_path.expanduser() / 'volume_registered'}. "
+            "Run 'lightsuite brain export' (atlas and/or sample space) first."
+        )
+        raise FileNotFoundError(msg)
+    if available.get(preferred, False):
+        return preferred
+    for space in ("sample", "atlas"):
+        if available.get(space, False):
+            return space
+    msg = "No view-registration exports are available."
+    raise FileNotFoundError(msg)
+
+
+def brain_view_load_summary(
+    paths: BrainViewPaths,
+    volumes: BrainViewVolumes,
+    *,
+    space: ViewSpace,
+    config: BrainPipelineConfig,
+) -> str:
+    """Short status line after loading a brain view-registration space."""
+    del paths, config
+    space_note = "sample-space " if space == "sample" else "atlas (template) space "
+    extras: list[str] = []
+    if volumes.template is not None:
+        extras.append("template")
+    if volumes.annotation is not None:
+        extras.append("annotation")
+    if volumes.channels_warped_on_the_fly:
+        extras.append("channels warped on the fly")
+    extra_text = f" ({', '.join(extras)})" if extras else ""
+    return (
+        f"Loaded {space_note}with {len(volumes.registered_channels)} channel(s), "
+        f"{len(volumes.point_layers)} import point layer(s), "
+        f"{len(volumes.mask_layers)} import mask layer(s){extra_text}."
     )
 
 

@@ -289,6 +289,99 @@ def test_sample_space_inspect_applies_orientation_permute(tmp_path: Path) -> Non
     assert float(volumes.registered_channels[1][3, 2, 1]) == 777.0
 
 
+def test_discover_brain_view_paths_atlas_on_the_fly(tmp_path: Path) -> None:
+    """Atlas view works without chan_*_registered_atlas.tif when transformix can warp."""
+    atlas_dir = tmp_path / "atlas"
+    atlas_dir.mkdir()
+    shape = (4, 5, 6)
+    template = np.zeros(shape, dtype=np.uint16)
+    annotation = np.zeros(shape, dtype=np.uint16)
+    nib.save(nib.Nifti1Image(template, np.eye(4)), str(atlas_dir / "average_template_10.nii.gz"))
+    nib.save(nib.Nifti1Image(annotation, np.eye(4)), str(atlas_dir / "annotation_10.nii.gz"))
+
+    save_path = tmp_path / "results"
+    vr = save_path / "volume_registered"
+    vr.mkdir(parents=True)
+    chan_path = save_path / "chan_1_sample_register_20um.tif"
+    save_registration_volume(np.ones(shape, dtype=np.uint16), chan_path)
+    _write_regopts(save_path, shape_yxz=shape, chan_path=chan_path)
+    _write_transform_params(save_path, shape_yxz=shape)
+
+    config_path = tmp_path / "brain.yaml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "sample": {
+                    "name": "test",
+                    "source": {"path": str(tmp_path / "data")},
+                    "scratch": str(tmp_path / "scratch"),
+                    "save_path": str(save_path),
+                    "voxel_um": [1.0, 1.0, 1.0],
+                },
+                "atlas": {"provider": "allen", "atlas_dir": str(atlas_dir)},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "data").mkdir()
+
+    from lightsuite.config.loader import load_config
+    from lightsuite.gui.brain_view_data import (
+        _can_warp_registration_channels_to_atlas,
+        discover_brain_import_inspect_paths,
+    )
+
+    cfg = load_config(config_path)
+    if _can_warp_registration_channels_to_atlas(cfg):
+        paths = discover_brain_import_inspect_paths(cfg, space="atlas")
+        assert paths.space == "atlas"
+        assert paths.template_path is not None
+        assert not paths.registered_channels
+
+
+def test_brain_view_spaces_available(tmp_path: Path) -> None:
+    save_path = tmp_path / "results"
+    vr = save_path / "volume_registered"
+    vr.mkdir(parents=True)
+    shape = (4, 5, 6)
+    chan_path = save_path / "chan_1_sample_register_20um.tif"
+    save_registration_volume(np.zeros(shape, dtype=np.uint16), chan_path)
+    _write_regopts(save_path, shape_yxz=shape, chan_path=chan_path)
+    _write_transform_params(save_path, shape_yxz=shape)
+    save_registration_volume(np.zeros(shape, dtype=np.uint16), vr / "chan_01_registered_atlas.tif")
+
+    config_path = tmp_path / "brain.yaml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "sample": {
+                    "name": "test",
+                    "source": {"path": str(tmp_path / "data")},
+                    "scratch": str(tmp_path / "scratch"),
+                    "save_path": str(save_path),
+                    "voxel_um": [1.0, 1.0, 1.0],
+                },
+                "atlas": {"provider": "allen", "atlas_dir": str(tmp_path / "atlas")},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "data").mkdir()
+
+    from lightsuite.config.loader import load_config
+    from lightsuite.gui.brain_view_data import (
+        brain_view_spaces_available,
+        resolve_brain_view_space,
+    )
+
+    cfg = load_config(config_path)
+    available = brain_view_spaces_available(cfg)
+    assert available["sample"] is True
+    assert available["atlas"] is True
+    assert resolve_brain_view_space(cfg, preferred="atlas") == "atlas"
+    assert resolve_brain_view_space(cfg, preferred="sample") == "sample"
+
+
 def test_load_resampled_config_annotations_mask(tmp_path: Path) -> None:
     save_path = tmp_path / "results"
     vr = save_path / "volume_registered"

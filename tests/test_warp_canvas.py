@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import numpy as np
 
+from lightsuite.config.models import RegistrationCanvasMode
 from lightsuite.registration.canvas import (
     RegistrationCanvas,
     WarpCanvasPadding,
     apply_canvas_sample_crop,
+    compute_registration_canvas,
     compute_vd_warp_canvas_padding,
     crop_from_warp_canvas,
     offset_volume_indices,
@@ -90,6 +92,60 @@ def test_imwarp_output_origin_embeds_original_grid() -> None:
     assert float(warped[5, 5, 5]) == 0.0
 
 
+def test_registration_canvas_pad_uses_registration_resolution_shapes() -> None:
+    sample_shape = (794, 346, 669)
+    atlas_native_shape = (1320, 792, 1050)
+    atlas_reg_shape = (660, 396, 525)
+
+    canvas_native = compute_registration_canvas(
+        sample_shape,
+        atlas_native_shape,
+        RegistrationCanvasMode.PAD,
+    )
+    canvas_reg = compute_registration_canvas(
+        sample_shape,
+        atlas_reg_shape,
+        RegistrationCanvasMode.PAD,
+    )
+
+    assert canvas_native.working_shape == atlas_native_shape
+    assert canvas_reg.working_shape == (794, 396, 669)
+    assert canvas_reg.pad_before == (0, 25, 0)
+    assert canvas_reg.pad_after == (0, 25, 0)
+
+
+def test_registration_canvas_pad_aligns_sample_and_warped_atlas() -> None:
+    sample_shape = (40, 60, 30)
+    atlas_reg_shape = (40, 70, 30)
+    volume = np.ones(sample_shape, dtype=np.float32)
+    ann = np.zeros((20, 30, 20), dtype=np.float32)
+    ann[5:15, 8:22, 8:18] = 100.0
+
+    reg_canvas = compute_registration_canvas(
+        sample_shape,
+        atlas_reg_shape,
+        RegistrationCanvasMode.PAD,
+    )
+    volume_work = apply_canvas_sample_crop(volume, reg_canvas)
+    warp_pad = WarpCanvasPadding(reg_canvas.pad_before, reg_canvas.pad_after)
+    working_shape = reg_canvas.working_shape
+    assert volume_work.shape == working_shape
+
+    tform = np.eye(4, dtype=float)
+    tform[2, 3] = -5.0
+    avaffine = warp_volume_affine(
+        ann,
+        tform,
+        working_shape,
+        order=0,
+        output_origin=warp_pad.pad_before,
+    )
+
+    sample_mask = volume_work > 0
+    atlas_mask = avaffine > 1
+    assert np.any(sample_mask & atlas_mask)
+
+
 def test_undo_canvas_sample_crop_inverts_pad() -> None:
     volume = np.arange(24, dtype=np.float32).reshape(2, 3, 4)
     canvas = RegistrationCanvas(
@@ -102,6 +158,20 @@ def test_undo_canvas_sample_crop_inverts_pad() -> None:
     cropped = apply_canvas_sample_crop(volume, canvas)
     restored = undo_canvas_sample_crop(cropped, canvas, volume.shape)
     np.testing.assert_array_equal(restored, volume)
+
+
+def test_undo_canvas_sample_crop_takes_working_grid_volume() -> None:
+    sample_shape = (794, 346, 669)
+    canvas = compute_registration_canvas(
+        sample_shape,
+        (660, 396, 525),
+        RegistrationCanvasMode.PAD,
+    )
+    warped = np.zeros(canvas.working_shape, dtype=np.float32)
+
+    restored = undo_canvas_sample_crop(warped, canvas, sample_shape)
+
+    assert restored.shape == sample_shape
 
 
 def test_unpermute_brain_volume_inverts_permute() -> None:

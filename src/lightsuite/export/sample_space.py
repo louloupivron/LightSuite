@@ -12,7 +12,6 @@ from lightsuite.registration.brain_register import TransformParamsCheckpoint
 from lightsuite.registration.canvas import (
     RegistrationCanvas,
     WarpCanvasPadding,
-    crop_from_warp_canvas,
     undo_canvas_sample_crop,
 )
 from lightsuite.registration.coordinates import affine_with_source_offset
@@ -24,7 +23,13 @@ def resolve_forward_transform_paths(
     transform_params: TransformParamsCheckpoint,
     save_path: Path,
 ) -> tuple[Path, np.ndarray]:
-    """Return B-spline (atlas→sample) path and atlas→sample affine matrix."""
+    """Return B-spline (atlas→sample) path and native-index atlas→sample affine.
+
+    Register warps the content-trimmed atlas, so the affine it stores expects trimmed
+    indices. Sample-space export warps the full native atlas, hence the trim offset is
+    removed here; applying it to a native volume translates the result by
+    ``crop_start @ linear``.
+    """
     bspline_path: Path | None = None
     if transform_params.tform_bspline_atlas_20um_to_samp20um_px:
         candidate = Path(transform_params.tform_bspline_atlas_20um_to_samp20um_px)
@@ -43,16 +48,15 @@ def resolve_forward_transform_paths(
 
     if transform_params.tform_affine_atlas_to_samp20um_px is not None:
         affine = np.asarray(transform_params.tform_affine_atlas_to_samp20um_px, dtype=float)
+        crop = tuple(int(v) for v in (transform_params.atlas_crop_start_native or (0, 0, 0)))
+        if any(crop):
+            affine = affine_with_source_offset(affine, tuple(-c for c in crop))
     else:
         affine_inv = np.asarray(
             transform_params.tform_affine_samp20um_to_atlas_10um_px,
             dtype=float,
         )
         affine = np.linalg.inv(affine_inv)
-        if transform_params.atlas_crop_start_native is not None:
-            crop = tuple(int(v) for v in transform_params.atlas_crop_start_native)
-            if any(crop):
-                affine = affine_with_source_offset(affine, crop)
 
     return bspline_path, affine
 
@@ -64,12 +68,13 @@ def _registration_canvas(transform_params: TransformParamsCheckpoint) -> Registr
     if transform_params.warp_canvas_pad_before is not None:
         pad = tuple(int(v) for v in transform_params.warp_canvas_pad_before)
         if any(pad):
+            # Legacy runs recorded only pad_before; the VD padding they applied was symmetric.
             regvol = tuple(int(v) for v in transform_params.regvolsize)
-            working = tuple(s + pad[i] for i, s in enumerate(regvol))
+            working = tuple(s + 2 * pad[i] for i, s in enumerate(regvol))
             return RegistrationCanvas(
                 mode="legacy_vd_pad",
                 pad_before=pad,
-                pad_after=(0, 0, 0),
+                pad_after=pad,
                 sample_crop_start=(0, 0, 0),
                 working_shape=working,
             )
@@ -96,14 +101,14 @@ def transform_atlas_volume_to_sample(
     canvas = _registration_canvas(transform_params)
     bspline_path, affine = resolve_forward_transform_paths(transform_params, save_path)
     warp_pad = WarpCanvasPadding(canvas.pad_before, canvas.pad_after)
-    working_shape = warp_pad.padded_shape(canvas.working_shape)
 
     vol = atlas_volume.astype(np.float32)
     warped_affine = warp_volume_affine(
         vol,
         affine,
-        working_shape,
+        canvas.working_shape,
         order=0 if nearest else 1,
+        output_origin=warp_pad.pad_before if not warp_pad.is_zero else None,
     )
 
     owned = temp_dir is None
@@ -124,11 +129,6 @@ def transform_atlas_volume_to_sample(
         if owned:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
-    inner_shape = tuple(
-        canvas.working_shape[i] - canvas.pad_before[i] - canvas.pad_after[i]
-        for i in range(3)
-    )
-    cropped = crop_from_warp_canvas(warped_bspline, warp_pad, inner_shape)
+    # undo_canvas_sample_crop removes the canvas padding and re-embeds any sample crop.
     full_shape = tuple(int(v) for v in transform_params.regvolsize)
-    embedded = undo_canvas_sample_crop(cropped, canvas, full_shape)
-    return embedded
+    return undo_canvas_sample_crop(warped_bspline, canvas, full_shape)

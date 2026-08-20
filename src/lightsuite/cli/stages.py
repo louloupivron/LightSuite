@@ -300,14 +300,29 @@ def _brain_stage_done(stage_id: str, save_path: Path, config: BrainPipelineConfi
         vr = save_path / "volume_registered"
         if not vr.is_dir():
             return False, str(vr)
-        tiffs = list(vr.glob("*.tif")) + list(vr.glob("*.tiff"))
-        return bool(tiffs), f"{len(tiffs)} TIFF(s) in volume_registered/"
+        # Atlas-space TIFFs land at volume_registered/ top level.
+        atlas_tiffs = list(vr.glob("chan_*_registered_atlas.tif"))
+        # Sample-space outputs go into volume_registered/sample_space/.
+        ss = vr / "sample_space"
+        ss_manifest = ss / "sample_space_manifest.json"
+        ss_tiffs = list(ss.glob("*.tif")) + list(ss.glob("*.tiff")) if ss.is_dir() else []
+        if atlas_tiffs:
+            detail = f"{len(atlas_tiffs)} atlas TIFF(s)"
+            if ss_manifest.is_file():
+                detail += " + sample-space"
+            return True, detail
+        if ss_manifest.is_file():
+            return True, f"sample-space ({len(ss_tiffs)} TIFF(s))"
+        return False, str(vr)
     if stage_id == "view-registration":
         vr = save_path / "volume_registered"
         if not vr.is_dir():
             return False, str(vr)
-        tiffs = list(vr.glob("*.tif")) + list(vr.glob("*.tiff"))
-        return bool(tiffs), "open Napari after export"
+        atlas_tiffs = list(vr.glob("chan_*_registered_atlas.tif"))
+        ss_manifest = vr / "sample_space" / "sample_space_manifest.json"
+        if atlas_tiffs or ss_manifest.is_file():
+            return True, "open Napari after export"
+        return False, "run export and/or import-annotations first"
     if stage_id == "import-annotations":
         summary = save_path / "volume_registered" / "import_annotations_summary.json"
         if summary.is_file():

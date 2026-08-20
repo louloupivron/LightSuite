@@ -100,16 +100,24 @@ def sample_points_to_registration_voxels(
     canvas = RegistrationCanvas.from_checkpoint_dict(transform_params.registration_canvas)
     if canvas is not None and canvas.sample_crop_start != (0, 0, 0):
         reg_yxz = registration_indices_uncropped_to_cropped(reg_yxz, canvas.sample_crop_start)
-    pad_before: tuple[int, int, int] | None = None
-    if canvas is not None and not canvas.is_identity:
-        pad_before = canvas.pad_before
-    elif transform_params.warp_canvas_pad_before is not None and any(
-        int(p) for p in transform_params.warp_canvas_pad_before
-    ):
-        pad_before = tuple(int(v) for v in transform_params.warp_canvas_pad_before)
+    pad_before = canvas_pad_before(transform_params)
     if pad_before is not None:
         reg_yxz = offset_volume_indices(reg_yxz, pad_before)
     return reg_yxz
+
+
+def canvas_pad_before(
+    transform_params: TransformParamsCheckpoint,
+) -> tuple[int, int, int] | None:
+    """Low-side padding between the sample grid and the elastix working grid."""
+    canvas = RegistrationCanvas.from_checkpoint_dict(transform_params.registration_canvas)
+    if canvas is not None:
+        return canvas.pad_before if not canvas.is_identity else None
+    if transform_params.warp_canvas_pad_before is not None and any(
+        int(p) for p in transform_params.warp_canvas_pad_before
+    ):
+        return tuple(int(v) for v in transform_params.warp_canvas_pad_before)
+    return None
 
 
 def _displacement_field_registration_voxels(
@@ -188,6 +196,10 @@ def transform_points_to_atlas(
         registres_um=registres_um,
     )
     warped_yxz = reg_yxz + interpolate_bspline_displacement(reg_yxz, displacement)
+    pad_before = canvas_pad_before(transform_params)
+    if pad_before is not None:
+        # The affine expects sample indices, warped_yxz is on the padded working grid.
+        warped_yxz = warped_yxz - np.asarray(pad_before, dtype=np.float64)
     affine = np.asarray(transform_params.tform_affine_samp20um_to_atlas_10um_px, dtype=np.float64)
     atlas_yxz = transform_points(warped_yxz, affine)
     atlas_xyz = volume_indices_to_cloud_xyz(atlas_yxz)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -15,12 +16,20 @@ from lightsuite.gui.brain_view_data import (
     BrainViewVolumes,
     ViewSpace,
     brain_points_to_napari_zyx,
+    brain_view_load_summary,
+    brain_view_spaces_available,
     brain_volume_to_napari_zyx,
     contrast_limits,
     discover_brain_view_paths,
     load_brain_view_volumes,
+    resolve_brain_view_space,
 )
-from lightsuite.gui.stage_controller import DockStageController, run_attached_stage
+from lightsuite.gui.stage_controller import (
+    DockStageController,
+    clear_viewer_layers_safely,
+    remove_dock_widget,
+    run_attached_stage,
+)
 from lightsuite.atlas.registry import atlas_display_provider_from_config
 from lightsuite.export.brain_export import _load_transform_params
 
@@ -51,8 +60,6 @@ def _masked_channel(
 
 
 def _build_division_panel(
-    viewer: Any,
-    state: _ViewState,
     legend_table: pd.DataFrame | None,
     *,
     on_change,
@@ -151,24 +158,79 @@ def _build_division_panel(
     return DivisionPanel()
 
 
-def attach_brain_view_registration(
+def _build_brain_space_switch_panel(
+    *,
+    available: dict[ViewSpace, bool],
+    current: ViewSpace,
+    on_change: Callable[[ViewSpace], None],
+) -> Any:
+    from qtpy.QtWidgets import (
+        QButtonGroup,
+        QLabel,
+        QRadioButton,
+        QVBoxLayout,
+        QWidget,
+    )
+
+    class SpaceSwitchPanel(QWidget):
+        def __init__(self) -> None:
+            super().__init__()
+            layout = QVBoxLayout(self)
+            self._title = QLabel("Coordinate space")
+            layout.addWidget(self._title)
+            self._group = QButtonGroup(self)
+            self._buttons: dict[ViewSpace, QRadioButton] = {}
+            for space, label in (
+                ("sample", "Sample (registration grid)"),
+                ("atlas", "Atlas (template grid)"),
+            ):
+                button = QRadioButton(label)
+                button.setEnabled(available.get(space, False))
+                if not available.get(space, False):
+                    button.setToolTip(
+                        "Export not found for this space. "
+                        "Enable it under Export spaces and run export."
+                    )
+                button.toggled.connect(
+                    lambda checked, selected=space: checked and on_change(selected)
+                )
+                self._group.addButton(button)
+                layout.addWidget(button)
+                self._buttons[space] = button
+            self._buttons[current].setChecked(True)
+
+        def set_current(self, space: ViewSpace) -> None:
+            button = self._buttons[space]
+            button.blockSignals(True)
+            button.setChecked(True)
+            button.blockSignals(False)
+
+        def set_loading(self, loading: bool) -> None:
+            """Disable controls and update title while a space switch is loading."""
+            self._title.setText(
+                "Coordinate space  [loading…]" if loading else "Coordinate space"
+            )
+            for button in self._buttons.values():
+                if loading:
+                    button.setEnabled(False)
+                else:
+                    space = next(k for k, v in self._buttons.items() if v is button)
+                    button.setEnabled(available.get(space, False))
+
+    return SpaceSwitchPanel()
+
+
+def add_brain_view_layers(
     viewer: Any,
     config: BrainPipelineConfig,
     *,
-    space: ViewSpace = "sample",
-    paths: BrainViewPaths | None = None,
-    volumes: BrainViewVolumes | None = None,
-) -> DockStageController:
-    """Attach registration review layers to an existing napari viewer."""
-    from napari.utils.notifications import show_info
-
-    paths = paths or discover_brain_view_paths(config, space=space)
-    volumes = volumes or load_brain_view_volumes(
-        config,
-        paths=paths,
-        space=space,
-        load_multires_roi=False,
-    )
+    paths: BrainViewPaths,
+    volumes: BrainViewVolumes,
+    space: ViewSpace,
+    background_workers: list[Any] | None = None,
+    load_state: dict[str, bool] | None = None,
+) -> tuple[_ViewState, Callable[[list[int]], None]]:
+    """Add Napari layers for one brain view-registration coordinate space."""
     atlas_provider = atlas_display_provider_from_config(config.atlas)
     permute_sample_to_atlas: list[int] | None = None
     if space == "sample":
@@ -200,13 +262,26 @@ def attach_brain_view_registration(
             permute_sample_to_atlas=state.permute_sample_to_atlas,
         )
 
-    def _apply_division_mask(selected_ids: list[int]) -> None:
+    def apply_division_mask(selected_ids: list[int]) -> None:
         depiction = "volume" if state.display_mode == "3d" else "plane"
         for ichan, layer in state.channel_layers.items():
             base = state.channel_volumes[ichan]
             masked = _masked_channel(base, state.division_labels, selected_ids)
             layer.data = _to_napari(masked)
             layer.depiction = depiction
+
+    if volumes.template is not None:
+        template_name = (
+            "atlas template" if space == "atlas" else "template in sample"
+        )
+        viewer.add_image(
+            _to_napari(volumes.template),
+            name=template_name,
+            colormap="gray",
+            blending="additive",
+            opacity=0.35 if space == "atlas" else 0.25,
+            contrast_limits=contrast_limits(volumes.template),
+        )
 
     channel_cmaps = ["gray", "magenta", "cyan", "yellow", "red"]
     for idx, (ichan, vol) in enumerate(sorted(volumes.registered_channels.items())):
@@ -220,12 +295,10 @@ def attach_brain_view_registration(
             contrast_limits=contrast_limits(vol),
         )
         state.channel_layers[ichan] = layer
-        state.channel_volumes[ichan] = vol
 
     roi_cmaps = ["orange", "lime", "violet", "pink"]
-    background_workers: list[Any] = []
-    load_state = {"cancelled": False}
-    _teardown_multires_load = None
+    workers = background_workers if background_workers is not None else []
+    roi_load_state = load_state if load_state is not None else {"cancelled": False}
 
     for idx, (channel, vol) in enumerate(sorted(volumes.multires_roi_channels.items())):
         cmap = roi_cmaps[idx % len(roi_cmaps)]
@@ -238,14 +311,11 @@ def attach_brain_view_registration(
             contrast_limits=contrast_limits(vol),
         )
 
-    if config.multires_link is not None and not volumes.multires_roi_channels:
-
-        def _teardown_multires_load() -> None:
-            load_state["cancelled"] = True
-            from lightsuite.gui.qt_workers import wait_background_workers
-
-            wait_background_workers(background_workers)
-
+    if (
+        space == "sample"
+        and config.multires_link is not None
+        and not volumes.multires_roi_channels
+    ):
         _schedule_multires_roi_layers(
             viewer,
             config,
@@ -253,8 +323,8 @@ def attach_brain_view_registration(
             expected_shape=reference_shape,
             to_napari=_to_napari,
             roi_cmaps=roi_cmaps,
-            background_workers=background_workers,
-            load_state=load_state,
+            background_workers=workers,
+            load_state=roi_load_state,
         )
 
     if volumes.annotation is not None:
@@ -333,42 +403,220 @@ def attach_brain_view_registration(
             border_color="black",
         )
 
-    division_panel = _build_division_panel(
+    return state, apply_division_mask
+
+
+def attach_brain_view_registration(
+    viewer: Any,
+    config: BrainPipelineConfig,
+    *,
+    space: ViewSpace = "sample",
+    paths: BrainViewPaths | None = None,
+    volumes: BrainViewVolumes | None = None,
+    auto_fallback: bool = True,
+) -> DockStageController:
+    """Attach registration review layers to an existing napari viewer."""
+    from napari.utils.notifications import show_info, show_warning
+
+    available = brain_view_spaces_available(config)
+    if not any(available.values()):
+        msg = (
+            "No view-registration exports found. "
+            "Run 'lightsuite brain export' (atlas and/or sample space) first."
+        )
+        raise FileNotFoundError(msg)
+
+    if auto_fallback:
+        resolved_space = resolve_brain_view_space(config, preferred=space)
+    elif not available.get(space, False):
+        msg = (
+            f"{space.capitalize()}-space export is not available. "
+            "Run export for that space first."
+        )
+        raise FileNotFoundError(msg)
+    else:
+        resolved_space = space
+
+    fallback_note: str | None = None
+    if auto_fallback and resolved_space != space and not available.get(space, False):
+        fallback_note = (
+            f"{space.capitalize()}-space export not found; showing {resolved_space} space. "
+            "Use the Coordinate space panel to switch after exporting."
+        )
+
+    holder: dict[str, Any] = {
+        "space": resolved_space,
+        "paths": paths,
+        "volumes": volumes,
+        "view_state": None,
+        "switching": False,
+        "division_panel": None,
+        "division_handle": None,
+    }
+    background_workers: list[Any] = []
+    load_state = {"cancelled": False}
+
+    def _teardown_multires_load() -> None:
+        load_state["cancelled"] = True
+        from lightsuite.gui.qt_workers import wait_background_workers
+
+        wait_background_workers(background_workers)
+
+    def _load_space(target_space: ViewSpace) -> tuple[BrainViewPaths, BrainViewVolumes]:
+        loaded_paths = discover_brain_view_paths(config, space=target_space)
+        loaded_volumes = load_brain_view_volumes(
+            config,
+            paths=loaded_paths,
+            space=target_space,
+            load_multires_roi=target_space == "sample",
+        )
+        return loaded_paths, loaded_volumes
+
+    def _mount_division_panel(
+        apply_division_mask: Callable[[list[int]], None],
+        loaded_volumes: BrainViewVolumes,
+    ) -> None:
+        if holder["division_handle"] is not None:
+            remove_dock_widget(
+                viewer,
+                holder["division_panel"],
+                dock_handle=holder["division_handle"],
+            )
+            holder["division_panel"] = None
+            holder["division_handle"] = None
+
+        panel = _build_division_panel(
+            loaded_volumes.division_legend,
+            on_change=apply_division_mask,
+        )
+        holder["division_panel"] = panel
+        holder["division_handle"] = viewer.window.add_dock_widget(
+            panel,
+            area="right",
+            name="Divisions",
+        )
+
+    if holder["paths"] is None or holder["volumes"] is None:
+        holder["paths"], holder["volumes"] = _load_space(resolved_space)
+    elif holder["paths"].space != resolved_space:
+        holder["paths"], holder["volumes"] = _load_space(resolved_space)
+
+    holder["view_state"], apply_division_mask = add_brain_view_layers(
         viewer,
-        state,
-        volumes.division_legend,
-        on_change=_apply_division_mask,
+        config,
+        paths=holder["paths"],
+        volumes=holder["volumes"],
+        space=resolved_space,
+        background_workers=background_workers,
+        load_state=load_state,
+    )
+    _mount_division_panel(apply_division_mask, holder["volumes"])
+
+    def _full_teardown() -> None:
+        if holder["division_handle"] is not None:
+            remove_dock_widget(
+                viewer,
+                holder["division_panel"],
+                dock_handle=holder["division_handle"],
+            )
+            holder["division_panel"] = None
+            holder["division_handle"] = None
+        _teardown_multires_load()
+
+    controller = DockStageController(
+        result=holder["paths"],
+        _teardown_fn=_full_teardown,
+        open_log_message=fallback_note,
     )
 
-    viewer.window.add_dock_widget(division_panel, area="right", name="Divisions")
+    def _switch_space(target_space: ViewSpace) -> None:
+        if holder["switching"] or target_space == holder["space"]:
+            return
+        if not available.get(target_space, False):
+            show_warning(
+                f"{target_space.capitalize()}-space export is not available. "
+                "Run export for that space first."
+            )
+            space_panel.set_current(holder["space"])
+            return
 
-    n_roi = len(volumes.resampled_roi_masks) + len(volumes.resampled_roi_points)
-    n_multires = len(volumes.multires_roi_channels)
-    extras: list[str] = []
-    if n_roi:
-        extras.append(f"{n_roi} resampled ROI preview layer(s)")
-    if n_multires:
-        extras.append(f"{n_multires} multires ROI channel(s) on 20 µm grid")
-    elif config.multires_link is not None:
-        extras.append("multires ROI channel(s) loading in background")
+        holder["switching"] = True
+        space_panel.set_loading(True)
 
-    open_log_message: str | None = None
-    if config.multires_link is not None and not volumes.multires_roi_channels:
-        open_log_message = "multires ROI channel(s) loading in background"
+        # Signal any in-flight background jobs to exit early, then clear the list.
+        # cancel_background_workers is non-blocking (short timeout only); the
+        # workers check load_state["cancelled"] and bail before doing heavy I/O.
+        load_state["cancelled"] = True
+        from lightsuite.gui.qt_workers import cancel_background_workers, start_background_task
 
-    show_info(
-        f"Loaded {len(volumes.registered_channels)} channel(s), "
-        f"{len(volumes.point_layers)} import point layer(s), "
-        f"{len(volumes.mask_layers)} import mask layer(s)"
-        + (", " + ", ".join(extras) if extras else "")
-        + "."
+        cancel_background_workers(background_workers)
+        background_workers.clear()
+        load_state["cancelled"] = False
+
+        def _work() -> tuple[BrainViewPaths, BrainViewVolumes]:
+            return _load_space(target_space)
+
+        def _on_success(result: tuple[BrainViewPaths, BrainViewVolumes]) -> None:
+            loaded_paths, loaded_volumes = result
+            clear_viewer_layers_safely(viewer)
+            vs, adm = add_brain_view_layers(
+                viewer,
+                config,
+                paths=loaded_paths,
+                volumes=loaded_volumes,
+                space=target_space,
+                background_workers=background_workers,
+                load_state=load_state,
+            )
+            holder["view_state"] = vs
+            holder["space"] = target_space
+            holder["paths"] = loaded_paths
+            holder["volumes"] = loaded_volumes
+            controller.result = loaded_paths
+            _mount_division_panel(adm, loaded_volumes)
+            holder["switching"] = False
+            space_panel.set_loading(False)
+            show_info(
+                brain_view_load_summary(
+                    loaded_paths,
+                    loaded_volumes,
+                    space=target_space,
+                    config=config,
+                )
+            )
+
+        def _on_failure(exc: BaseException) -> None:
+            show_warning(f"Could not switch to {target_space} space: {exc}")
+            space_panel.set_current(holder["space"])
+            holder["switching"] = False
+            space_panel.set_loading(False)
+
+        background_workers.append(
+            start_background_task(_work, on_success=_on_success, on_failure=_on_failure)
+        )
+
+    space_panel = _build_brain_space_switch_panel(
+        available=available,
+        current=resolved_space,
+        on_change=_switch_space,
     )
+    controller.dock_widgets = [(space_panel, "Coordinate space")]
 
-    return DockStageController(
-        result=paths,
-        _teardown_fn=_teardown_multires_load,
-        open_log_message=open_log_message,
-    )
+    def _notify() -> None:
+        show_info(
+            brain_view_load_summary(
+                holder["paths"],
+                holder["volumes"],
+                space=holder["space"],
+                config=config,
+            )
+        )
+
+    controller._refresh_fn = _notify
+    if fallback_note is not None:
+        show_info(fallback_note)
+
+    return controller
 
 
 def _schedule_multires_roi_layers(

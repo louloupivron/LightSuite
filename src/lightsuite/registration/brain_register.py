@@ -64,7 +64,6 @@ from lightsuite.registration.canvas import (
     compute_registration_canvas,
     crop_from_warp_canvas,
     offset_volume_indices,
-    pad_volume_for_warp_canvas,
 )
 from lightsuite.registration.coordinates import affine_with_source_offset
 
@@ -483,7 +482,7 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
     # Match multiobjRegistration.m: warp trimmed atlas onto the sample working grid.
     reg_canvas = compute_registration_canvas(
         tuple(volume.shape),
-        tuple(tv.shape),
+        tuple(tvreg_shape),
         config.registration.canvas_mode,
     )
     if not reg_canvas.is_identity:
@@ -499,27 +498,37 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
         else None
     )
     warp_pad = WarpCanvasPadding(reg_canvas.pad_before, reg_canvas.pad_after)
-    volume_padded = pad_volume_for_warp_canvas(volume_work, warp_pad)
-    volume_secondary_padded = (
-        pad_volume_for_warp_canvas(volume_secondary_work, warp_pad)
-        if volume_secondary_work is not None
-        else None
+    working_shape = reg_canvas.working_shape
+    warp_output_origin = warp_pad.pad_before if not warp_pad.is_zero else None
+    inner_shape = tuple(
+        working_shape[i] - warp_pad.pad_before[i] - warp_pad.pad_after[i]
+        for i in range(3)
     )
-    working_shape = warp_pad.padded_shape(volume_work.shape)
 
     tform_warp = affine_with_source_offset(tform_aff, atlas_crop_start)
     t0 = time.perf_counter()
-    tvaffine = warp_volume_affine(tv, tform_warp, working_shape, order=1)
-    avaffine = warp_volume_affine(av, tform_warp, working_shape, order=0)
+    tvaffine = warp_volume_affine(
+        tv,
+        tform_warp,
+        working_shape,
+        order=1,
+        output_origin=warp_output_origin,
+    )
+    avaffine = warp_volume_affine(
+        av,
+        tform_warp,
+        working_shape,
+        order=0,
+        output_origin=warp_output_origin,
+    )
     affine_warp_elapsed = time.perf_counter() - t0
 
     hi = float(np.quantile(volume_work, 0.999))
     voltoshow = np.clip(volume_work / max(hi, 1e-6) * 255.0, 0, 255).astype(np.uint8)
-    voltoshow_padded = pad_volume_for_warp_canvas(voltoshow, warp_pad)
     save_registration_stage_previews(
         save_path,
         config.sample.name,
-        voltoshow_padded,
+        voltoshow,
         avaffine,
         "affine_registration",
         atlas_provider=atlas_display_provider_from_config(config.atlas),
@@ -535,9 +544,9 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
 
     t0 = time.perf_counter()
     bspline_result = run_bspline_registration(
-        fixed_volume=volume_padded,
+        fixed_volume=volume_work,
         moving_volume=tvaffine,
-        fixed_secondary=volume_secondary_padded,
+        fixed_secondary=volume_secondary_work,
         moving_points_mm=moving_pts_mm,
         fixed_points_mm=fixed_pts_mm,
         output_dir=elastix_temp,
@@ -562,7 +571,7 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
         nearest=True,
     )
     transformix_elapsed = time.perf_counter() - t0
-    avreg = crop_from_warp_canvas(avreg_padded, warp_pad, volume_work.shape)
+    avreg = crop_from_warp_canvas(avreg_padded, warp_pad, inner_shape)
     annotation_label_voxels = int(np.sum(np.rint(avreg) > 1))
     final_landmark_mm = read_elastix_landmark_metric_mm(bspline_result.output_dir)
     final_landmark_vox = (
@@ -574,7 +583,7 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
     save_registration_stage_previews(
         save_path,
         config.sample.name,
-        voltoshow_padded,
+        voltoshow,
         avreg_padded,
         "bspline_registration",
         atlas_provider=atlas_display_provider_from_config(config.atlas),
