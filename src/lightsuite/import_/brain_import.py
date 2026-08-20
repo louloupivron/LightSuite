@@ -35,6 +35,11 @@ from lightsuite.import_.transform import (
 )
 from lightsuite.preprocess.checkpoint import RegOptsCheckpoint
 from lightsuite.preprocess.slice_ops import output_xy_shape, output_z_count
+from lightsuite.registration.brain_paths import (
+    IMPORT_ANNOTATIONS_TEMP,
+    brain_work_dir,
+    cleanup_brain_work,
+)
 from lightsuite.registration.points import volume_indices_to_cloud_xyz
 
 console = Console()
@@ -236,8 +241,7 @@ def run_brain_import_annotations(
         raise FileNotFoundError(msg)
 
     output_dir = save_path / "volume_registered"
-    temp_root = save_path / "import_annotations_temp"
-    temp_root.mkdir(parents=True, exist_ok=True)
+    temp_root = brain_work_dir(save_path, IMPORT_ANNOTATIONS_TEMP)
 
     importer = BrainAnnotationImporter(
         transform_params=_load_transform_params(save_path),
@@ -247,7 +251,10 @@ def run_brain_import_annotations(
         temp_dir=temp_root,
         write_csv=write_csv_resolved,
     )
-    results = run_annotation_import(specs, importer=importer, output_dir=output_dir)
+    try:
+        results = run_annotation_import(specs, importer=importer, output_dir=output_dir)
+    finally:
+        cleanup_brain_work(save_path, IMPORT_ANNOTATIONS_TEMP)
     if config.analysis.count_points:
         from lightsuite.analysis.brain_runner import maybe_refresh_brain_region_stats
 

@@ -13,7 +13,10 @@ from rich.console import Console
 from scipy.spatial.distance import cdist
 
 from lightsuite.atlas.io import load_atlas_volume
-from lightsuite.atlas.registry import atlas_display_provider_from_config, resolve_brain_atlas_content
+from lightsuite.atlas.registry import (
+    atlas_display_provider_from_config,
+    resolve_brain_atlas_content,
+)
 from lightsuite.config.models import BrainPipelineConfig
 from lightsuite.gui.affine import (
     affine_point_errors,
@@ -22,14 +25,39 @@ from lightsuite.gui.affine import (
     transform_points,
     transform_points_inverse,
 )
-from lightsuite.registration.points import cloud_xyz_to_volume_indices
-from lightsuite.registration.warp import swap_xy_transform, warp_sample_to_atlas
+from lightsuite.gui.brain_data import load_slice_correspondence
 from lightsuite.gui.control_points import (
     ControlPointSession,
     default_session_path,
     load_registration_control_point_session,
 )
 from lightsuite.preprocess.checkpoint import RegOptsCheckpoint
+from lightsuite.registration.brain_paths import (
+    AFFINE_FIT_STATS_FILENAME,
+    CORRESPONDENCE_AFFINE_STATS_FILENAME,
+    CORRESPONDENCE_LANDMARK_STATS_FILENAME,
+    ELASTIX_INVERSE_TEMP,
+    ELASTIX_TEMP,
+    REGISTRATION_DIAGNOSTICS_FILENAME,
+    TRANSFORMIX_ANNOTATION_TEMP,
+    brain_qc_file,
+    brain_qc_previews_dir,
+    brain_work_dir,
+    cleanup_brain_work,
+    cleanup_legacy_brain_work,
+)
+from lightsuite.registration.canvas import (
+    WarpCanvasPadding,
+    apply_canvas_sample_crop,
+    compute_registration_canvas,
+    crop_from_warp_canvas,
+    offset_volume_indices,
+)
+from lightsuite.registration.coordinates import affine_with_source_offset
+from lightsuite.registration.correspondence_affine import (
+    append_correspondence_bspline_landmarks,
+    apply_slice_correspondence_affine,
+)
 from lightsuite.registration.elastix.invert import (
     invert_elastix_transform,
     write_inverted_transform_copy,
@@ -40,12 +68,8 @@ from lightsuite.registration.elastix.runner import (
     run_bspline_registration,
     run_transformix,
 )
-from lightsuite.gui.brain_data import load_slice_correspondence
-from lightsuite.registration.correspondence_affine import (
-    append_correspondence_bspline_landmarks,
-    apply_slice_correspondence_affine,
-)
 from lightsuite.registration.plots import save_registration_stage_previews
+from lightsuite.registration.points import cloud_xyz_to_volume_indices
 from lightsuite.registration.points_utils import thin_point_list
 from lightsuite.registration.register_diagnostics import (
     RegistrationDiagnostics,
@@ -57,21 +81,9 @@ from lightsuite.registration.volume import (
     permute_brain_volume,
     resize_atlas_volume,
 )
-from lightsuite.registration.canvas import (
-    RegistrationCanvas,
-    WarpCanvasPadding,
-    apply_canvas_sample_crop,
-    compute_registration_canvas,
-    crop_from_warp_canvas,
-    offset_volume_indices,
-)
-from lightsuite.registration.coordinates import affine_with_source_offset
-
-from lightsuite.registration.warp import warp_volume_affine
+from lightsuite.registration.warp import swap_xy_transform, warp_sample_to_atlas, warp_volume_affine
 
 console = Console()
-REGISTRATION_DIAGNOSTICS_FILENAME = "registration_diagnostics.json"
-
 
 def _auto_atlas_cloud_to_affine_native(cloud_xyz: np.ndarray, *, downfac: float) -> np.ndarray:
     """Map init-registration atlas cloud (x,y,z) to affine-fit native atlas (Y,X,Z).
@@ -120,7 +132,9 @@ class AffineFitDiagnostics:
 
     def save(self, path: Path) -> None:
         path = path.expanduser()
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(self.to_dict(), indent=2), encoding="utf-8")
+
 
 @dataclass
 class TransformParamsCheckpoint:
@@ -381,7 +395,7 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
     tform_aff, cpaffine, cptshistology, cpwt, affine_diag = _prepare_control_points(
         checkpoint, session, config
     )
-    affine_diag.save(save_path / "affine_fit_stats.json")
+    affine_diag.save(brain_qc_file(save_path, AFFINE_FIT_STATS_FILENAME))
 
     atlas_content = resolve_brain_atlas_content(
         config.atlas,
@@ -432,7 +446,7 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
         downfac=downfac,
         enabled=config.registration.use_slice_correspondence_affine,
     )
-    corr_affine_stats.save(save_path / "correspondence_affine_stats.json")
+    corr_affine_stats.save(brain_qc_file(save_path, CORRESPONDENCE_AFFINE_STATS_FILENAME))
     if corr_affine_stats.applied:
         landmark_atlas = transform_points_inverse(cpaffine, tform_aff_before_corr)
         cpaffine = transform_points(landmark_atlas, tform_aff)
@@ -462,7 +476,7 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
         max_landmarks=config.registration.correspondence_landmark_max_count,
         enabled=config.registration.use_slice_correspondence_landmarks,
     )
-    corr_landmark_stats.save(save_path / "correspondence_landmark_stats.json")
+    corr_landmark_stats.save(brain_qc_file(save_path, CORRESPONDENCE_LANDMARK_STATS_FILENAME))
     if corr_landmark_stats.applied:
         cpwt = max(cpwt, config.registration.correspondence_landmark_weight)
         console.print(
@@ -525,8 +539,9 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
 
     hi = float(np.quantile(volume_work, 0.999))
     voltoshow = np.clip(volume_work / max(hi, 1e-6) * 255.0, 0, 255).astype(np.uint8)
+    preview_dir = brain_qc_previews_dir(save_path)
     save_registration_stage_previews(
-        save_path,
+        preview_dir,
         config.sample.name,
         voltoshow,
         avaffine,
@@ -534,7 +549,7 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
         atlas_provider=atlas_display_provider_from_config(config.atlas),
     )
 
-    elastix_temp = save_path / "elastix_temp"
+    elastix_temp = brain_work_dir(save_path, ELASTIX_TEMP)
     cptshistology_work = cptshistology
     if reg_canvas.sample_crop_start != (0, 0, 0):
         cptshistology_work = cptshistology_work - np.asarray(reg_canvas.sample_crop_start, float)
@@ -563,10 +578,11 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
     bspline_elapsed = time.perf_counter() - t0
 
     t0 = time.perf_counter()
+    annotation_temp = brain_work_dir(save_path, TRANSFORMIX_ANNOTATION_TEMP)
     avreg_padded = run_transformix(
         moving_volume=np.rint(avaffine).astype(np.int32),
         transform_path=bspline_result.transform_path,
-        output_dir=save_path / "transformix_annotation_temp",
+        output_dir=annotation_temp,
         spacing_mm=spacing_mm,
         nearest=True,
     )
@@ -581,7 +597,7 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
     )
 
     save_registration_stage_previews(
-        save_path,
+        preview_dir,
         config.sample.name,
         voltoshow,
         avreg_padded,
@@ -589,7 +605,7 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
         atlas_provider=atlas_display_provider_from_config(config.atlas),
     )
 
-    inverse_dir = save_path / "elastix_inverse_temp"
+    inverse_dir = brain_work_dir(save_path, ELASTIX_INVERSE_TEMP)
     inverted = invert_elastix_transform(elastix_temp, inverse_dir)
     if (inverse_dir / "inversion_parameters_gentle.txt").is_file():
         console.print(
@@ -647,7 +663,7 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
         status_message=status_message,
         warnings=warnings,
     )
-    diag_path = save_path / REGISTRATION_DIAGNOSTICS_FILENAME
+    diag_path = brain_qc_file(save_path, REGISTRATION_DIAGNOSTICS_FILENAME)
     diagnostics.save(diag_path)
     diagnostics.print_summary(console=console)
 
@@ -681,8 +697,12 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
     )
     out_json = save_path / "transform_params.json"
     transform_params.save(out_json)
+    cleanup_brain_work(save_path, ELASTIX_TEMP)
+    cleanup_brain_work(save_path, ELASTIX_INVERSE_TEMP)
+    cleanup_brain_work(save_path, TRANSFORMIX_ANNOTATION_TEMP)
+    cleanup_legacy_brain_work(save_path)
     console.print(
-        f"[dim]Checkpoint {out_json.name} · diagnostics {diag_path.name} · "
-        f"affine_fit_stats.json · load {load_elapsed:.1f}s[/dim]"
+        f"[dim]Checkpoint {out_json.name} · diagnostics {diag_path.relative_to(save_path)} · "
+        f"{AFFINE_FIT_STATS_FILENAME} · load {load_elapsed:.1f}s[/dim]"
     )
     return out_json

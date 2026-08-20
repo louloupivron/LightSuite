@@ -76,9 +76,10 @@ def test_initialize_brain_registration(tmp_path: Path) -> None:
     assert len(result.original_trans) == 4
     assert result.downfac_reg == 0.5
     assert result.autocpsample is not None
-    assert (save / "dim1_initial_registration.png").is_file()
-    assert (save / "dim1_initial_registration.png").stat().st_size > 10_000
-    diag_path = save / "init_registration_diagnostics.json"
+    preview = save / "qc" / "previews" / "dim1_initial_registration.png"
+    assert preview.is_file()
+    assert preview.stat().st_size > 10_000
+    diag_path = save / "qc" / "init_registration_diagnostics.json"
     assert diag_path.is_file()
     diag = json.loads(diag_path.read_text(encoding="utf-8"))
     assert diag["status"] in {"good", "moderate", "poor", "failed"}

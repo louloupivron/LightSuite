@@ -25,8 +25,8 @@ from lightsuite.atlas.registry import (
     uses_ccf_id_parcellation,
 )
 from lightsuite.config.models import BrainPipelineConfig
-from lightsuite.export.brain_sample_space import export_brain_sample_space
 from lightsuite.export.atlas_space import transform_volume_to_atlas
+from lightsuite.export.brain_sample_space import export_brain_sample_space
 from lightsuite.export.parcellation import (
     compute_allen_parcellation,
     compute_perens_parcellation,
@@ -34,6 +34,12 @@ from lightsuite.export.parcellation import (
 )
 from lightsuite.io.tiff_write import save_registration_volume
 from lightsuite.preprocess.checkpoint import RegOptsCheckpoint
+from lightsuite.registration.brain_paths import (
+    TRANSFORMIX_EXPORT_TEMP,
+    brain_work_dir,
+    cleanup_brain_work,
+    cleanup_legacy_brain_work,
+)
 from lightsuite.registration.brain_register import TransformParamsCheckpoint
 from lightsuite.registration.volume import load_registration_volume
 
@@ -123,8 +129,7 @@ def export_registered_brain_volumes(
     if "atlas" in export_spaces:
         console.print("Applying transforms to registration volumes (atlas space)...")
         t0 = time.perf_counter()
-        transformix_root = save_path / "transformix_export_temp"
-        transformix_root.mkdir(parents=True, exist_ok=True)
+        transformix_root = brain_work_dir(save_path, TRANSFORMIX_EXPORT_TEMP)
 
         for ichan, volpath in sorted(channel_paths.items()):
             console.print(f"Registering channel {ichan}: {volpath.name}")
@@ -142,6 +147,7 @@ def export_registered_brain_volumes(
                 save_registration_volume(registered, out_path)
                 registered_paths[ichan] = out_path
             console.print(f"Channel {ichan}/{n_chans} done in {time.perf_counter() - t0:.1f}s.")
+        cleanup_brain_work(save_path, TRANSFORMIX_EXPORT_TEMP)
     else:
         console.print("[dim]Skipping atlas-space volume warp (export.spaces).[/dim]")
 
@@ -255,6 +261,7 @@ def export_registered_brain_volumes(
             region_table=region_table,
         )
 
+    cleanup_legacy_brain_work(save_path)
     console.print(f"[green]Export complete.[/green] Output under {save_path}")
     return BrainExportResult(
         registered_volumes=registered_paths,

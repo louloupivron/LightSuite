@@ -6,6 +6,7 @@ import json
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
@@ -13,9 +14,8 @@ from rich.console import Console
 
 from lightsuite.analysis.brain_runner import maybe_write_brain_sample_region_stats
 from lightsuite.analysis.division_map import ensure_division_map
-from lightsuite.analysis.ontology import RegionTable, load_region_table
+from lightsuite.analysis.ontology import RegionTable
 from lightsuite.analysis.region_stats import (
-    concat_tidy,
     parcellation_result_to_tidy,
     write_region_stats_csv,
 )
@@ -32,6 +32,11 @@ from lightsuite.export.parcellation import (
 from lightsuite.export.sample_space import transform_atlas_volume_to_sample
 from lightsuite.io.tiff_write import save_registration_volume
 from lightsuite.preprocess.checkpoint import RegOptsCheckpoint
+from lightsuite.registration.brain_paths import (
+    TRANSFORMIX_SAMPLE_EXPORT_TEMP,
+    brain_work_dir,
+    cleanup_brain_work,
+)
 from lightsuite.registration.brain_register import TransformParamsCheckpoint
 from lightsuite.registration.plots import boundary_volume_from_annotation
 from lightsuite.registration.volume import (
@@ -39,6 +44,9 @@ from lightsuite.registration.volume import (
     load_registration_volume,
     permute_brain_volume,
 )
+
+if TYPE_CHECKING:
+    from lightsuite.gui.brain_view_data import BrainViewVolumes
 
 console = Console()
 
@@ -96,54 +104,56 @@ def export_brain_sample_space(
     atlas = resolve_brain_atlas_from_config(config.atlas)
     spacing_mm = checkpoint.registres_um * 1e-3
     registres_um = float(checkpoint.registres_um)
-    transformix_root = save_path / "transformix_sample_export_temp"
-    transformix_root.mkdir(parents=True, exist_ok=True)
+    transformix_root = brain_work_dir(save_path, TRANSFORMIX_SAMPLE_EXPORT_TEMP)
 
     console.print("Warping atlas volumes to sample registration grid...")
     t0 = time.perf_counter()
 
-    av_native = load_atlas_volume(atlas.annotation_path)
-    annotation_sample = transform_atlas_volume_to_sample(
-        av_native,
-        transform_params,
-        save_path=save_path,
-        spacing_mm=spacing_mm,
-        temp_dir=transformix_root / "annotation",
-        nearest=True,
-    )
-
-    tv_native = load_atlas_volume(atlas.template_path)
-    template_sample = transform_atlas_volume_to_sample(
-        tv_native,
-        transform_params,
-        save_path=save_path,
-        spacing_mm=spacing_mm,
-        temp_dir=transformix_root / "template",
-        nearest=False,
-    )
-
-    if atlas.boundary_path is not None and atlas.boundary_path.is_file():
-        boundary_native = load_atlas_volume(atlas.boundary_path)
-        boundary_sample = transform_atlas_volume_to_sample(
-            boundary_native,
+    try:
+        av_native = load_atlas_volume(atlas.annotation_path)
+        annotation_sample = transform_atlas_volume_to_sample(
+            av_native,
             transform_params,
             save_path=save_path,
             spacing_mm=spacing_mm,
-            temp_dir=transformix_root / "boundary",
+            temp_dir=transformix_root / "annotation",
             nearest=True,
         )
-    else:
-        boundary_sample = boundary_volume_from_annotation(annotation_sample)
 
-    division_result = ensure_division_map(atlas)
-    division_sample = transform_atlas_volume_to_sample(
-        division_result.labels.astype(np.float32),
-        transform_params,
-        save_path=save_path,
-        spacing_mm=spacing_mm,
-        temp_dir=transformix_root / "division",
-        nearest=True,
-    )
+        tv_native = load_atlas_volume(atlas.template_path)
+        template_sample = transform_atlas_volume_to_sample(
+            tv_native,
+            transform_params,
+            save_path=save_path,
+            spacing_mm=spacing_mm,
+            temp_dir=transformix_root / "template",
+            nearest=False,
+        )
+
+        if atlas.boundary_path is not None and atlas.boundary_path.is_file():
+            boundary_native = load_atlas_volume(atlas.boundary_path)
+            boundary_sample = transform_atlas_volume_to_sample(
+                boundary_native,
+                transform_params,
+                save_path=save_path,
+                spacing_mm=spacing_mm,
+                temp_dir=transformix_root / "boundary",
+                nearest=True,
+            )
+        else:
+            boundary_sample = boundary_volume_from_annotation(annotation_sample)
+
+        division_result = ensure_division_map(atlas)
+        division_sample = transform_atlas_volume_to_sample(
+            division_result.labels.astype(np.float32),
+            transform_params,
+            save_path=save_path,
+            spacing_mm=spacing_mm,
+            temp_dir=transformix_root / "division",
+            nearest=True,
+        )
+    finally:
+        cleanup_brain_work(save_path, TRANSFORMIX_SAMPLE_EXPORT_TEMP)
 
     if save_volume:
         save_registration_volume(
@@ -335,7 +345,7 @@ def load_brain_sample_space_inspect_volumes(
     config: BrainPipelineConfig,
     *,
     paths: BrainSampleSpaceInspectPaths | None = None,
-) -> "BrainViewVolumes":
+) -> BrainViewVolumes:
     """Load registration-grid channels, warped atlas overlays, and sample imports."""
     from lightsuite.analysis.counts import SAMPLE_POINTS_KEY, load_atlas_points
     from lightsuite.export.brain_export import _load_transform_params

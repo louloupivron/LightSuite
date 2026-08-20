@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import csv
-import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -14,16 +13,15 @@ import pandas as pd
 
 from lightsuite.analysis.counts import SAMPLE_POINTS_KEY, load_atlas_points
 from lightsuite.analysis.division_map import ensure_division_map
-from lightsuite.atlas.registry import (
-    atlas_display_provider_from_config,
-    resolve_brain_atlas_from_config,
-    resolve_brain_atlas_with_config,
-)
 from lightsuite.atlas.display import (
     atlas_points_xyz_to_napari_zyx,
     atlas_volume_yxz_to_napari_zyx,
     registration_points_xyz_to_napari_zyx,
     registration_volume_yxz_to_napari_zyx,
+)
+from lightsuite.atlas.registry import (
+    resolve_brain_atlas_from_config,
+    resolve_brain_atlas_with_config,
 )
 from lightsuite.config.models import BrainPipelineConfig
 from lightsuite.export.brain_export import _load_transform_params
@@ -44,6 +42,13 @@ from lightsuite.import_.orchestrator import slug_for_label
 from lightsuite.import_.sample_reference import load_sample_reference
 from lightsuite.import_.transform import sample_points_to_registration_voxels
 from lightsuite.preprocess.checkpoint import RegOptsCheckpoint
+from lightsuite.registration.brain_paths import (
+    REGISTRATION_DIAGNOSTICS_FILENAME,
+    TRANSFORMIX_VIEW_TEMP,
+    brain_work_dir,
+    cleanup_brain_work,
+    resolve_brain_qc_file,
+)
 from lightsuite.registration.points import volume_indices_to_cloud_xyz
 from lightsuite.registration.register_diagnostics import RegistrationDiagnostics
 from lightsuite.registration.volume import (
@@ -143,7 +148,7 @@ def _discover_brain_view_paths_sample(config: BrainPipelineConfig) -> BrainViewP
     except (FileNotFoundError, OSError, ValueError):
         pass
 
-    diagnostics_path = save_path / "registration_diagnostics.json"
+    diagnostics_path = resolve_brain_qc_file(save_path, REGISTRATION_DIAGNOSTICS_FILENAME)
     if not diagnostics_path.is_file():
         diagnostics_path = None
 
@@ -227,7 +232,7 @@ def _discover_brain_view_paths_atlas(config: BrainPipelineConfig) -> BrainViewPa
         )
         raise FileNotFoundError(msg)
 
-    diagnostics_path = save_path / "registration_diagnostics.json"
+    diagnostics_path = resolve_brain_qc_file(save_path, REGISTRATION_DIAGNOSTICS_FILENAME)
     return BrainViewPaths(
         volume_registered_dir=vr.resolve() if vr.is_dir() else save_path,
         template_path=atlas.template_path.resolve(),
@@ -391,28 +396,30 @@ def _warp_registration_channels_for_atlas_inspect(
 
     permute = transform_params.permute_sample_to_atlas or [1, 2, 3]
     spacing_mm = checkpoint.registres_um * 1e-3
-    transformix_root = save_path / "transformix_view_registration_temp"
-    transformix_root.mkdir(parents=True, exist_ok=True)
+    transformix_root = brain_work_dir(save_path, TRANSFORMIX_VIEW_TEMP)
 
     registered_channels: dict[int, np.ndarray] = {}
-    for ichan, volpath in sorted(channel_paths.items()):
-        if not volpath.is_file():
-            continue
-        volume = load_registration_volume(volpath)
-        registered = transform_volume_to_atlas(
-            volume,
-            transform_params,
-            permute=permute,
-            spacing_mm=spacing_mm,
-            temp_dir=transformix_root / f"chan_{ichan:02d}",
-        )
-        if tuple(registered.shape) != expected_shape:
-            msg = (
-                f"On-the-fly atlas warp for {volpath.name} produced shape "
-                f"{registered.shape}, expected {expected_shape}."
+    try:
+        for ichan, volpath in sorted(channel_paths.items()):
+            if not volpath.is_file():
+                continue
+            volume = load_registration_volume(volpath)
+            registered = transform_volume_to_atlas(
+                volume,
+                transform_params,
+                permute=permute,
+                spacing_mm=spacing_mm,
+                temp_dir=transformix_root / f"chan_{ichan:02d}",
             )
-            raise ValueError(msg)
-        registered_channels[ichan] = registered.astype(np.float32, copy=False)
+            if tuple(registered.shape) != expected_shape:
+                msg = (
+                    f"On-the-fly atlas warp for {volpath.name} produced shape "
+                    f"{registered.shape}, expected {expected_shape}."
+                )
+                raise ValueError(msg)
+            registered_channels[ichan] = registered.astype(np.float32, copy=False)
+    finally:
+        cleanup_brain_work(save_path, TRANSFORMIX_VIEW_TEMP)
     return registered_channels
 
 

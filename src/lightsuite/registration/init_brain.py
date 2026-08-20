@@ -5,12 +5,15 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from lightsuite.atlas.io import load_atlas_volume
-from lightsuite.atlas.trim import save_atlas_manifest_copy
 import numpy as np
 from rich.console import Console
 
-from lightsuite.atlas.registry import atlas_display_provider_from_config, resolve_brain_atlas_content
+from lightsuite.atlas.io import load_atlas_volume
+from lightsuite.atlas.registry import (
+    atlas_display_provider_from_config,
+    resolve_brain_atlas_content,
+)
+from lightsuite.atlas.trim import save_atlas_manifest_copy
 from lightsuite.config.models import BrainPipelineConfig
 from lightsuite.preprocess.checkpoint import RegOptsCheckpoint
 from lightsuite.registration.align import (
@@ -21,15 +24,23 @@ from lightsuite.registration.align import (
     triage_and_match_clouds,
 )
 from lightsuite.registration.bcpd import find_bcpd_executable
+from lightsuite.registration.brain_paths import (
+    INIT_DIAGNOSTICS_FILENAME,
+    brain_qc_file,
+    brain_qc_previews_dir,
+)
 from lightsuite.registration.init_diagnostics import (
     InitRegistrationDiagnostics,
     classify_init_registration_status,
 )
-from lightsuite.registration.orientation import orientation_path, resolve_orientation, save_orientation
+from lightsuite.registration.orientation import (
+    orientation_path,
+    resolve_orientation,
+    save_orientation,
+)
 from lightsuite.registration.plots import save_initial_registration_previews
 from lightsuite.registration.points import (
     extract_atlas_points_gradient,
-    extract_sample_points,
     extract_sample_points_stages,
 )
 from lightsuite.registration.volume import (
@@ -40,7 +51,6 @@ from lightsuite.registration.volume import (
 )
 
 console = Console()
-INIT_DIAGNOSTICS_FILENAME = "init_registration_diagnostics.json"
 
 
 def initialize_brain_registration(config: BrainPipelineConfig) -> RegOptsCheckpoint:
@@ -128,8 +138,9 @@ def initialize_brain_registration(config: BrainPipelineConfig) -> RegOptsCheckpo
     triage_elapsed = time.perf_counter() - t0
 
     t0 = time.perf_counter()
+    preview_dir = brain_qc_previews_dir(save_path)
     warped_boundary = save_initial_registration_previews(
-        save_path,
+        preview_dir,
         volumereg,
         avreg,
         transform_matlab,
@@ -185,11 +196,11 @@ def initialize_brain_registration(config: BrainPipelineConfig) -> RegOptsCheckpo
         status_message=status_message,
         warnings=warnings,
     )
-    diag_path = save_path / INIT_DIAGNOSTICS_FILENAME
+    diag_path = brain_qc_file(save_path, INIT_DIAGNOSTICS_FILENAME)
     diagnostics.save(diag_path)
     diagnostics.print_summary(console=console)
     console.print(
-        f"[dim]Checkpoint {regopts_path.name} · diagnostics {diag_path.name} · "
+        f"[dim]Checkpoint {regopts_path.name} · diagnostics {diag_path.relative_to(save_path)} · "
         f"cloud extraction {sample_cloud_elapsed + atlas_cloud_elapsed:.1f}s[/dim]"
     )
 
