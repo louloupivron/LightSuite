@@ -2,10 +2,42 @@
 
 from __future__ import annotations
 
+from io import StringIO
+
+from rich.console import Console
+
 from lightsuite.registration.register_diagnostics import (
+    RegistrationDiagnostics,
     classify_registration_status,
     landmark_mm_to_vox,
 )
+
+
+def test_register_print_summary_is_status_only() -> None:
+    diag = RegistrationDiagnostics(
+        sample_shape=[10, 10, 10],
+        atlas_shape=[8, 8, 8],
+        orientation=[1, 2, 3],
+        registration_resolution_um=20.0,
+        n_manual_pairs=0,
+        n_auto_pairs=32,
+        n_landmark_pairs=32,
+        control_point_weight=0.1,
+        use_multistep=True,
+        use_dual_channel_mi=False,
+        bspline_spatial_scale_mm=0.64,
+        status="poor",
+        status_message="Registration quality is low — review previews and add manual landmarks.",
+        warnings=["Auto-only landmarks — consider match-points for difficult samples."],
+    )
+    buf = StringIO()
+    diag.print_summary(console=Console(file=buf, force_terminal=False, width=80, color_system=None))
+    text = buf.getvalue()
+    assert "POOR" in text
+    assert "Registration quality is low" in text
+    assert "Warning:" in text
+    assert "Control points" not in text
+    assert "Affine fit" not in text
 
 
 def test_landmark_mm_to_vox_at_20um() -> None:

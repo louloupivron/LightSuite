@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Literal
 
 from rich.console import Console
-from rich.panel import Panel
 
 InitRegistrationStatus = Literal["good", "moderate", "poor", "failed"]
 
@@ -75,63 +74,11 @@ class InitRegistrationDiagnostics:
         return cls(**raw)
 
     def print_summary(self, *, console: Console | None = None) -> None:
+        """Log GOOD/MODERATE/POOR/FAILED plus the status comment (metrics stay in JSON)."""
         out = console or Console()
-        sy, sx, sz = self.sample_shape
-        ay, ax, az = self.atlas_shape
-        lines = [
-            f"[bold]Volumes[/bold]  sample {sy}×{sx}×{sz}  ·  atlas {ay}×{ax}×{az}  "
-            f"@ {self.registration_resolution_um:g} µm",
-            f"[bold]Orientation[/bold]  {self.orientation}",
-            (
-                f"[bold]Point clouds[/bold]  sample {self.sample_cloud_points:,}  ·  "
-                f"atlas {self.atlas_cloud_points:,}  "
-                f"(threshold {self.cloud_threshold:g}, subsample {self.sample_cloud_subsample:g})"
-            ),
-            (
-                f"[bold]Similarity[/bold]  {self.alignment_backend.upper()}  ·  "
-                f"scale {self.similarity_scale:.3f}  ·  {self.alignment_elapsed_s:.1f}s"
-            ),
-        ]
-        if self.sample_mask_points is not None:
-            lines.insert(
-                4,
-                (
-                    "[dim]Sample extract stages[/dim]  "
-                    f"mask {self.sample_mask_points:,}  ·  trim {self.sample_trim_points:,}  ·  "
-                    f"down {self.sample_downsample_points:,}  ·  denoise {self.sample_denoise_points:,}"
-                ),
-            )
-        lines.extend(
-            [
-            "",
-            "[bold]Coarse fit[/bold]  (median / p95 NN distance, voxels)",
-            (
-                f"  sample → atlas   {self.median_error_sample_to_atlas_vox:5.1f}  /  "
-                f"{self.p95_error_sample_to_atlas_vox:5.1f}"
-            ),
-            (
-                f"  atlas → sample   {self.median_error_atlas_to_sample_vox:5.1f}  /  "
-                f"{self.p95_error_atlas_to_sample_vox:5.1f}"
-            ),
-            (
-                f"  combined median  {self.median_error_vox:5.1f}  ·  "
-                f"inliers ≤{self.inlier_threshold_vox:g} vox: {self.inlier_fraction * 100:.0f}%"
-            ),
-            "",
-            (
-                f"[bold]Auto pairs[/bold]  {self.auto_pairs:,}  "
-                f"({self.triage_elapsed_s:.1f}s)  ·  "
-                f"[bold]Preview edges[/bold]  {self.warped_boundary_voxels:,} voxels "
-                f"({self.preview_elapsed_s:.1f}s)"
-            ),
-            ]
-        )
         style = _STATUS_STYLE[self.status]
         label = _STATUS_LABEL[self.status]
-        lines.append("")
-        lines.append(f"[bold]Status[/bold]  [{style}]{label}[/{style}] — {self.status_message}")
-
-        out.print(Panel("\n".join(lines), title="Init registration", border_style=style))
+        out.print(f"[{style}]{label}[/{style}] — {self.status_message}")
         for warning in self.warnings:
             out.print(f"[yellow]Warning:[/yellow] {warning}")
 
