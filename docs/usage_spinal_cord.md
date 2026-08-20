@@ -103,6 +103,7 @@ analysis:
 Outputs under `volume_registered/`:
 
 - `region_stats.csv` — combined long-form table (intensities + cell counts)
+- `region_stats_top{N}.csv` — wide top-N leaf regions per channel (default N=10)
 - `chan{NN}_region_stats.csv` — per-channel intensity table
 - `{label}_region_counts.csv` — per-import-label cell count table
 
@@ -229,6 +230,7 @@ Under `<sample.save_path>/`:
 | `sample_reference.json` | preprocess |
 | `{label}_atlas_coords.npz` | import-annotations |
 | `region_stats.csv` | region-stats |
+| `region_stats_top{N}.csv` | region-stats |
 | `region_stats_division.csv` | region-stats (rollup) |
 | `region_stats_structure.csv` | region-stats (rollup) |
 | `chan{NN}_region_stats.csv` | region-stats (intensity) |

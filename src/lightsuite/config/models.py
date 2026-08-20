@@ -9,6 +9,7 @@ from typing import Annotated
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from lightsuite.analysis.intensity_metrics import DEFAULT_INTENSITY_METRICS, normalize_intensity_metrics
+from lightsuite.analysis.region_stats import METRICS
 
 
 class SourceFormat(str, Enum):
@@ -384,6 +385,18 @@ class AnalysisConfig(BaseModel):
         default=False,
         description="When split_hemispheres is true, also emit whole-cord summary rows.",
     )
+    top_n_regions: int = Field(
+        default=10,
+        ge=0,
+        description="Write region_stats_top{N}.csv next to region_stats.csv (0 disables).",
+    )
+    top_n_rank_by: str | None = Field(
+        default=None,
+        description=(
+            "Metric used to rank regions for the top-N CSV. Default: cell_count when "
+            "present, otherwise the first intensity metric."
+        ),
+    )
 
     @field_validator("intensity_metrics", mode="before")
     @classmethod
@@ -396,6 +409,19 @@ class AnalysisConfig(BaseModel):
             msg = "analysis.intensity_metrics must be a list of metric names"
             raise ValueError(msg)
         return normalize_intensity_metrics(value)
+
+    @field_validator("top_n_rank_by", mode="before")
+    @classmethod
+    def validate_top_n_rank_by(cls, value: object) -> str | None:
+        if value is None:
+            return None
+        key = str(value).strip()
+        if not key:
+            return None
+        if key not in METRICS:
+            msg = f"analysis.top_n_rank_by must be one of: {', '.join(METRICS)}"
+            raise ValueError(msg)
+        return key
 
 
 class AnnotationFormat(str, Enum):

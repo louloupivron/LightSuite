@@ -41,13 +41,15 @@ volume_registered/
 ├── chan_01_registered_atlas.tif      # atlas space
 ├── chan01_region_stats.csv           # atlas-space intensities
 ├── region_stats.csv                  # atlas-space combined stats
+├── region_stats_top10.csv            # wide top-N regions per channel
 ├── sample_space/
 │   ├── annotation_in_sample_20um.tif
 │   ├── template_in_sample_20um.tif
 │   ├── division_labels_in_sample_20um.tif
 │   ├── sample_space_manifest.json
 │   ├── chan01_region_stats_sample.csv
-│   └── region_stats_sample.csv
+│   ├── region_stats_sample.csv
+│   └── region_stats_sample_top10.csv
 ├── {label}_atlas_coords.npz
 ├── {label}_sample_coords.npz         # key: regptcoords
 └── {label}_in_sample_20um.tif        # masks only

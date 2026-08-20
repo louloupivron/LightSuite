@@ -102,3 +102,8 @@ def test_finalize_brain_region_stats_merges_point_counts(tmp_path: Path) -> None
     combined = pd.read_csv(stats.combined_path)
     assert set(combined["metric"]) >= {"median_intensity", "volume_mm3", "cell_count"}
     assert list(combined.columns) == TIDY_COLUMNS
+    assert stats.top_n_path is not None
+    top = pd.read_csv(stats.top_n_path)
+    assert stats.top_n_path.name == "region_stats_top10.csv"
+    assert "rank" in top.columns
+    assert set(top["channel"].astype(str)) >= {"1", "cells"}

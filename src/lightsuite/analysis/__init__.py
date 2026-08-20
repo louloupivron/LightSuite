@@ -21,6 +21,7 @@ from lightsuite.analysis.region_stats import (
     tidy_to_wide,
     write_region_stats_csv,
 )
+from lightsuite.analysis.top_regions import maybe_write_top_n_regions_csv, top_n_regions_wide
 
 __all__ = [
     "METRICS",
@@ -33,7 +34,9 @@ __all__ = [
     "hemisphere_side_volume",
     "load_atlas_points",
     "load_region_table",
+    "maybe_write_top_n_regions_csv",
     "parcellation_result_to_tidy",
     "tidy_to_wide",
+    "top_n_regions_wide",
     "write_region_stats_csv",
 ]

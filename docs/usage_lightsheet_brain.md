@@ -394,6 +394,7 @@ Flags override YAML defaults:
 - `chan{NN}_intensities.csv` — regional median intensity, std, volume per hemisphere
 - `chan{NN}_intensities.json` — same statistics in JSON form
 - `chan{NN}_region_stats_sample.csv` / `region_stats_sample.csv` — sample-space stats when enabled
+- `region_stats.csv` / `region_stats_top{N}.csv` — combined tidy table and wide top-N summary
 
 Allen parcellation CSV export requires `parcellation_to_parcellation_term_membership.csv` (see [Installation](installation.md)).
 
@@ -448,7 +449,8 @@ Atlas-space Napari QC applies the same canonical coronal orientation used in reg
     ├── chan01_intensities.csv          # legacy wide intensity table
     ├── chan01_intensities.json
     ├── chan01_region_stats.csv         # tidy per-channel table (with region names)
-    └── region_stats.csv                # combined tidy table (brain export)
+    ├── region_stats.csv                # combined tidy table (brain export)
+    └── region_stats_top10.csv          # wide top-N regions per channel
 ```
 
 Checkpoints use **JSON** instead of MATLAB `.mat` files. Legacy MATLAB outputs in the same folder are not read automatically — re-run the Python stages to produce JSON checkpoints.
@@ -543,7 +545,7 @@ Outputs land in `volume_registered/` (`*_atlas_coords.npz`, optional CSV, mask T
 
 ## Region statistics (export)
 
-During `brain export` with `--write-csv`, LightSuite writes per-channel intensity parcellation tables and, when `analysis.write_tidy_csv: true` (default), long-form `chanXX_region_stats.csv` files plus a combined `volume_registered/region_stats.csv`.
+During `brain export` with `--write-csv`, LightSuite writes per-channel intensity parcellation tables and, when `analysis.write_tidy_csv: true` (default), long-form `chanXX_region_stats.csv` files plus a combined `volume_registered/region_stats.csv`. A wide `region_stats_top{N}.csv` (default N=10) lists the highest-ranked leaf regions per channel, with the same metrics of interest as columns.
 
 | Column | Notes |
 |--------|-------|
@@ -554,11 +556,11 @@ During `brain export` with `--write-csv`, LightSuite writes per-channel intensit
 | `metric` | `median_intensity`, `std`, `volume_mm3` |
 | `value` | the measurement |
 
-Imported spot coordinates are written by `import-annotations` (`*_atlas_coords.npz`). Per-region **cell counts** and cross-subject **cohort statistics** are MATLAB-only today — see [Python vs MATLAB](python_vs_matlab.md).
-
 ```yaml
 analysis:
   write_tidy_csv: true   # emit chanXX_region_stats.csv during export
+  top_n_regions: 10
+  top_n_rank_by: cell_count  # optional; default is cell_count, else first intensity metric
 ```
 
 ---

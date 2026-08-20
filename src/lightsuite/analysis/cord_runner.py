@@ -25,6 +25,7 @@ from lightsuite.analysis.cord_hemisphere import (
 )
 from lightsuite.analysis.counts import SAMPLE_POINTS_KEY
 from lightsuite.analysis.cord_ontology import load_cord_region_table
+from lightsuite.analysis.top_regions import maybe_write_top_n_regions_csv
 from lightsuite.atlas.fiederling import resolve_fiederling_paths
 from lightsuite.config.models import SpinalCordPipelineConfig
 from lightsuite.export.cord_registered import (
@@ -90,6 +91,7 @@ def maybe_run_cord_region_stats(
 @dataclass
 class CordRegionStatsRunResult:
     combined_path: Path | None = None
+    top_n_path: Path | None = None
     rollup_paths: dict[str, Path] = field(default_factory=dict)
     intensity_channels: list[int] = field(default_factory=list)
     count_labels: list[str] = field(default_factory=list)
@@ -312,12 +314,19 @@ def run_cord_region_stats(
             )
 
     combined_path: Path | None = None
+    top_n_path: Path | None = None
     if atlas_frames:
         combined = pd.concat(atlas_frames, ignore_index=True).reindex(columns=CORD_TIDY_COLUMNS)
         regions_df = pd.read_csv(atlas_paths.regions_csv)
         combined = apply_cord_rollups(combined, regions_df, config.analysis.rollups)
         combined_path = register_path / "region_stats.csv"
         write_cord_region_stats_csv(combined_path, combined)
+        top_n_path = maybe_write_top_n_regions_csv(
+            register_path,
+            combined,
+            n=config.analysis.top_n_regions,
+            rank_by=config.analysis.top_n_rank_by,
+        )
         for level in config.analysis.rollups:
             normalized = str(level).strip().lower()
             if normalized not in ("division", "structure", "horn"):
@@ -332,9 +341,14 @@ def run_cord_region_stats(
 
     if sample_frames:
         sample_combined = pd.concat(sample_frames, ignore_index=True).reindex(columns=CORD_TIDY_COLUMNS)
-        write_cord_region_stats_csv(
-            sample_space_dir(config.sample.save_path.expanduser()) / "region_stats_sample.csv",
+        sample_dir = sample_space_dir(config.sample.save_path.expanduser())
+        write_cord_region_stats_csv(sample_dir / "region_stats_sample.csv", sample_combined)
+        maybe_write_top_n_regions_csv(
+            sample_dir,
             sample_combined,
+            n=config.analysis.top_n_regions,
+            rank_by=config.analysis.top_n_rank_by,
+            sample_space=True,
         )
 
     console.print(
@@ -342,8 +356,13 @@ def run_cord_region_stats(
         f"({len(intensity_channels)} intensity channel(s), {len(count_labels)} point source(s)"
         f"{f', rollups: {sorted(rollup_paths)}' if rollup_paths else ''})"
     )
+    if top_n_path is not None:
+        console.print(
+            f"[green]Top-{config.analysis.top_n_regions} regions:[/green] {top_n_path}"
+        )
     return CordRegionStatsRunResult(
         combined_path=combined_path,
+        top_n_path=top_n_path,
         rollup_paths=rollup_paths,
         intensity_channels=intensity_channels,
         count_labels=count_labels,

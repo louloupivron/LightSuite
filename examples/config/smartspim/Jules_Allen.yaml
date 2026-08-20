@@ -71,3 +71,5 @@ analysis:
     - std
     - volume_mm3
   count_points: true
+  top_n_regions: 10
+  top_n_rank_by: cell_count

@@ -153,6 +153,8 @@ LightSuite configs are YAML files validated by Pydantic models in `src/lightsuit
 | `analysis.split_hemispheres` | YAML | YAML | — | `false` | Spinal: left/right using `Hemisphere_Annotation.tif` |
 | `analysis.hemisphere_flip` | YAML | YAML | — | `false` | Swap L/R for Fiederling hemisphere mask |
 | `analysis.hemisphere_keep_whole` | YAML | YAML | — | `false` | Also emit whole-cord rows when splitting hemispheres |
+| `analysis.top_n_regions` | YAML | YAML | — | `10` | Write `region_stats_top{N}.csv` (0 disables) |
+| `analysis.top_n_rank_by` | YAML | YAML | — | per channel: `cell_count` if present else first intensity metric | Preferred ranking metric for the top-N CSV |
 
 **GUI intensity metric checkboxes:** Median, Mean, Std, Variance, Volume mm³.
 

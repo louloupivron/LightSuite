@@ -13,6 +13,7 @@ from lightsuite.analysis.counts import SAMPLE_POINTS_KEY, count_points_in_region
 from lightsuite.analysis.intensity_metrics import filter_intensity_metric_rows
 from lightsuite.analysis.ontology import RegionTable
 from lightsuite.analysis.region_stats import concat_tidy, write_region_stats_csv
+from lightsuite.analysis.top_regions import maybe_write_top_n_regions_csv
 from lightsuite.atlas.io import load_atlas_volume
 from lightsuite.atlas.registry import AtlasPaths
 from lightsuite.config.models import BrainPipelineConfig
@@ -28,6 +29,7 @@ console = Console()
 @dataclass
 class BrainRegionStatsRunResult:
     combined_path: Path | None = None
+    top_n_path: Path | None = None
     count_labels: list[str] = field(default_factory=list)
     n_rows: int = 0
 
@@ -171,18 +173,30 @@ def finalize_brain_region_stats(
 
     usable = [frame for frame in filtered if frame is not None and len(frame) > 0]
     combined_path: Path | None = None
+    top_n_path: Path | None = None
     n_rows = 0
     if usable:
         combined = concat_tidy(usable)
         combined_path = stats_path / "region_stats.csv"
         write_region_stats_csv(combined_path, combined)
         n_rows = len(combined)
+        top_n_path = maybe_write_top_n_regions_csv(
+            stats_path,
+            combined,
+            n=config.analysis.top_n_regions,
+            rank_by=config.analysis.top_n_rank_by,
+        )
         console.print(
             f"[green]Brain region stats:[/green] {n_rows} rows "
             f"({len(tidy_frames)} intensity source(s), {len(count_labels)} point source(s))"
         )
+        if top_n_path is not None:
+            console.print(
+                f"[green]Top-{config.analysis.top_n_regions} regions:[/green] {top_n_path}"
+            )
     return BrainRegionStatsRunResult(
         combined_path=combined_path,
+        top_n_path=top_n_path,
         count_labels=count_labels,
         n_rows=n_rows,
     )
@@ -272,6 +286,18 @@ def maybe_write_brain_sample_region_stats(
     usable = [frame for frame in filtered if frame is not None and len(frame) > 0]
     if not usable:
         return None
+    combined = concat_tidy(usable)
     combined_path = stats_path / "region_stats_sample.csv"
-    write_region_stats_csv(combined_path, concat_tidy(usable))
+    write_region_stats_csv(combined_path, combined)
+    top_n_path = maybe_write_top_n_regions_csv(
+        stats_path,
+        combined,
+        n=config.analysis.top_n_regions,
+        rank_by=config.analysis.top_n_rank_by,
+        sample_space=True,
+    )
+    if top_n_path is not None:
+        console.print(
+            f"[green]Top-{config.analysis.top_n_regions} regions (sample):[/green] {top_n_path}"
+        )
     return combined_path

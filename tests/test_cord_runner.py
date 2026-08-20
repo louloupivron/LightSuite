@@ -76,6 +76,11 @@ def test_run_cord_region_stats_intensity_only(tmp_path: Path) -> None:
     df = pd.read_csv(result.combined_path)
     assert "median_intensity" in df["metric"].values
     assert (df["segment"] == "C1").any()
+    assert result.top_n_path is not None
+    assert result.top_n_path.name == "region_stats_top10.csv"
+    top = pd.read_csv(result.top_n_path)
+    assert "rank" in top.columns
+    assert "segment" in top.columns
 
 
 def test_resolve_cord_stats_spaces_intersects_export(tmp_path: Path) -> None:
