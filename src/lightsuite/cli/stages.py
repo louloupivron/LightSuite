@@ -507,8 +507,6 @@ def _multires_stage_done(stage_id: str, save_path: Path, config: Any) -> tuple[b
             if artifacts:
                 return True, f"{len(artifacts)} file(s)"
         convert_summary = save_path / "converted" / "convert_annotations_summary.json"
-        from lightsuite.multires.checkpoint import MultiresRegOptsCheckpoint, multires_checkpoint_path
-
         ck_path = multires_checkpoint_path(save_path)
         registered = False
         if ck_path.is_file():

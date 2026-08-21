@@ -421,11 +421,84 @@ def test_multires_form_roundtrip_geometry_and_registration() -> None:
     assert state.landmark_fit_mode == "affine"
     assert state.overlap_margin_um == -10.0
     assert state.write_full_overview_canvas is False
+    assert state.vendor_suite == "mesospim"
     updated = multires_form_to_raw(state, raw)
     assert updated["multires"]["geometry_mode"] == "hybrid"
     assert updated["multires"]["landmarks"]["fit_mode"] == "affine"
     assert updated["multires"]["registration"]["overlap_margin_um"] == -10.0
+    assert updated["multires"]["vendor"]["suite"] == "mesospim"
     assert updated["import"]["annotations"][0]["path"] == "/a.csv"
+
+
+def test_multires_form_roundtrip_vendor_manifest_and_custom() -> None:
+    manifest_raw = {
+        "sample": {"name": "s", "save_path": "/out"},
+        "multires": {
+            "vendor": {"suite": "manifest"},
+            "pair_manifest": "/data/pair.json",
+        },
+    }
+    manifest_state = multires_form_from_raw(manifest_raw)
+    assert manifest_state.vendor_suite == "manifest"
+    assert manifest_state.pair_manifest == "/data/pair.json"
+    manifest_updated = multires_form_to_raw(manifest_state, manifest_raw)
+    assert manifest_updated["multires"]["vendor"]["suite"] == "manifest"
+
+    custom_raw = {
+        "sample": {"name": "s", "save_path": "/out"},
+        "multires": {
+            "vendor": {"suite": "custom", "custom_entry": "/scripts/build.py"},
+            "channels": {"488": {"overview": "/ov.tif", "roi": "/roi.tif"}},
+        },
+    }
+    custom_state = multires_form_from_raw(custom_raw)
+    assert custom_state.vendor_suite == "custom"
+    assert custom_state.vendor_custom_entry == "/scripts/build.py"
+    custom_updated = multires_form_to_raw(custom_state, custom_raw)
+    assert custom_updated["multires"]["vendor"]["custom_entry"] == "/scripts/build.py"
+
+    meta_raw = {
+        "sample": {"name": "s", "save_path": "/out"},
+        "multires": {
+            "vendor": {"suite": "smartspim"},
+            "channels": {
+                "488": {
+                    "overview": "/ov.tif",
+                    "roi": "/roi.tif",
+                    "overview_meta_path": "/ov_meta.json",
+                    "roi_meta_path": "/roi_meta.txt",
+                },
+            },
+        },
+    }
+    meta_state = multires_form_from_raw(meta_raw)
+    assert meta_state.channels[0].overview_meta == "/ov_meta.json"
+    assert meta_state.channels[0].roi_meta == "/roi_meta.txt"
+    meta_updated = multires_form_to_raw(meta_state, meta_raw)
+    ch = meta_updated["multires"]["channels"]["488"]
+    assert ch["overview_meta_path"] == "/ov_meta.json"
+    assert ch["roi_meta_path"] == "/roi_meta.txt"
+
+
+def test_multires_form_prunes_stale_apply_transform_to() -> None:
+    """Template leftovers must not block save when channels are reduced."""
+    raw = {
+        "sample": {"name": "s", "save_path": "/out"},
+        "multires": {
+            "pair_manifest": "/legacy/gilda_pair.json",
+            "vendor": {"suite": "smartspim"},
+            "channels": {"488": {"overview": "/ov.tif", "roi": "/roi.tif"}},
+            "registration": {
+                "reference_channel": "488",
+                "apply_transform_to": ["555", "647"],
+            },
+        },
+    }
+    state = multires_form_from_raw(raw)
+    updated = multires_form_to_raw(state, raw)
+    assert "apply_transform_to" not in updated["multires"]["registration"]
+    assert "pair_manifest" not in updated["multires"]
+    assert updated["multires"]["vendor"]["suite"] == "smartspim"
 
 
 def test_import_annotations_to_raw_clears_empty_rows() -> None:

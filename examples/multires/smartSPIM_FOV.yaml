@@ -1,0 +1,30 @@
+sample:
+  name: smartSPIM
+  save_path: /media/gbm/NVME2/ALICe-pipelines-data/Multi_RES_SCANs/multiresolution_results
+  scratch: /media/gbm/NVME2/lightsuite_scratch
+multires:
+  pair_label: singleFOV
+  channels:
+    '488':
+      overview: /media/gbm/NVME2/ALICe-pipelines-data/Multi_RES_SCANs/1_6X/All_Channels/
+      roi: /media/gbm/NVME2/ALICe-pipelines-data/Multi_RES_SCANs/9X/20260710_11_03_38_9X_single__FOV/Ex_561_Em_561F/
+      overview_meta_path: /media/gbm/NVME2/ALICe-pipelines-data/Multi_RES_SCANs/1_6X/metadata.txt
+      roi_meta_path: /media/gbm/NVME2/ALICe-pipelines-data/Multi_RES_SCANs/9X/20260710_11_03_38_9X_single__FOV/metadata.txt
+  geometry_mode: metadata
+  landmarks:
+    session_path: null
+    fit_mode: similarity
+    min_pairs: 4
+  registration:
+    overlap_margin_um: 0.0
+    registration_bin: 1
+    experiment_name: singleFOV
+    elastix_stages:
+    - translation
+    - rigid
+    write_full_overview_canvas: false
+    reference_channel: '488'
+  vendor:
+    suite: smartspim
+compute:
+  workers: 4

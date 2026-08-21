@@ -185,17 +185,33 @@ _MULTIRES: dict[str, str] = {
     "pair_label": (
         "Short label for this overview/ROI pair, used in manifest filenames and log messages."
     ),
+    "multires_vendor": (
+        "How overview/ROI paths are converted into a pair manifest: built-in mesoSPIM or "
+        "SmartSPIM conventions, a pre-built JSON file, or a custom Python script."
+    ),
+    "multires_custom_converter": (
+        "Python module defining build_pair_manifest(cfg, output). Used when Acquisition vendor "
+        "is Custom. See examples/multires/custom_manifest_converter_example.py."
+    ),
     "pair_manifest": (
-        "JSON manifest describing the overview and ROI image pair, motor positions, and "
-        "geometry (written by multires import or conversion tools)."
+        "Pre-built JSON manifest (Acquisition vendor = Pre-built). Built-in vendors write "
+        "to save_path/converted/<pair_label>_pair.json unless you set an explicit path here."
     ),
     "reference_channel": (
         "Channel name (e.g. 488, 555) whose overview↔ROI transform is estimated first and "
         "applied to co-registered channels. Can also be set in the GUI shell."
     ),
     "multires_channels": (
-        "Per-channel overview (low mag) and ROI (high mag) image paths. Channel names "
-        "become YAML keys under multires.channels."
+        "Per-channel overview (low mag) and ROI (high mag) paths. For mesoSPIM, optional "
+        "overview metadata for stitched folders. For SmartSPIM, overview and ROI metadata "
+        "(.json or .txt) when not auto-discovered beside the stack."
+    ),
+    "multires_channel_overview_meta": (
+        "mesoSPIM stitched-folder anchor metadata, or SmartSPIM overview metadata.txt/json. "
+        "Optional when metadata sits beside the stack (SmartSPIM default)."
+    ),
+    "multires_channel_roi_meta": (
+        "SmartSPIM ROI metadata.txt/json. Optional when metadata sits beside the ROI stack."
     ),
     "geometry_mode": (
         "metadata: use manifest motor geometry only. hybrid: refine overview↔ROI alignment "

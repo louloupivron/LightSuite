@@ -70,6 +70,18 @@ class _ChannelRow:
 
 
 @dataclass
+class _MultiresChannelRow:
+    row_widget: Any
+    name_edit: Any
+    overview_field: _PathField
+    roi_field: _PathField
+    overview_meta_field: _PathField
+    roi_meta_field: _PathField
+    overview_meta_label: Any
+    roi_meta_label: Any
+
+
+@dataclass
 class _AnnotationRow:
     row_widget: Any
     format_combo: Any
@@ -411,6 +423,23 @@ class ConfigEditorDock:
         self._config_form.addRow("Workers", self._workers)
         self._pair_label_edit = self._line_edit(self._mark_dirty)
         self._config_form.addRow("Pair label", self._pair_label_edit)
+        self._multires_vendor_combo = QComboBox()
+        for value, label in (
+            ("mesospim", "mesoSPIM (overview/ROI TIFF or stitched folder)"),
+            ("smartspim", "SmartSPIM / ASI (stitched stack + metadata)"),
+            ("manifest", "Pre-built pair manifest JSON"),
+            ("custom", "Custom Python converter"),
+        ):
+            self._multires_vendor_combo.addItem(label, value)
+        self._multires_vendor_combo.currentIndexChanged.connect(self._on_multires_vendor_changed)
+        self._config_form.addRow("Acquisition vendor", self._multires_vendor_combo)
+        self._multires_custom_entry = _PathField(
+            parent=self._config_block,
+            browse_label="Custom pair manifest .py",
+            browse_mode="file",
+            on_change=self._mark_dirty,
+        )
+        self._config_form.addRow("Custom pair converter", self._multires_custom_entry.widget)
         self._pair_manifest = _PathField(
             parent=self._config_block,
             browse_label="Pair manifest JSON",
@@ -459,7 +488,7 @@ class ConfigEditorDock:
         root.addWidget(self._status_label)
 
         self._channel_rows: list[_ChannelRow] = []
-        self._multires_channel_rows: list[tuple[Any, _PathField, _PathField]] = []
+        self._multires_channel_rows: list[_MultiresChannelRow] = []
         self._import_annotation_rows: list[_AnnotationRow] = []
         self._loading_metrics = False
         self._brainglobe_catalog: list[Any] = []
@@ -621,7 +650,9 @@ class ConfigEditorDock:
         self._set_form_row_visible(form, self._workers, True)
 
         self._set_form_row_visible(form, self._pair_label_edit, is_multires)
-        self._set_form_row_visible(form, self._pair_manifest.widget, is_multires)
+        self._set_form_row_visible(form, self._multires_vendor_combo, is_multires)
+        if is_multires:
+            self._update_multires_vendor_field_visibility()
         self._set_form_row_visible(form, self._reference_channel_edit, is_multires)
         multires_channels_wrapper = self._multires_channels_host.parentWidget()
         if multires_channels_wrapper is not None:
@@ -660,6 +691,8 @@ class ConfigEditorDock:
         if self._workflow == "multires":
             multires_fields: list[tuple[Any, str]] = [
                 (self._pair_label_edit, "pair_label"),
+                (self._multires_vendor_combo, "multires_vendor"),
+                (self._multires_custom_entry, "multires_custom_converter"),
                 (self._pair_manifest, "pair_manifest"),
                 (self._reference_channel_edit, "reference_channel"),
                 (self._multires_channels_wrapper, "multires_channels"),
@@ -902,6 +935,8 @@ class ConfigEditorDock:
             self._save_path.set_text(state.save_path)
             self._scratch_path.set_text(state.scratch)
             self._pair_label_edit.setText(state.pair_label)
+            self._set_combo_value(self._multires_vendor_combo, state.vendor_suite or "mesospim")
+            self._multires_custom_entry.set_text(state.vendor_custom_entry)
             self._pair_manifest.set_text(state.pair_manifest)
             self._reference_channel_edit.setText(state.reference_channel)
             self._set_combo_value(self._geometry_mode_combo, state.geometry_mode)
@@ -917,7 +952,13 @@ class ConfigEditorDock:
             self._workers.setValue(int(compute.get("workers") or 4))
             self._clear_multires_channel_rows()
             for item in state.channels:
-                self._add_multires_channel_row(item.name, item.overview, item.roi)
+                self._add_multires_channel_row(
+                    item.name,
+                    item.overview,
+                    item.roi,
+                    item.overview_meta,
+                    item.roi_meta,
+                )
             if not state.channels:
                 self._add_multires_channel_row()
 
@@ -1019,6 +1060,34 @@ class ConfigEditorDock:
     def _on_converter_suite_changed(self, _index: int = 0) -> None:
         self._update_converter_field_visibility()
         self._mark_dirty()
+
+    def _on_multires_vendor_changed(self, _index: int = 0) -> None:
+        self._update_multires_vendor_field_visibility()
+        self._mark_dirty()
+
+    def _update_multires_vendor_field_visibility(self) -> None:
+        form = self._config_form
+        suite = str(self._multires_vendor_combo.currentData() or "mesospim")
+        is_manifest = suite == "manifest"
+        is_custom = suite == "custom"
+        uses_channels = suite in {"mesospim", "smartspim", "custom"}
+
+        self._set_form_row_visible(form, self._pair_manifest.widget, is_manifest)
+        self._set_form_row_visible(form, self._multires_custom_entry.widget, is_custom)
+        multires_channels_wrapper = self._multires_channels_host.parentWidget()
+        if multires_channels_wrapper is not None:
+            self._set_form_row_visible(form, multires_channels_wrapper, uses_channels)
+        self._update_multires_channel_meta_visibility()
+
+    def _update_multires_channel_meta_visibility(self) -> None:
+        suite = str(self._multires_vendor_combo.currentData() or "mesospim")
+        show_overview_meta = suite in {"mesospim", "smartspim"}
+        show_roi_meta = suite == "smartspim"
+        for row in self._multires_channel_rows:
+            row.overview_meta_field.widget.setVisible(show_overview_meta)
+            row.overview_meta_label.setVisible(show_overview_meta)
+            row.roi_meta_field.widget.setVisible(show_roi_meta)
+            row.roi_meta_label.setVisible(show_roi_meta)
 
     def _update_converter_field_visibility(self) -> None:
         """Show suite-dependent converter fields; native layers only for suite=native."""
@@ -1208,16 +1277,45 @@ class ConfigEditorDock:
         name: str = "",
         overview: str = "",
         roi: str = "",
+        overview_meta: str = "",
+        roi_meta: str = "",
     ) -> None:
-        from qtpy.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QPushButton, QWidget
+        from qtpy.QtWidgets import (
+            QFormLayout,
+            QHBoxLayout,
+            QLabel,
+            QLineEdit,
+            QPushButton,
+            QVBoxLayout,
+            QWidget,
+        )
 
         row_widget = QWidget(self._multires_channels_host)
-        layout = QHBoxLayout(row_widget)
-        layout.setContentsMargins(0, 0, 0, 0)
+        column = QVBoxLayout(row_widget)
+        column.setContentsMargins(6, 6, 6, 6)
+        column.setSpacing(4)
+
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
         name_edit = QLineEdit()
         name_edit.setPlaceholderText("488")
         name_edit.setText(name)
+        name_edit.setMaximumWidth(120)
         name_edit.textChanged.connect(self._mark_dirty)
+        remove = QPushButton("Remove")
+        remove.clicked.connect(
+            lambda _checked=False, name=name_edit: self._remove_multires_channel_row(name)
+        )
+        header.addWidget(QLabel("Name"))
+        header.addWidget(name_edit)
+        header.addStretch(1)
+        header.addWidget(remove)
+        column.addLayout(header)
+
+        form = QFormLayout()
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setSpacing(4)
+
         overview_field = _PathField(
             parent=row_widget,
             browse_label="Overview volume",
@@ -1232,28 +1330,53 @@ class ConfigEditorDock:
             on_change=self._mark_dirty,
         )
         roi_field.set_text(roi)
-        remove = QPushButton("Remove")
-        remove.clicked.connect(
-            lambda _checked=False, name=name_edit: self._remove_multires_channel_row(name)
+        overview_meta_label = QLabel("Overview meta")
+        overview_meta_field = _PathField(
+            parent=row_widget,
+            browse_label="Overview metadata (.json/.txt)",
+            browse_mode="file",
+            on_change=self._mark_dirty,
         )
-        layout.addWidget(QLabel("Name"))
-        layout.addWidget(name_edit)
-        layout.addWidget(QLabel("Overview"))
-        layout.addWidget(overview_field.widget, stretch=1)
-        layout.addWidget(QLabel("ROI"))
-        layout.addWidget(roi_field.widget, stretch=1)
-        layout.addWidget(remove)
+        overview_meta_field.set_text(overview_meta)
+        roi_meta_label = QLabel("ROI meta")
+        roi_meta_field = _PathField(
+            parent=row_widget,
+            browse_label="ROI metadata (.json/.txt)",
+            browse_mode="file",
+            on_change=self._mark_dirty,
+        )
+        roi_meta_field.set_text(roi_meta)
+        tips = tooltips_for_workflow("multires")
+        overview_meta_field.set_tooltip(tips.get("multires_channel_overview_meta", ""))
+        roi_meta_field.set_tooltip(tips.get("multires_channel_roi_meta", ""))
+
+        form.addRow("Overview", overview_field.widget)
+        form.addRow("ROI", roi_field.widget)
+        form.addRow(overview_meta_label, overview_meta_field.widget)
+        form.addRow(roi_meta_label, roi_meta_field.widget)
+        column.addLayout(form)
+
         self._multires_channels_layout.addWidget(row_widget)
-        self._multires_channel_rows.append((name_edit, overview_field, roi_field))
+        self._multires_channel_rows.append(
+            _MultiresChannelRow(
+                row_widget=row_widget,
+                name_edit=name_edit,
+                overview_field=overview_field,
+                roi_field=roi_field,
+                overview_meta_field=overview_meta_field,
+                roi_meta_field=roi_meta_field,
+                overview_meta_label=overview_meta_label,
+                roi_meta_label=roi_meta_label,
+            )
+        )
+        self._update_multires_channel_meta_visibility()
 
     def _remove_multires_channel_row(self, name_edit: Any) -> None:
         for index, row in enumerate(self._multires_channel_rows):
-            if row[0] is not name_edit:
+            if row.name_edit is not name_edit:
                 continue
-            row_widget = name_edit.parentWidget()
-            if row_widget is not None:
-                row_widget.setParent(None)
-                row_widget.deleteLater()
+            row.row_widget.setParent(None)
+            row.row_widget.deleteLater()
             self._multires_channel_rows.pop(index)
             self._mark_dirty()
             return
@@ -1335,17 +1458,21 @@ class ConfigEditorDock:
             return spinal_form_to_raw(state, self._raw)
         channels = [
             ChannelPaths(
-                name=name_edit.text().strip(),
-                overview=overview_field.text(),
-                roi=roi_field.text(),
+                name=row.name_edit.text().strip(),
+                overview=row.overview_field.text(),
+                roi=row.roi_field.text(),
+                overview_meta=row.overview_meta_field.text(),
+                roi_meta=row.roi_meta_field.text(),
             )
-            for name_edit, overview_field, roi_field in self._multires_channel_rows
+            for row in self._multires_channel_rows
         ]
         state = MultiresFormState(
             sample_name=self._name_edit.text().strip(),
             save_path=self._save_path.text(),
             scratch=self._scratch_path.text(),
             pair_label=self._pair_label_edit.text().strip(),
+            vendor_suite=str(self._multires_vendor_combo.currentData() or "mesospim"),
+            vendor_custom_entry=self._multires_custom_entry.text(),
             pair_manifest=self._pair_manifest.text(),
             reference_channel=self._reference_channel_edit.text().strip(),
             channels=channels,

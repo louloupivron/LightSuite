@@ -23,7 +23,12 @@ from pathlib import Path
 from typing import Any
 
 from lightsuite.multires.manifest import save_pair_manifest
-from lightsuite.multires.models import MANIFEST_FORMAT, ManifestVolumeSpec, MultiresPairManifest
+from lightsuite.multires.models import (
+    MANIFEST_FORMAT,
+    ManifestVolumeSpec,
+    MultiresChannelSpecs,
+    MultiresPairManifest,
+)
 from lightsuite.multires.volume import discover_volume_shape
 
 # ASI stage X/Y table values are tenths of a micron (0.1 µm).
@@ -223,6 +228,55 @@ def parse_smartspim_metadata(path: Path) -> SmartspimScanMeta:
     return _parse_smartspim_metadata_txt(path)
 
 
+def metadata_path_for_smartspim_export(volume_path: Path) -> Path:
+    """Locate ``metadata.json`` or ``metadata.txt`` beside a SmartSPIM stack export."""
+    volume_path = volume_path.expanduser().resolve()
+    candidates: list[Path] = []
+    if volume_path.is_dir():
+        candidates.extend(
+            [
+                volume_path / "metadata.json",
+                volume_path / "metadata.txt",
+                volume_path.parent / "metadata.json",
+                volume_path.parent / "metadata.txt",
+            ]
+        )
+    else:
+        candidates.extend(
+            [
+                volume_path.parent / "metadata.json",
+                volume_path.parent / "metadata.txt",
+            ]
+        )
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate.resolve()
+    msg = (
+        f"No SmartSPIM metadata (.json/.txt) found for {volume_path}. "
+        "Set overview_meta_path / roi_meta_path on the channel or multires.overview_meta_path."
+    )
+    raise FileNotFoundError(msg)
+
+
+def _resolve_overview_meta_path(
+    volume_path: Path,
+    *,
+    channel_meta: Path | None,
+    default_meta: Path | None,
+) -> Path:
+    if channel_meta is not None:
+        return channel_meta.expanduser().resolve()
+    if default_meta is not None:
+        return default_meta.expanduser().resolve()
+    return metadata_path_for_smartspim_export(volume_path)
+
+
+def _resolve_roi_meta_path(volume_path: Path, channel_meta: Path | None) -> Path:
+    if channel_meta is not None:
+        return channel_meta.expanduser().resolve()
+    return metadata_path_for_smartspim_export(volume_path)
+
+
 def stage_pitch_overlap_fractions(
     tile_centers_stage: list[tuple[float, float, float]],
     *,
@@ -405,6 +459,89 @@ def build_smartspim_pair_manifest(
             "xy_origin": "upper_left_tile_corner",
             "conversion_timestamp": datetime.now(UTC).isoformat(),
         },
+    )
+
+    if output_manifest_path is not None:
+        save_pair_manifest(manifest, output_manifest_path)
+
+    return manifest
+
+
+def build_smartspim_multichannel_pair_manifest(
+    *,
+    sample_name: str,
+    pair_label: str,
+    channels: dict[str, dict[str, Path]],
+    reference_channel: str,
+    geometry: SmartspimGeometryConfig | None = None,
+    overview_meta_path: Path | None = None,
+    overview_meta_by_channel: dict[str, Path] | None = None,
+    roi_meta_by_channel: dict[str, Path] | None = None,
+    landmarks_path: Path | None = None,
+    output_manifest_path: Path | None = None,
+) -> MultiresPairManifest:
+    """Build a multichannel manifest sharing SmartSPIM stage geometry across lasers.
+
+    Each channel entry must provide ``overview`` and ``roi`` stack paths (folder or TIFF).
+    Metadata paths default from ``metadata.json`` / ``metadata.txt`` beside each stack,
+    with optional per-channel overrides and a shared ``overview_meta_path`` fallback.
+    """
+    if reference_channel not in channels:
+        msg = f"reference_channel {reference_channel!r} missing from channels"
+        raise KeyError(msg)
+
+    geometry = geometry or SmartspimGeometryConfig()
+    overview_meta_by_channel = overview_meta_by_channel or {}
+    roi_meta_by_channel = roi_meta_by_channel or {}
+    channel_specs: dict[str, MultiresChannelSpecs] = {}
+
+    for channel_name, paths in channels.items():
+        overview_path = paths["overview"].expanduser().resolve()
+        roi_path = paths["roi"].expanduser().resolve()
+        overview_meta = _resolve_overview_meta_path(
+            overview_path,
+            channel_meta=overview_meta_by_channel.get(channel_name),
+            default_meta=overview_meta_path,
+        )
+        roi_meta = _resolve_roi_meta_path(
+            roi_path,
+            channel_meta=roi_meta_by_channel.get(channel_name),
+        )
+        channel_specs[channel_name] = MultiresChannelSpecs(
+            overview=volume_spec_from_smartspim_export(
+                volume_path=overview_path,
+                metadata_path=overview_meta,
+                geometry=geometry,
+            ),
+            roi=volume_spec_from_smartspim_export(
+                volume_path=roi_path,
+                metadata_path=roi_meta,
+                geometry=geometry,
+            ),
+        )
+
+    ref_specs = channel_specs[reference_channel]
+    manifest = MultiresPairManifest(
+        format=MANIFEST_FORMAT,
+        sample_name=sample_name,
+        pair_label=pair_label,
+        overview=ref_specs.overview,
+        roi=ref_specs.roi,
+        reference_channel=reference_channel,
+        channels=channel_specs,
+        provenance={
+            "microscope": "smartspim",
+            "conversion": "lightsuite.multires.vendor.smartspim",
+            "conversion_timestamp": datetime.now(UTC).isoformat(),
+            "channels": ",".join(sorted(channels)),
+            "reference_channel": reference_channel,
+            "stage_coord_scale_um": str(geometry.stage_coord_scale_um),
+            "stage_xy_is_center": str(geometry.stage_xy_is_center),
+            "stage_z_is_center": str(geometry.stage_z_is_center),
+            "lateral_flip": ",".join(str(v) for v in geometry.lateral_flip),
+            "xy_origin": "upper_left_tile_corner",
+        },
+        landmarks_path=str(landmarks_path) if landmarks_path is not None else None,
     )
 
     if output_manifest_path is not None:

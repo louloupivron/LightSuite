@@ -278,3 +278,53 @@ def test_load_multires_config_from_channel_paths(tmp_path: Path) -> None:
     assert set(manifest.channel_names()) == {"488", "561"}
     assert manifest.overview.volume_path.endswith("overview_a.tif")
     assert manifest.channels["561"].roi.volume_path.endswith("roi_b.tif")
+
+
+def test_resolve_custom_vendor_converter(tmp_path: Path) -> None:
+    converter_path = tmp_path / "build_pair.py"
+    converter_path.write_text(
+        '''
+from lightsuite.multires.models import MANIFEST_FORMAT, ManifestVolumeSpec, MultiresPairManifest
+
+def build_pair_manifest(cfg, output):
+    manifest = MultiresPairManifest(
+        format=MANIFEST_FORMAT,
+        sample_name=cfg.sample.name,
+        pair_label="custom_pair",
+        overview=ManifestVolumeSpec(
+            volume_path="/ov.tif",
+            shape_zyx=[2, 2, 2],
+            spacing_um=[1.0, 1.0, 1.0],
+            origin_um=[0.0, 0.0, 0.0],
+        ),
+        roi=ManifestVolumeSpec(
+            volume_path="/roi.tif",
+            shape_zyx=[2, 2, 2],
+            spacing_um=[1.0, 1.0, 1.0],
+            origin_um=[0.0, 0.0, 0.0],
+        ),
+        provenance={"microscope": "custom"},
+    )
+    return manifest
+''',
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "sample": {"name": "sample_a", "save_path": str(tmp_path / "out")},
+                "multires": {
+                    "vendor": {"suite": "custom", "custom_entry": str(converter_path)},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    cfg = load_multires_config(config_path)
+    from lightsuite.multires.resolve import resolve_pair_manifest
+
+    manifest, manifest_path = resolve_pair_manifest(cfg)
+    assert manifest_path.is_file()
+    assert manifest.pair_label == "custom_pair"
+    assert manifest.provenance["microscope"] == "custom"

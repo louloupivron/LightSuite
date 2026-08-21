@@ -34,6 +34,8 @@ class ChannelPaths:
     name: str
     overview: str = ""
     roi: str = ""
+    overview_meta: str = ""
+    roi_meta: str = ""
 
 
 @dataclass
@@ -394,6 +396,8 @@ class MultiresFormState:
     save_path: str = ""
     scratch: str = ""
     pair_label: str = ""
+    vendor_suite: str = "mesospim"
+    vendor_custom_entry: str = ""
     pair_manifest: str = ""
     reference_channel: str = ""
     channels: list[ChannelPaths] = field(default_factory=list)
@@ -404,6 +408,45 @@ class MultiresFormState:
     import_segmentation: bool = False
     import_converter: AnnotationConverterState = field(default_factory=AnnotationConverterState)
     import_annotations: list[AnnotationImportRow] = field(default_factory=list)
+
+
+def _infer_multires_vendor_suite(multires: dict[str, Any]) -> str:
+    vendor = multires.get("vendor") or {}
+    if isinstance(vendor, dict):
+        suite = str(vendor.get("suite") or "").strip().lower()
+        if suite:
+            return suite
+        if str(vendor.get("custom_entry") or "").strip():
+            return "custom"
+    channels_raw = multires.get("channels") or {}
+    has_channels = isinstance(channels_raw, dict) and bool(channels_raw)
+    has_manifest = bool(str(multires.get("pair_manifest") or "").strip())
+    if has_manifest and not has_channels:
+        return "manifest"
+    return "mesospim"
+
+
+def _multires_vendor_from_raw(multires: dict[str, Any]) -> tuple[str, str]:
+    vendor = multires.get("vendor") or {}
+    suite = _infer_multires_vendor_suite(multires)
+    custom_entry = ""
+    if isinstance(vendor, dict):
+        custom_entry = _path_str(vendor.get("custom_entry"))
+    return suite, custom_entry
+
+
+def _apply_multires_vendor_to_raw(
+    *,
+    suite: str,
+    custom_entry: str,
+    multires: dict[str, Any],
+) -> dict[str, Any]:
+    suite_key = (suite or "mesospim").strip().lower()
+    vendor: dict[str, Any] = {"suite": suite_key}
+    if suite_key == "custom" and custom_entry.strip():
+        vendor["custom_entry"] = custom_entry.strip()
+    multires["vendor"] = vendor
+    return multires
 
 
 def load_template_raw(workflow: str) -> tuple[str, dict[str, Any]]:
@@ -757,14 +800,19 @@ def multires_form_from_raw(raw: dict[str, Any]) -> MultiresFormState:
                     name=str(name),
                     overview=_path_str(item.get("overview")),
                     roi=_path_str(item.get("roi")),
+                    overview_meta=_path_str(item.get("overview_meta_path")),
+                    roi_meta=_path_str(item.get("roi_meta_path")),
                 )
             )
     landmarks = multires.get("landmarks") or {}
+    vendor_suite, vendor_custom_entry = _multires_vendor_from_raw(multires)
     return MultiresFormState(
         sample_name=str(sample.get("name") or ""),
         save_path=_path_str(sample.get("save_path")),
         scratch=_path_str(sample.get("scratch")),
         pair_label=str(multires.get("pair_label") or ""),
+        vendor_suite=vendor_suite,
+        vendor_custom_entry=vendor_custom_entry,
         pair_manifest=_path_str(multires.get("pair_manifest")),
         reference_channel=str(registration.get("reference_channel") or ""),
         channels=channels,
@@ -794,10 +842,17 @@ def multires_form_to_raw(state: MultiresFormState, raw: dict[str, Any]) -> dict[
         multires["pair_label"] = state.pair_label.strip()
     else:
         multires.pop("pair_label", None)
-    if state.pair_manifest.strip():
+    if state.pair_manifest.strip() and state.vendor_suite == "manifest":
         multires["pair_manifest"] = state.pair_manifest.strip()
     else:
+        # Built-in / custom vendors write under save_path/converted/; drop template leftovers.
         multires.pop("pair_manifest", None)
+
+    multires = _apply_multires_vendor_to_raw(
+        suite=state.vendor_suite,
+        custom_entry=state.vendor_custom_entry,
+        multires=multires,
+    )
 
     multires["geometry_mode"] = state.geometry_mode
     landmarks = dict(multires.get("landmarks") or {})
@@ -814,6 +869,10 @@ def multires_form_to_raw(state: MultiresFormState, raw: dict[str, Any]) -> dict[
             entry["overview"] = item.overview.strip()
         if item.roi.strip():
             entry["roi"] = item.roi.strip()
+        if item.overview_meta.strip():
+            entry["overview_meta_path"] = item.overview_meta.strip()
+        if item.roi_meta.strip():
+            entry["roi_meta_path"] = item.roi_meta.strip()
         if entry:
             channels[name] = entry
     if channels:
@@ -828,6 +887,15 @@ def multires_form_to_raw(state: MultiresFormState, raw: dict[str, Any]) -> dict[
         registration.pop("reference_channel", None)
     registration["overlap_margin_um"] = state.overlap_margin_um
     registration["write_full_overview_canvas"] = state.write_full_overview_canvas
+    # Template leftovers (e.g. Gilda apply_transform_to: [555, 647]) must not survive
+    # when the form only keeps a subset of channels.
+    apply_raw = registration.get("apply_transform_to")
+    if isinstance(apply_raw, list):
+        kept = [str(name) for name in apply_raw if str(name) in channels]
+        if kept:
+            registration["apply_transform_to"] = kept
+        else:
+            registration.pop("apply_transform_to", None)
     multires["registration"] = registration
     out["multires"] = multires
     return _apply_import_to_raw(

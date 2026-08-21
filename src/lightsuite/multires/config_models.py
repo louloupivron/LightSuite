@@ -37,6 +37,29 @@ class MultiresMesospimGeometryConfig(BaseModel):
     roi: MesospimGeometryOverride | None = None
 
 
+class MultiresVendorSuite(StrEnum):
+    """Acquisition vendor convention for building or loading a pair manifest."""
+
+    MESOSPIM = "mesospim"
+    SMARTSPIM = "smartspim"
+    MANIFEST = "manifest"
+    CUSTOM = "custom"
+
+
+class MultiresVendorConfig(BaseModel):
+    """How overview/ROI paths are converted into ``multires.pair_manifest``."""
+
+    suite: MultiresVendorSuite = MultiresVendorSuite.MESOSPIM
+    custom_entry: Path | None = None
+
+    @field_validator("custom_entry")
+    @classmethod
+    def expand_custom_entry(cls, value: Path | None) -> Path | None:
+        if value is None:
+            return None
+        return value.expanduser().resolve()
+
+
 class MultiresGeometryMode(StrEnum):
     METADATA = "metadata"
     HYBRID = "hybrid"
@@ -112,6 +135,7 @@ class MultiresRegistrationSettings(BaseModel):
 
 
 class MultiresConfig(BaseModel):
+    vendor: MultiresVendorConfig = Field(default_factory=MultiresVendorConfig)
     pair_manifest: Path | None = None
     pair_label: str | None = None
     overview_meta_path: Path | None = None
@@ -137,11 +161,36 @@ class MultiresConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_manifest_or_channels(self) -> MultiresConfig:
+        suite = self.vendor.suite
         has_channels = bool(self.channels)
         has_manifest = self.pair_manifest is not None
-        if not has_channels and not has_manifest:
-            msg = "Provide multires.pair_manifest and/or multires.channels"
+
+        if suite == MultiresVendorSuite.CUSTOM:
+            if self.vendor.custom_entry is None:
+                msg = "multires.vendor.custom_entry is required when vendor.suite is custom"
+                raise ValueError(msg)
+            if not self.vendor.custom_entry.is_file():
+                msg = f"Custom pair manifest converter not found: {self.vendor.custom_entry}"
+                raise ValueError(msg)
+            return self
+
+        if suite == MultiresVendorSuite.MANIFEST:
+            if not has_manifest:
+                msg = "multires.pair_manifest is required when vendor.suite is manifest"
+                raise ValueError(msg)
+            if self.pair_manifest is not None and not self.pair_manifest.is_file():
+                msg = f"Pair manifest does not exist: {self.pair_manifest}"
+                raise ValueError(msg)
+            return self
+
+        if suite in {MultiresVendorSuite.MESOSPIM, MultiresVendorSuite.SMARTSPIM}:
+            if not has_channels:
+                msg = f"multires.channels is required when vendor.suite is {suite.value}"
+                raise ValueError(msg)
+        elif not has_channels and not has_manifest:
+            msg = "Provide multires.channels and/or multires.pair_manifest"
             raise ValueError(msg)
+
         if has_manifest and self.pair_manifest is not None and not has_channels:
             if not self.pair_manifest.is_file():
                 msg = f"Pair manifest does not exist: {self.pair_manifest}"
@@ -163,7 +212,10 @@ class MultiresConfig(BaseModel):
                     for name in (self.registration.apply_transform_to or [])
                     if name not in self.channels
                 ]
-                msg = f"registration.apply_transform_to channels missing from multires.channels: {missing}"
+                msg = (
+                    f"registration.apply_transform_to channels missing from multires.channels: "
+                    f"{missing} (available: {sorted(self.channels)})"
+                )
                 raise ValueError(msg)
         return self
 
