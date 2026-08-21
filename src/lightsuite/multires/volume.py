@@ -53,10 +53,15 @@ def empty_image_from_shape(shape_zyx: tuple[int, int, int]) -> sitk.Image:
 
 
 def _sorted_plane_files(folder: Path, *, expected_planes: int | None = None) -> list[Path]:
+    """List plane TIFFs once per file (Windows glob is case-insensitive)."""
     paths: list[Path] = []
-    for pattern in ("*.tif", "*.tiff", "*.TIF", "*.TIFF"):
-        paths.extend(folder.glob(pattern))
-    paths = sorted(paths, key=lambda p: p.name)
+    for entry in folder.iterdir():
+        if not entry.is_file():
+            continue
+        if entry.suffix.lower() not in {".tif", ".tiff"}:
+            continue
+        paths.append(entry)
+    paths.sort(key=lambda p: p.name)
     return _resolve_smartspim_plane_files(paths, expected_planes=expected_planes)
 
 

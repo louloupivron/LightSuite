@@ -52,6 +52,17 @@ def test_volume_spec_filters_interleaved_smartspim_channels(tmp_path: Path) -> N
     assert spec.shape_zyx[0] == num_planes
 
 
+def test_sorted_plane_files_counts_each_tiff_once(tmp_path: Path) -> None:
+    from lightsuite.multires.volume import _sorted_plane_files
+
+    folder = tmp_path / "All_Channels"
+    folder.mkdir()
+    for iz in range(3):
+        tifffile.imwrite(folder / f"Z{iz:06d}_Ch0.tif", np.zeros((8, 8), dtype=np.uint16))
+
+    assert len(_sorted_plane_files(folder)) == 3
+
+
 def test_build_smartspim_multichannel_pair_manifest(tmp_path: Path) -> None:
     overview_a = tmp_path / "overview_488"
     roi_a = tmp_path / "roi_488"
