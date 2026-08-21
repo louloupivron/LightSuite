@@ -440,7 +440,10 @@ def load_manifest_xyz_crop(
         raise ValueError(msg)
 
     stack = np.empty((sz, sy, sx), dtype=np.float32)
+    from lightsuite.reporter import check_stage_cancelled
+
     for dz in range(sz):
+        check_stage_cancelled()
         stack[dz] = load_manifest_xy_crop(
             spec,
             z_index=iz0 + dz,
@@ -511,7 +514,10 @@ def stream_resample_to_reference(
         z_chunk = max(1, int(max_moving_planes / planes_per_ref))
 
     chunk = max(1, int(z_chunk))
+    from lightsuite.reporter import check_stage_cancelled
+
     for z0 in range(0, sz, chunk):
+        check_stage_cancelled()
         z1 = min(sz, z0 + chunk)
         chunk_size = [sx, sy, z1 - z0]
         chunk_ref = sitk.RegionOfInterest(reference, chunk_size, [0, 0, z0])

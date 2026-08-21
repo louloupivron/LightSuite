@@ -45,7 +45,7 @@ from lightsuite.multires.spec_geometry import (
     transformed_bounds_from_spec,
 )
 from lightsuite.multires.volume import load_manifest_xy_crop, write_sitk_hyperstack_tiff
-from lightsuite.reporter import emit_pipeline_message, format_duration
+from lightsuite.reporter import check_stage_cancelled, emit_pipeline_message, format_duration
 
 
 def _status(message: str) -> None:
@@ -134,6 +134,7 @@ def _write_geometry_artifacts(
     level: MultiresGeometryCheckLevel,
     prepared=None,
 ) -> MultiresRegOptsCheckpoint:
+    check_stage_cancelled()
     mode = cfg.multires.geometry_mode
     rep_overview = manifest_geometry_report_from_spec("overview", manifest.overview)
     if landmark_fit is not None:
@@ -196,6 +197,7 @@ def _write_geometry_artifacts(
 
     roi_tform = landmark_fit.roi_to_overview_tform if landmark_fit is not None else None
     if level == MultiresGeometryCheckLevel.SLICE_QC:
+        check_stage_cancelled()
         emit_pipeline_message("Check-geometry: loading mid-plane overlap crops for slice QC…")
         center_um = tuple(float(v) for v in 0.5 * (overlap_min + overlap_max))
         overview_start, overview_size = crop_index_range_from_physical_box(
@@ -330,6 +332,7 @@ def check_multires_geometry(
     level: MultiresGeometryCheckLevel = MultiresGeometryCheckLevel.FULL,
 ) -> MultiresRegOptsCheckpoint:
     """Validate FOV overlap and write geometry QA artifacts."""
+    check_stage_cancelled()
     t0 = time.perf_counter()
     mode = cfg.multires.geometry_mode
     emit_pipeline_message(
@@ -337,6 +340,7 @@ def check_multires_geometry(
     )
 
     emit_pipeline_message("Check-geometry: resolving pair manifest…")
+    check_stage_cancelled()
     manifest, manifest_path = resolve_pair_manifest(cfg)
     manifest_dir = manifest_path.parent
     overview_stem = _volume_stem(Path(manifest.overview.volume_path))
@@ -352,6 +356,7 @@ def check_multires_geometry(
                 "Check-geometry: loading landmarks and fitting coarse transform…"
             )
         emit_pipeline_message("Check-geometry: computing overlap bounds…")
+        check_stage_cancelled()
         t_overlap = time.perf_counter()
         overlap_min, overlap_max, crop_start_index, landmark_fit = _lightweight_geometry_context(
             cfg,
@@ -369,6 +374,7 @@ def check_multires_geometry(
             f"({overlap_msg})"
         )
         emit_pipeline_message(f"Check-geometry: writing QA artifacts ({level.value})…")
+        check_stage_cancelled()
         checkpoint = _write_geometry_artifacts(
             cfg=cfg,
             manifest=manifest,
@@ -387,6 +393,7 @@ def check_multires_geometry(
     emit_pipeline_message(
         "Check-geometry: loading overview overlap crop and resampling ROI…"
     )
+    check_stage_cancelled()
     t_prep = time.perf_counter()
     prepared = prepare_multires_registration_pair(cfg, manifest=manifest)
     overlap_min, overlap_max = prepared.overlap_box
@@ -402,6 +409,7 @@ def check_multires_geometry(
         f"({prep_msg})"
     )
     emit_pipeline_message("Check-geometry: writing QA artifacts (full)…")
+    check_stage_cancelled()
     checkpoint = _write_geometry_artifacts(
         cfg=cfg,
         manifest=manifest,
@@ -419,6 +427,7 @@ def check_multires_geometry(
 
 def run_multires_registration(cfg: MultiresPipelineConfig) -> MultiresRegOptsCheckpoint:
     """Register ROI stack to overview using a pair manifest and elastix."""
+    check_stage_cancelled()
     manifest, manifest_path = resolve_pair_manifest(cfg)
     meso = cfg.multires
 
@@ -443,6 +452,7 @@ def run_multires_registration(cfg: MultiresPipelineConfig) -> MultiresRegOptsChe
         overview_spec=overview_spec,
         roi_spec=roi_spec,
     )
+    check_stage_cancelled()
     overview_stem = _volume_stem(Path(overview_spec.volume_path))
     roi_stem = _volume_stem(Path(roi_spec.volume_path))
 
@@ -464,6 +474,7 @@ def run_multires_registration(cfg: MultiresPipelineConfig) -> MultiresRegOptsChe
         apply_transform_to=meso.registration.apply_transform_to,
     )
     for channel_name in additional_channels:
+        check_stage_cancelled()
         channel_specs = manifest.channel_specs(channel_name)
         channel_prepared = prepare_multires_registration_pair(
             cfg,

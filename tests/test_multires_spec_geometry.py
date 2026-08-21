@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
 
 import numpy as np
@@ -12,6 +13,7 @@ import tifffile
 import yaml
 
 from lightsuite.config.loader import load_multires_config
+from lightsuite.exceptions import StageCancelledError
 from lightsuite.multires.config_models import MultiresGeometryCheckLevel
 from lightsuite.multires.manifest import save_pair_manifest
 from lightsuite.multires.models import MANIFEST_FORMAT, ManifestVolumeSpec, MultiresPairManifest
@@ -23,6 +25,7 @@ from lightsuite.multires.spec_geometry import (
     physical_bounds_from_spec,
 )
 from lightsuite.multires.volume import load_manifest_xy_slice, manifest_geometry_report
+from lightsuite.reporter import stage_cancellation
 
 
 def _write_plane_stack(folder: Path, shape_zyx: tuple[int, int, int]) -> None:
@@ -135,7 +138,10 @@ def test_check_multires_geometry_metadata_only(tmp_path: Path) -> None:
         yaml.safe_dump(
             {
                 "sample": {"name": "sample", "save_path": str(tmp_path / "out")},
-                "multires": {"pair_manifest": str(manifest_path)},
+                "multires": {
+                    "vendor": {"suite": "manifest"},
+                    "pair_manifest": str(manifest_path),
+                },
             }
         ),
         encoding="utf-8",
@@ -152,6 +158,43 @@ def test_check_multires_geometry_metadata_only(tmp_path: Path) -> None:
     assert report["roi"]["phys_min"][0] == pytest.approx(4.0)
     assert report["roi"]["phys_center"][0] == pytest.approx(7.0)
     assert report["alignment_metrics"]["center_offset_norm_um"] == pytest.approx(0.0)
+
+
+def test_check_multires_geometry_respects_cancel_event(tmp_path: Path) -> None:
+    overview_dir = tmp_path / "overview"
+    roi_dir = tmp_path / "roi"
+    _write_plane_stack(overview_dir, (4, 8, 8))
+    _write_plane_stack(roi_dir, (4, 4, 4))
+
+    manifest = MultiresPairManifest(
+        format=MANIFEST_FORMAT,
+        sample_name="sample",
+        pair_label="pair",
+        overview=_overview_spec(overview_dir),
+        roi=_roi_spec(roi_dir),
+    )
+    manifest_path = tmp_path / "pair.json"
+    save_pair_manifest(manifest, manifest_path)
+
+    config_path = tmp_path / "multires.yaml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "sample": {"name": "sample", "save_path": str(tmp_path / "out")},
+                "multires": {
+                    "vendor": {"suite": "manifest"},
+                    "pair_manifest": str(manifest_path),
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    cfg = load_multires_config(config_path)
+    cancel = threading.Event()
+    cancel.set()
+    with stage_cancellation(cancel):
+        with pytest.raises(StageCancelledError):
+            check_multires_geometry(cfg, level=MultiresGeometryCheckLevel.METADATA_ONLY)
 
 
 def test_load_manifest_xy_crop_matches_plane_per_file(tmp_path: Path) -> None:

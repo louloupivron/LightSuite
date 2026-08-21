@@ -738,6 +738,7 @@ class LightsuiteShell:
         self._action_button.setEnabled(enabled)
         self._action_button.setVisible(not running)
         self._cancel_button.setVisible(running)
+        self._cancel_button.setEnabled(running)
         self._optional_toggle.setEnabled(enabled)
         self._stage_list.setEnabled(enabled)
         if not running:
@@ -746,8 +747,10 @@ class LightsuiteShell:
             self._update_action_button()
 
     def _on_cancel_stage(self) -> None:
-        if self._stage_cancel_event is not None:
-            self._stage_cancel_event.set()
+        if self._stage_cancel_event is None or self._stage_cancel_event.is_set():
+            return
+        self._stage_cancel_event.set()
+        self._cancel_button.setEnabled(False)
         self.log("Cancelling stage…")
 
     def _on_stage_finished(self, stage_id: str, _result: Any) -> None:

@@ -25,6 +25,7 @@ from lightsuite.multires.spec_geometry import (
     sitk_geometry_from_spec,
 )
 from lightsuite.multires.volume import load_manifest_xyz_crop, stream_resample_to_reference
+from lightsuite.reporter import check_stage_cancelled
 
 
 @dataclass
@@ -119,12 +120,14 @@ def prepare_multires_registration_pair(
         crop_size,
         max_slab_bytes=cfg.multires.registration.max_slab_bytes,
     )
+    check_stage_cancelled()
     fixed_cropped = load_manifest_xyz_crop(
         overview_spec,
         start_xyz=crop_start_index,
         crop_size_xyz=crop_size,
         manifest_dir=manifest_dir,
     )
+    check_stage_cancelled()
     moving = stream_resample_to_reference(
         roi_spec,
         fixed_cropped,
