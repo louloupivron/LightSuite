@@ -36,7 +36,7 @@ from lightsuite.preprocess.brain import preprocess_lightsheet_volume
 from lightsuite.registration.init_brain import initialize_brain_registration
 
 
-def test_resolve_default_atlas_plane_prefers_previous_when_advancing() -> None:
+def test_resolve_default_atlas_plane_uses_precomputed_not_previous() -> None:
     anchors = [
         SliceAnchor(sample_index=10, atlas_plane=80, confirmed=True),
         SliceAnchor(sample_index=20, atlas_plane=90, confirmed=False),
@@ -46,10 +46,9 @@ def test_resolve_default_atlas_plane_prefers_previous_when_advancing() -> None:
         anchors,
         3,
         edited_slice_indices=set(),
-        prefer_previous=True,
-        estimated_plane=55,
+        estimated_plane=40,
     )
-    assert plane == 90
+    assert plane == 55
 
 
 def test_resolve_default_atlas_plane_keeps_edited_anchor() -> None:
@@ -62,7 +61,6 @@ def test_resolve_default_atlas_plane_keeps_edited_anchor() -> None:
         anchors,
         3,
         edited_slice_indices={3},
-        prefer_previous=False,
         estimated_plane=55,
     )
     assert plane == 95
