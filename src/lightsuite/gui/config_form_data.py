@@ -400,6 +400,7 @@ class MultiresFormState:
     vendor_custom_entry: str = ""
     pair_manifest: str = ""
     reference_channel: str = ""
+    experiment_name: str = "default"
     channels: list[ChannelPaths] = field(default_factory=list)
     geometry_mode: str = "metadata"
     landmark_fit_mode: str = "similarity"
@@ -841,6 +842,7 @@ def multires_form_from_raw(raw: dict[str, Any]) -> MultiresFormState:
         vendor_custom_entry=vendor_custom_entry,
         pair_manifest=_path_str(multires.get("pair_manifest")),
         reference_channel=str(registration.get("reference_channel") or ""),
+        experiment_name=str(registration.get("experiment_name") or "default"),
         channels=channels,
         geometry_mode=str(multires.get("geometry_mode") or "metadata"),
         landmark_fit_mode=str(landmarks.get("fit_mode") or "similarity"),
@@ -915,6 +917,11 @@ def multires_form_to_raw(state: MultiresFormState, raw: dict[str, Any]) -> dict[
         registration.pop("reference_channel", None)
     registration["overlap_margin_um"] = state.overlap_margin_um
     registration["write_full_overview_canvas"] = state.write_full_overview_canvas
+    experiment_name = state.experiment_name.strip() or "default"
+    if experiment_name != "default":
+        registration["experiment_name"] = experiment_name
+    else:
+        registration.pop("experiment_name", None)
     # Template leftovers (e.g. Gilda apply_transform_to: [555, 647]) must not survive
     # when the form only keeps a subset of channels.
     apply_raw = registration.get("apply_transform_to")

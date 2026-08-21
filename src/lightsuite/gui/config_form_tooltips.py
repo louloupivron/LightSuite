@@ -201,6 +201,11 @@ _MULTIRES: dict[str, str] = {
         "Channel name (e.g. 488, 555) whose overview↔ROI transform is estimated first and "
         "applied to co-registered channels. Can also be set in the GUI shell."
     ),
+    "experiment_name": (
+        "Slug for registration outputs under save_path/elastix_roi_to_overview/<name>/. "
+        "Change when re-running register after geometry or landmark changes to avoid "
+        "mixing old TIFFs and transforms."
+    ),
     "multires_channels": (
         "Per-channel overview (low mag) and ROI (high mag) paths. For mesoSPIM, optional "
         "overview metadata for stitched folders. For SmartSPIM, overview and ROI metadata "

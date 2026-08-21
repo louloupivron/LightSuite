@@ -429,6 +429,7 @@ def test_multires_form_roundtrip_geometry_and_registration() -> None:
             "landmarks": {"fit_mode": "affine"},
             "registration": {
                 "reference_channel": "488",
+                "experiment_name": "tg14_hybrid",
                 "overlap_margin_um": -10.0,
                 "write_full_overview_canvas": False,
             },
@@ -442,12 +443,14 @@ def test_multires_form_roundtrip_geometry_and_registration() -> None:
     assert state.geometry_mode == "hybrid"
     assert state.landmark_fit_mode == "affine"
     assert state.overlap_margin_um == -10.0
+    assert state.experiment_name == "tg14_hybrid"
     assert state.write_full_overview_canvas is False
     assert state.vendor_suite == "mesospim"
     updated = multires_form_to_raw(state, raw)
     assert updated["multires"]["geometry_mode"] == "hybrid"
     assert updated["multires"]["landmarks"]["fit_mode"] == "affine"
     assert updated["multires"]["registration"]["overlap_margin_um"] == -10.0
+    assert updated["multires"]["registration"]["experiment_name"] == "tg14_hybrid"
     assert updated["multires"]["vendor"]["suite"] == "mesospim"
     assert updated["import"]["annotations"][0]["path"] == "/a.csv"
 

@@ -455,6 +455,9 @@ class ConfigEditorDock:
         self._config_form.addRow("Pair manifest", self._pair_manifest.widget)
         self._reference_channel_edit = self._line_edit(self._mark_dirty)
         self._config_form.addRow("Reference channel", self._reference_channel_edit)
+        self._experiment_name_edit = self._line_edit(self._mark_dirty)
+        self._experiment_name_edit.setPlaceholderText("default")
+        self._config_form.addRow("Experiment name", self._experiment_name_edit)
         self._multires_channels_host = QWidget()
         self._multires_channels_layout = QVBoxLayout(self._multires_channels_host)
         self._multires_channels_layout.setContentsMargins(0, 0, 0, 0)
@@ -667,6 +670,7 @@ class ConfigEditorDock:
         if is_multires:
             self._update_multires_vendor_field_visibility()
         self._set_form_row_visible(form, self._reference_channel_edit, is_multires)
+        self._set_form_row_visible(form, self._experiment_name_edit, is_multires)
         multires_channels_wrapper = self._multires_channels_host.parentWidget()
         if multires_channels_wrapper is not None:
             self._set_form_row_visible(form, multires_channels_wrapper, is_multires)
@@ -708,6 +712,7 @@ class ConfigEditorDock:
                 (self._multires_custom_entry, "multires_custom_converter"),
                 (self._pair_manifest, "pair_manifest"),
                 (self._reference_channel_edit, "reference_channel"),
+                (self._experiment_name_edit, "experiment_name"),
                 (self._multires_channels_wrapper, "multires_channels"),
                 (self._geometry_mode_combo, "geometry_mode"),
                 (self._landmark_fit_mode_combo, "landmark_fit_mode"),
@@ -952,6 +957,7 @@ class ConfigEditorDock:
             self._multires_custom_entry.set_text(state.vendor_custom_entry)
             self._pair_manifest.set_text(state.pair_manifest)
             self._reference_channel_edit.setText(state.reference_channel)
+            self._experiment_name_edit.setText(state.experiment_name)
             self._set_combo_value(self._geometry_mode_combo, state.geometry_mode)
             self._set_combo_value(self._landmark_fit_mode_combo, state.landmark_fit_mode)
             self._overlap_margin_um.setValue(state.overlap_margin_um)
@@ -1527,6 +1533,7 @@ class ConfigEditorDock:
             vendor_custom_entry=self._multires_custom_entry.text(),
             pair_manifest=self._pair_manifest.text(),
             reference_channel=self._reference_channel_edit.text().strip(),
+            experiment_name=self._experiment_name_edit.text().strip() or "default",
             channels=channels,
             geometry_mode=str(self._geometry_mode_combo.currentData() or "metadata"),
             landmark_fit_mode=str(self._landmark_fit_mode_combo.currentData() or "similarity"),
