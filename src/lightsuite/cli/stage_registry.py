@@ -218,7 +218,10 @@ def _multires_inspect_geometry(config: Any, ctx: StageContext) -> Any:
 def _multires_check_geometry(config: Any, ctx: StageContext) -> Any:
     from lightsuite.multires.runner import check_multires_geometry
 
-    return check_multires_geometry(config)
+    return check_multires_geometry(
+        config,
+        level=config.multires.registration.geometry_check_level,
+    )
 
 
 def _multires_register(config: Any, ctx: StageContext) -> Any:

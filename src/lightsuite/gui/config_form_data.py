@@ -406,6 +406,7 @@ class MultiresFormState:
     landmark_fit_mode: str = "similarity"
     overlap_margin_um: float = 0.0
     write_full_overview_canvas: bool = True
+    geometry_check_level: str = "full"
     import_segmentation: bool = False
     import_converter: AnnotationConverterState = field(default_factory=AnnotationConverterState)
     import_annotations: list[AnnotationImportRow] = field(default_factory=list)
@@ -848,6 +849,7 @@ def multires_form_from_raw(raw: dict[str, Any]) -> MultiresFormState:
         landmark_fit_mode=str(landmarks.get("fit_mode") or "similarity"),
         overlap_margin_um=float(registration.get("overlap_margin_um") or 0.0),
         write_full_overview_canvas=bool(registration.get("write_full_overview_canvas", True)),
+        geometry_check_level=str(registration.get("geometry_check_level") or "full"),
         import_segmentation=import_segmentation_enabled_from_raw(raw),
         import_converter=import_converter_from_raw(raw),
         import_annotations=import_annotations_from_raw(raw),
@@ -917,6 +919,11 @@ def multires_form_to_raw(state: MultiresFormState, raw: dict[str, Any]) -> dict[
         registration.pop("reference_channel", None)
     registration["overlap_margin_um"] = state.overlap_margin_um
     registration["write_full_overview_canvas"] = state.write_full_overview_canvas
+    level = (state.geometry_check_level or "full").strip().lower()
+    if level and level != "full":
+        registration["geometry_check_level"] = level
+    else:
+        registration.pop("geometry_check_level", None)
     experiment_name = state.experiment_name.strip() or "default"
     if experiment_name != "default":
         registration["experiment_name"] = experiment_name

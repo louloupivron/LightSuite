@@ -737,10 +737,13 @@ def multires_match_points(
 @multires_app.command("check-geometry")
 def multires_check_geometry(
     config: str = typer.Option(..., "--config", "-c", help="Multires pipeline YAML config."),
-    level: str = typer.Option(
-        "full",
+    level: str | None = typer.Option(
+        None,
         "--level",
-        help="Geometry QA depth: metadata-only, slice-qc, or full (loads overlap crop).",
+        help=(
+            "Geometry QA depth: metadata-only, slice-qc, or full. "
+            "Defaults to multires.registration.geometry_check_level in the YAML."
+        ),
     ),
 ) -> None:
     """Validate FOV overlap and write geometry QA artifacts."""
@@ -748,13 +751,17 @@ def multires_check_geometry(
     from lightsuite.multires.config_models import MultiresGeometryCheckLevel
     from lightsuite.multires.runner import check_multires_geometry
 
-    try:
-        check_level = MultiresGeometryCheckLevel(level)
-    except ValueError as exc:
-        allowed = ", ".join(item.value for item in MultiresGeometryCheckLevel)
-        raise typer.BadParameter(f"level must be one of: {allowed}") from exc
+    cfg = load_multires_config(config)
+    if level is None:
+        check_level = cfg.multires.registration.geometry_check_level
+    else:
+        try:
+            check_level = MultiresGeometryCheckLevel(level)
+        except ValueError as exc:
+            allowed = ", ".join(item.value for item in MultiresGeometryCheckLevel)
+            raise typer.BadParameter(f"level must be one of: {allowed}") from exc
 
-    check_multires_geometry(load_multires_config(config), level=check_level)
+    check_multires_geometry(cfg, level=check_level)
 
 
 @multires_app.command("export-preview")

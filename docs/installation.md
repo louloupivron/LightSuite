@@ -244,6 +244,71 @@ GPU-accelerated cell detection is **not implemented in Python** — see [Python 
 
 ---
 
+## Speed and data storage
+
+LightSuite is I/O-heavy: many stages read large TIFF stacks or thousands of small plane files. **Where data lives** often matters more than CPU core count or `compute.workers`.
+
+### Put hot paths on fast local disk
+
+| Path | Used for |
+|------|----------|
+| `sample.source` / channel folders | Raw SmartSPIM / lightsheet TIFFs |
+| `sample.scratch` | Preprocess memmaps and temporary volumes |
+| `sample.save_path` | Checkpoints, registered outputs, multires geometry |
+| Multires `channels.*.overview` / `.roi` | Overview and ROI stacks |
+
+**Prefer local NVMe or SSD** for these paths. Registration on a **spinning HDD** or **network share** (SMB/NAS) can be **several times slower** than the same data on NVMe — especially for SmartSPIM **plane-per-file** folders (`Z000000_Ch0.tif`, …) where preprocess and multires check-geometry read **one file per Z plane**.
+
+Copy or symlink acquisition data to a fast drive before long runs when the instrument export lives on slow storage.
+
+### `compute.workers` (brain / spinal preprocess only)
+
+| Layout | Workers |
+|--------|---------|
+| Brain **channelperfile** (one hyperstack per channel) | Uses `compute.workers` (default 4) |
+| Brain **planeperfile** (SmartSPIM `Ch0/`, Terastitcher) | **Forced to 1** — parallel reads thrash disk |
+| Spinal **planeperfile** | Uses workers (capped at 8) |
+| Init-registration, register, export, multires | **Ignored** |
+
+Raising workers on SmartSPIM brain data does **not** speed preprocess.
+
+### Multires check-geometry levels
+
+Set in the GUI (**Check geometry level**) or YAML:
+
+```yaml
+multires:
+  registration:
+    geometry_check_level: slice-qc   # metadata-only | slice-qc | full (default)
+```
+
+| Level | Loads | Typical time |
+|-------|--------|--------------|
+| `metadata-only` | Manifest geometry math only | Seconds |
+| `slice-qc` | One mid-plane overview + ROI pair | Minutes |
+| `full` | Full overlap crop + ROI resample | Long on HDD (tens of minutes) |
+
+Use **`slice-qc`** for a first QA pass on Windows; use **`full`** before register when you need overlap TIFFs and full QC plots.
+
+### Multires memory / chunking
+
+```yaml
+multires:
+  registration:
+    max_slab_bytes: 2000000000   # default 500000000 — raise on large-RAM machines for fewer Z chunks
+    overlap_margin_um: 0           # negative values shrink the overlap crop
+```
+
+Larger `max_slab_bytes` reduces the number of resample chunks (faster, more RAM). Ensure `sample.scratch` and the system have enough free memory.
+
+### Windows notes
+
+- Exclude scratch, save, and data folders from real-time antivirus scanning when possible.
+- After `split-smartspim-channels`, point configs at **`Ch0` / `Ch1` folders**, not the flat interleaved `All_Channels` parent.
+- Use `lightsuite doctor -c my.yaml` to confirm atlas, scratch, and BCPD paths before long runs.
+
+---
+
 ## Optional extras
 
 | Extra | Install | Purpose |

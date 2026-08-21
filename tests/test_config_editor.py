@@ -546,6 +546,28 @@ def test_multires_form_prunes_stale_apply_transform_to() -> None:
     assert updated["multires"]["vendor"]["suite"] == "smartspim"
 
 
+def test_multires_form_roundtrips_geometry_check_level() -> None:
+    raw = {
+        "sample": {"name": "s", "save_path": "/out"},
+        "multires": {
+            "vendor": {"suite": "smartspim"},
+            "channels": {"488": {"overview": "/ov", "roi": "/roi"}},
+            "registration": {
+                "reference_channel": "488",
+                "geometry_check_level": "slice-qc",
+            },
+        },
+    }
+    state = multires_form_from_raw(raw)
+    assert state.geometry_check_level == "slice-qc"
+    updated = multires_form_to_raw(state, raw)
+    assert updated["multires"]["registration"]["geometry_check_level"] == "slice-qc"
+
+    state.geometry_check_level = "full"
+    updated = multires_form_to_raw(state, raw)
+    assert "geometry_check_level" not in updated["multires"]["registration"]
+
+
 def test_import_annotations_to_raw_clears_empty_rows() -> None:
     raw = {"import": {"write_csv": True, "annotations": [{"format": "points_csv", "path": "/a.csv"}]}}
     rows = import_annotations_from_raw(raw)

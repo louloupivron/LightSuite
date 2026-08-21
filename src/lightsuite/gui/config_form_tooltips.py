@@ -235,6 +235,11 @@ _MULTIRES: dict[str, str] = {
         "Extra margin (µm) around the overview/ROI overlap region. Use negative values "
         "to shrink the working canvas and save memory."
     ),
+    "geometry_check_level": (
+        "How much data multires check-geometry loads: metadata-only (fast, manifest math "
+        "only), slice-qc (one mid-plane pair), or full (overlap crop + ROI resample — "
+        "slow on HDD; use slice-qc for a first pass on Windows)."
+    ),
     "write_full_overview_canvas": (
         "When enabled, registration writes a full-overview registered canvas in addition "
         "to overlap crops (needed for some import-annotations workflows)."

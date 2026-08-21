@@ -128,6 +128,7 @@ class MultiresRegistrationSettings(BaseModel):
     registration_bin: int = Field(default=1, ge=1)
     max_slab_bytes: int = Field(default=500_000_000, ge=50_000_000)
     experiment_name: str = "default"
+    geometry_check_level: MultiresGeometryCheckLevel = MultiresGeometryCheckLevel.FULL
     elastix_stages: Annotated[list[str], Field(min_length=1)] = ["translation", "rigid"]
     write_full_overview_canvas: bool = True
     reference_channel: str | None = None

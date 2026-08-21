@@ -334,6 +334,12 @@ class ConfigEditorDock:
         self._config_form.addRow("Landmark fit mode", self._landmark_fit_mode_combo)
         self._overlap_margin_um = self._float_spin(-500.0, 500.0, self._mark_dirty)
         self._config_form.addRow("Overlap margin µm", self._overlap_margin_um)
+        self._geometry_check_level_combo = QComboBox()
+        self._geometry_check_level_combo.addItem("Full (overlap crop + resample)", "full")
+        self._geometry_check_level_combo.addItem("Slice QC (one mid-plane)", "slice-qc")
+        self._geometry_check_level_combo.addItem("Metadata only (fast)", "metadata-only")
+        self._geometry_check_level_combo.currentIndexChanged.connect(self._mark_dirty)
+        self._config_form.addRow("Check geometry level", self._geometry_check_level_combo)
         self._write_full_overview_canvas = QCheckBox("Write full overview canvas")
         self._write_full_overview_canvas.stateChanged.connect(self._mark_dirty)
         self._config_form.addRow(self._write_full_overview_canvas)
@@ -647,6 +653,7 @@ class ConfigEditorDock:
         self._set_form_row_visible(form, self._geometry_mode_combo, is_multires)
         self._update_geometry_mode_field_visibility()
         self._set_form_row_visible(form, self._overlap_margin_um, is_multires)
+        self._set_form_row_visible(form, self._geometry_check_level_combo, is_multires)
         self._set_form_row_visible(form, self._write_full_overview_canvas, is_multires)
         show_import_host = is_brain or is_spinal or is_multires
         import_on = show_import_host and self._import_segmentation_check.isChecked()
@@ -717,6 +724,7 @@ class ConfigEditorDock:
                 (self._geometry_mode_combo, "geometry_mode"),
                 (self._landmark_fit_mode_combo, "landmark_fit_mode"),
                 (self._overlap_margin_um, "overlap_margin_um"),
+                (self._geometry_check_level_combo, "geometry_check_level"),
                 (self._write_full_overview_canvas, "write_full_overview_canvas"),
                 (self._import_segmentation_check, "import_segmentation"),
                 (self._converter_suite_combo, "segmentation_suite"),
@@ -961,6 +969,10 @@ class ConfigEditorDock:
             self._set_combo_value(self._geometry_mode_combo, state.geometry_mode)
             self._set_combo_value(self._landmark_fit_mode_combo, state.landmark_fit_mode)
             self._overlap_margin_um.setValue(state.overlap_margin_um)
+            self._set_combo_value(
+                self._geometry_check_level_combo,
+                state.geometry_check_level or "full",
+            )
             self._write_full_overview_canvas.setChecked(state.write_full_overview_canvas)
             self._fill_import_section(
                 enabled=state.import_segmentation,
@@ -1538,6 +1550,9 @@ class ConfigEditorDock:
             geometry_mode=str(self._geometry_mode_combo.currentData() or "metadata"),
             landmark_fit_mode=str(self._landmark_fit_mode_combo.currentData() or "similarity"),
             overlap_margin_um=self._overlap_margin_um.value(),
+            geometry_check_level=str(
+                self._geometry_check_level_combo.currentData() or "full"
+            ),
             write_full_overview_canvas=self._write_full_overview_canvas.isChecked(),
             import_segmentation=self._import_segmentation_check.isChecked(),
             import_converter=self._collect_import_converter(),
