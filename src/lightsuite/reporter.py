@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import contextvars
 import io
+import threading
 import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -12,10 +13,16 @@ from typing import Protocol, runtime_checkable
 
 from rich.console import Console
 
+from lightsuite.exceptions import StageCancelledError
+
 _DEFAULT_CONSOLE = Console()
 
 _current_reporter: contextvars.ContextVar[Reporter | None] = contextvars.ContextVar(
     "lightsuite_reporter",
+    default=None,
+)
+_stage_cancel_event: contextvars.ContextVar[threading.Event | None] = contextvars.ContextVar(
+    "lightsuite_stage_cancel",
     default=None,
 )
 
@@ -23,6 +30,23 @@ _current_reporter: contextvars.ContextVar[Reporter | None] = contextvars.Context
 def get_active_reporter() -> Reporter | None:
     """Return the reporter active in the current context, if any."""
     return _current_reporter.get()
+
+
+@contextlib.contextmanager
+def stage_cancellation(cancel_event: threading.Event | None) -> Iterator[None]:
+    """Bind a cancel event for the current stage worker thread."""
+    token = _stage_cancel_event.set(cancel_event)
+    try:
+        yield
+    finally:
+        _stage_cancel_event.reset(token)
+
+
+def check_stage_cancelled() -> None:
+    """Raise if the GUI user requested stage cancellation."""
+    event = _stage_cancel_event.get()
+    if event is not None and event.is_set():
+        raise StageCancelledError("Stage cancelled by user.")
 
 
 def format_duration(seconds: float) -> str:

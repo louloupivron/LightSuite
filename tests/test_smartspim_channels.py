@@ -86,3 +86,15 @@ def test_split_to_external_output(tmp_path: Path) -> None:
     assert set(result.channel_dirs) == {0, 1, 2}
     assert (out / "Ch2" / "Z000000_Ch2.tif").is_file()
     assert (src / "Z000000_Ch2.tif").is_file()
+
+
+def test_discover_rejects_interleaved_smartspim_planes(tmp_path: Path) -> None:
+    from lightsuite.config.models import TiffLayout
+    from lightsuite.io.discover import discover_tiff_stack
+
+    src = tmp_path / "All_Channels"
+    for z in (0, 10):
+        for ch in (0, 1):
+            _touch(src / f"Z{z:06d}_Ch{ch}.tif")
+    with pytest.raises(ValueError, match="interleaved"):
+        discover_tiff_stack(src, tiff_type=TiffLayout.PLANE_PER_FILE)

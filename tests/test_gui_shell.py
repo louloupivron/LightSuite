@@ -31,6 +31,17 @@ def test_detect_workflow_multires() -> None:
     assert detect_workflow(raw) == "multires"
 
 
+def test_detect_workflow_multires_vendor_only() -> None:
+    raw = {
+        "sample": {"name": "x", "save_path": "/out"},
+        "multires": {
+            "vendor": {"suite": "smartspim"},
+            "geometry_mode": "metadata",
+        },
+    }
+    assert detect_workflow(raw) == "multires"
+
+
 def test_detect_workflow_brain_with_multires_link() -> None:
     raw = {
         "sample": {"name": "x"},

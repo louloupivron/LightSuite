@@ -17,7 +17,7 @@ from lightsuite.atlas.brainglobe_backend import (
     list_lightsuite_brainglobe_atlases,
 )
 from lightsuite.cli.spaces import default_export_space_checks, export_spaces_from_checks
-from lightsuite.config.workflow import detect_workflow, load_project
+from lightsuite.config.workflow import detect_workflow, is_brain_multires_link, load_project
 from lightsuite.exceptions import LightsuiteConfigError
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -464,14 +464,24 @@ def load_template_raw(workflow: str) -> tuple[str, dict[str, Any]]:
     return key, raw
 
 
-def load_raw_config(path: Path) -> tuple[str, dict[str, Any]]:
+def load_raw_config(path: Path, *, workflow_hint: str | None = None) -> tuple[str, dict[str, Any]]:
     """Read a config file and return ``(workflow, raw_dict)``."""
     resolved = path.expanduser().resolve()
     raw = yaml.safe_load(resolved.read_text(encoding="utf-8")) or {}
     if not isinstance(raw, dict) or not raw:
         msg = f"Config must be a non-empty YAML mapping: {resolved}"
         raise LightsuiteConfigError(msg)
-    return detect_workflow(raw), raw
+    workflow = detect_workflow(raw)
+    if workflow_hint in {"brain", "spinal", "multires"} and workflow != workflow_hint:
+        multires = raw.get("multires")
+        if (
+            workflow_hint == "multires"
+            and isinstance(multires, dict)
+            and multires
+            and not is_brain_multires_link(multires)
+        ):
+            workflow = "multires"
+    return workflow, raw
 
 
 def dump_config_dict(data: dict[str, Any]) -> str:
@@ -542,6 +552,20 @@ def _apply_analysis_to_raw(
     return out
 
 
+def _optional_registration_float(
+    registration: dict[str, Any],
+    key: str,
+    *legacy_keys: str,
+    default: float,
+) -> float:
+    if key in registration and registration[key] is not None:
+        return float(registration[key])
+    for legacy in legacy_keys:
+        if legacy in registration and registration[legacy] is not None:
+            return float(registration[legacy])
+    return default
+
+
 def brain_form_from_raw(raw: dict[str, Any]) -> BrainFormState:
     sample = raw.get("sample") or {}
     source = sample.get("source") or {}
@@ -583,15 +607,17 @@ def brain_form_from_raw(raw: dict[str, Any]) -> BrainFormState:
         bspline_spatial_scale_mm=float(registration.get("bspline_spatial_scale_mm") or 0.64),
         control_point_weight=float(registration.get("control_point_weight") or 0.2),
         augment_points=bool(registration.get("augment_points", False)),
-        dual_channel_mi_weight_primary=float(
-            registration.get("dual_channel_mi_weight_primary")
-            or registration.get("dual_channel_mi_weight_autofluor")
-            or 0.4
+        dual_channel_mi_weight_primary=_optional_registration_float(
+            registration,
+            "dual_channel_mi_weight_primary",
+            "dual_channel_mi_weight_autofluor",
+            default=0.4,
         ),
-        dual_channel_mi_weight_secondary=float(
-            registration.get("dual_channel_mi_weight_secondary")
-            or registration.get("dual_channel_mi_weight_signal")
-            or 0.4
+        dual_channel_mi_weight_secondary=_optional_registration_float(
+            registration,
+            "dual_channel_mi_weight_secondary",
+            "dual_channel_mi_weight_signal",
+            default=0.4,
         ),
         orientation=_parse_orientation(registration.get("orientation")),
         canvas_mode=str(registration.get("canvas_mode") or "off").lower(),
@@ -853,6 +879,8 @@ def multires_form_to_raw(state: MultiresFormState, raw: dict[str, Any]) -> dict[
         custom_entry=state.vendor_custom_entry,
         multires=multires,
     )
+    if state.vendor_suite.strip().lower() != "mesospim":
+        multires.pop("mesospim_geometry", None)
 
     multires["geometry_mode"] = state.geometry_mode
     landmarks = dict(multires.get("landmarks") or {})
@@ -906,7 +934,11 @@ def multires_form_to_raw(state: MultiresFormState, raw: dict[str, Any]) -> dict[
     )
 
 
-def try_validate_config_dict(data: dict[str, Any]) -> tuple[str, Any] | LightsuiteConfigError:
+def try_validate_config_dict(
+    data: dict[str, Any],
+    *,
+    workflow: str | None = None,
+) -> tuple[str, Any] | LightsuiteConfigError:
     """Validate a config mapping via the normal loaders."""
     text = dump_config_dict(data)
     with tempfile.NamedTemporaryFile(
@@ -918,7 +950,25 @@ def try_validate_config_dict(data: dict[str, Any]) -> tuple[str, Any] | Lightsui
         handle.write(text)
         temp_path = Path(handle.name)
     try:
-        return load_project(temp_path)
+        detected = detect_workflow(data)
+        use_workflow = workflow if workflow in {"brain", "spinal", "multires"} else detected
+        multires = data.get("multires")
+        if (
+            workflow == "multires"
+            and isinstance(multires, dict)
+            and multires
+            and not is_brain_multires_link(multires)
+        ):
+            use_workflow = "multires"
+        if use_workflow == detected:
+            return load_project(temp_path)
+        from lightsuite.config.loader import load_config, load_multires_config, load_spinal_config
+
+        if use_workflow == "multires":
+            return "multires", load_multires_config(temp_path)
+        if use_workflow == "spinal":
+            return "spinal", load_spinal_config(temp_path)
+        return "brain", load_config(temp_path)
     except (LightsuiteConfigError, FileNotFoundError, OSError, ValueError) as exc:
         if isinstance(exc, LightsuiteConfigError):
             return exc

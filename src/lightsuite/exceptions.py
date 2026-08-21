@@ -21,6 +21,10 @@ class LightsuiteExternalToolError(LightsuiteError):
     """Required external binary or library is missing."""
 
 
+class StageCancelledError(LightsuiteError):
+    """Pipeline stage stopped by the user."""
+
+
 def format_validation_error(exc: ValidationError, *, config_path: str | None = None) -> str:
     """Turn Pydantic validation errors into a short, actionable message."""
     lines: list[str] = []

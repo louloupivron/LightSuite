@@ -11,12 +11,36 @@ from lightsuite.config.loader import load_config, load_multires_config, load_spi
 from lightsuite.exceptions import LightsuiteConfigError
 
 
+_MULTIRES_PIPELINE_KEYS = frozenset(
+    {
+        "pair_manifest",
+        "channels",
+        "pair_label",
+        "vendor",
+        "geometry_mode",
+        "landmarks",
+        "registration",
+        "mesospim_geometry",
+    }
+)
+
+
+def is_brain_multires_link(multires: dict[str, Any]) -> bool:
+    """True when ``multires`` only points at an external multires YAML (brain combined workflow)."""
+    if not isinstance(multires, dict) or not multires:
+        return False
+    config_ref = multires.get("config")
+    if not isinstance(config_ref, str) or not config_ref.strip():
+        return False
+    return not any(key in multires for key in _MULTIRES_PIPELINE_KEYS)
+
+
 def is_multires_pipeline_config(raw: dict[str, Any]) -> bool:
     """True when ``multires`` is a full multires workflow block (not a brain link)."""
     multires = raw.get("multires")
-    if not isinstance(multires, dict):
+    if not isinstance(multires, dict) or not multires:
         return False
-    return bool(multires.get("pair_manifest") or multires.get("channels"))
+    return not is_brain_multires_link(multires)
 
 
 def detect_workflow(raw: dict[str, Any]) -> str:

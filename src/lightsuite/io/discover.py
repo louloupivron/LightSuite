@@ -200,12 +200,42 @@ def _tiff_channel_stack_dims(path: Path) -> tuple[int, int, int, bool, bool, str
     return ny, nx, nz, planes_in_time, use_native, mode
 
 
+_SMARTSPIM_CHANNEL_PLANE_RE = re.compile(
+    r"^.+_Ch(?P<channel>\d+)\.(?:tif|tiff)$",
+    re.IGNORECASE,
+)
+
+
+def _smartspim_interleaved_channel_indices(tfiles: Sequence[Path]) -> set[int]:
+    channels: set[int] = set()
+    for path in tfiles:
+        match = _SMARTSPIM_CHANNEL_PLANE_RE.match(path.name)
+        if match is not None:
+            channels.add(int(match.group("channel")))
+    return channels
+
+
+def _raise_if_smartspim_interleaved_planes(folder: Path, tfiles: list[Path]) -> None:
+    channels = _smartspim_interleaved_channel_indices(tfiles)
+    if len(channels) < 2:
+        return
+    msg = (
+        f"SmartSPIM interleaved planes detected in {folder} "
+        f"(channels {sorted(channels)} in one folder). "
+        "Run: lightsuite brain split-smartspim-channels -s <All_Channels> "
+        "then set source.channels to the Ch0/Ch1 folders (planeperfile)."
+    )
+    raise ValueError(msg)
+
+
 def _discover_planeperfile_folder(folder: Path) -> tuple[tuple[Path, ...], int, int, int]:
     """Return sorted plane TIFFs and ny, nx, nz for one planeperfile root."""
     tfiles = _list_tiffs(folder)
     if not tfiles:
         msg = f"No TIFF files found in {folder}"
         raise FileNotFoundError(msg)
+
+    _raise_if_smartspim_interleaved_planes(folder, tfiles)
 
     nz = len(tfiles)
     first = tfiles[0]

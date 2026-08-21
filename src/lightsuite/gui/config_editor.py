@@ -130,6 +130,12 @@ class _PathField:
     def set_text(self, value: str) -> None:
         self.line.setText(value)
 
+    def set_browse_mode(self, mode: str) -> None:
+        self._browse_mode = mode
+
+    def set_browse_label(self, label: str) -> None:
+        self._browse_label = label
+
     def set_tooltip(self, text: str) -> None:
         self.widget.setToolTip(text)
         self.line.setToolTip(text)
@@ -318,7 +324,7 @@ class ConfigEditorDock:
         self._geometry_mode_combo = QComboBox()
         self._geometry_mode_combo.addItem("Metadata (manifest)", "metadata")
         self._geometry_mode_combo.addItem("Hybrid (landmarks)", "hybrid")
-        self._geometry_mode_combo.currentIndexChanged.connect(self._mark_dirty)
+        self._geometry_mode_combo.currentIndexChanged.connect(self._on_geometry_mode_changed)
         self._config_form.addRow("Geometry mode", self._geometry_mode_combo)
         self._landmark_fit_mode_combo = QComboBox()
         self._landmark_fit_mode_combo.addItem("Similarity", "similarity")
@@ -636,7 +642,7 @@ class ConfigEditorDock:
         self._set_form_row_visible(form, self._orientation_edit, is_brain)
         self._set_form_row_visible(form, self._canvas_mode_combo, is_brain)
         self._set_form_row_visible(form, self._geometry_mode_combo, is_multires)
-        self._set_form_row_visible(form, self._landmark_fit_mode_combo, is_multires)
+        self._update_geometry_mode_field_visibility()
         self._set_form_row_visible(form, self._overlap_margin_um, is_multires)
         self._set_form_row_visible(form, self._write_full_overview_canvas, is_multires)
         show_import_host = is_brain or is_spinal or is_multires
@@ -1068,7 +1074,25 @@ class ConfigEditorDock:
         self._update_converter_field_visibility()
         self._mark_dirty()
 
+    def _on_geometry_mode_changed(self, _index: int = 0) -> None:
+        self._update_geometry_mode_field_visibility()
+        self._mark_dirty()
+
+    def _update_geometry_mode_field_visibility(self) -> None:
+        form = self._config_form
+        is_hybrid = str(self._geometry_mode_combo.currentData() or "metadata") == "hybrid"
+        self._set_form_row_visible(
+            form,
+            self._landmark_fit_mode_combo,
+            self._workflow == "multires" and is_hybrid,
+        )
+
     def _on_multires_vendor_changed(self, _index: int = 0) -> None:
+        suite = str(self._multires_vendor_combo.currentData() or "mesospim")
+        if suite != "mesospim" and isinstance(self._raw.get("multires"), dict):
+            multires = dict(self._raw["multires"])
+            multires.pop("mesospim_geometry", None)
+            self._raw["multires"] = multires
         self._update_multires_vendor_field_visibility()
         self._mark_dirty()
 
@@ -1085,6 +1109,26 @@ class ConfigEditorDock:
         if multires_channels_wrapper is not None:
             self._set_form_row_visible(form, multires_channels_wrapper, uses_channels)
         self._update_multires_channel_meta_visibility()
+        self._update_multires_channel_browse_modes()
+
+    def _update_multires_channel_browse_modes(self) -> None:
+        suite = str(self._multires_vendor_combo.currentData() or "mesospim")
+        for row in self._multires_channel_rows:
+            if suite == "smartspim":
+                row.overview_field.set_browse_mode("directory")
+                row.overview_field.set_browse_label("Overview folder")
+                row.roi_field.set_browse_mode("directory")
+                row.roi_field.set_browse_label("ROI folder")
+            elif suite == "mesospim":
+                row.overview_field.set_browse_mode("directory")
+                row.overview_field.set_browse_label("Overview folder or TIFF")
+                row.roi_field.set_browse_mode("file")
+                row.roi_field.set_browse_label("ROI volume")
+            else:
+                row.overview_field.set_browse_mode("file")
+                row.overview_field.set_browse_label("Overview volume")
+                row.roi_field.set_browse_mode("file")
+                row.roi_field.set_browse_label("ROI volume")
 
     def _update_multires_channel_meta_visibility(self) -> None:
         suite = str(self._multires_vendor_combo.currentData() or "mesospim")
@@ -1377,6 +1421,7 @@ class ConfigEditorDock:
             )
         )
         self._update_multires_channel_meta_visibility()
+        self._update_multires_channel_browse_modes()
 
     def _remove_multires_channel_row(self, name_edit: Any) -> None:
         for index, row in enumerate(self._multires_channel_rows):
@@ -1594,7 +1639,7 @@ class ConfigEditorDock:
         self._update_path_label()
         self._on_log(f"Saved config to {self._config_path}")
 
-        validation = try_validate_config_dict(raw)
+        validation = try_validate_config_dict(raw, workflow=self._workflow)
         if isinstance(validation, LightsuiteConfigError):
             self._status_label.setText(f"Saved (validation pending): {validation}")
             self._on_log(f"Config saved but not loaded — fix validation errors: {validation}")

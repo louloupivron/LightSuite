@@ -331,6 +331,28 @@ def test_brain_form_reads_legacy_dual_channel_mi_weight_keys() -> None:
     assert state.dual_channel_mi_weight_secondary == 0.8
 
 
+def test_brain_form_preserves_zero_dual_channel_mi_weights() -> None:
+    raw = {
+        "sample": {
+            "name": "mouse",
+            "source": {"format": "tiff_stack", "path": "/data", "tiff_type": "channelperfile"},
+            "scratch": "/scratch",
+            "save_path": "/out",
+            "voxel_um": [1.0, 1.0, 1.0],
+        },
+        "atlas": {"provider": "allen", "resolution_um": 10, "atlas_dir": "/atlas"},
+        "registration": {
+            "resolution_um": 20,
+            "channel_primary": 1,
+            "dual_channel_mi_weight_primary": 0.0,
+            "dual_channel_mi_weight_secondary": 0.0,
+        },
+    }
+    state = brain_form_from_raw(raw)
+    assert state.dual_channel_mi_weight_primary == 0.0
+    assert state.dual_channel_mi_weight_secondary == 0.0
+
+
 def test_brain_form_roundtrip_analysis_metrics() -> None:
     raw = {
         "sample": {
@@ -428,6 +450,26 @@ def test_multires_form_roundtrip_geometry_and_registration() -> None:
     assert updated["multires"]["registration"]["overlap_margin_um"] == -10.0
     assert updated["multires"]["vendor"]["suite"] == "mesospim"
     assert updated["import"]["annotations"][0]["path"] == "/a.csv"
+
+
+def test_multires_form_drops_mesospim_geometry_for_smartspim_vendor() -> None:
+    raw = {
+        "sample": {"name": "s", "save_path": "/out"},
+        "multires": {
+            "vendor": {"suite": "smartspim"},
+            "geometry_mode": "metadata",
+            "mesospim_geometry": {
+                "overview": {"lateral_flip": [1, -1]},
+                "roi": {"lateral_flip": [1, -1]},
+            },
+            "channels": {"640": {"overview": "/ov", "roi": "/roi"}},
+        },
+    }
+    state = multires_form_from_raw(raw)
+    state.vendor_suite = "smartspim"
+    updated = multires_form_to_raw(state, raw)
+    assert updated["multires"]["vendor"]["suite"] == "smartspim"
+    assert "mesospim_geometry" not in updated["multires"]
 
 
 def test_multires_form_roundtrip_vendor_manifest_and_custom() -> None:

@@ -14,7 +14,12 @@ import tifffile
 from rich.console import Console
 
 from lightsuite.config.models import BrainPipelineConfig, TiffLayout
-from lightsuite.reporter import emit_pipeline_message, report_step_progress
+from lightsuite.reporter import (
+    check_stage_cancelled,
+    emit_pipeline_message,
+    format_duration,
+    report_step_progress,
+)
 from lightsuite.io.discover import (
     TiffStackDiscovery,
     discover_tiff_stack,
@@ -131,11 +136,14 @@ def _iter_processed_slices(
 ) -> Iterator[SliceProcessResult]:
     if workers <= 1:
         for job in jobs:
+            check_stage_cancelled()
             yield process_slice_job(job)
         return
 
     with ProcessPoolExecutor(max_workers=workers) as pool:
-        yield from pool.map(process_slice_job, jobs, chunksize=1)
+        for result in pool.map(process_slice_job, jobs, chunksize=1):
+            check_stage_cancelled()
+            yield result
 
 
 def _allocate_xy_stack(
@@ -421,6 +429,7 @@ def preprocess_lightsheet_volume(
             )
 
     for ichannel in range(1, nchans + 1):
+        check_stage_cancelled()
         chan0 = ichannel - 1
         sample_path = _registration_tiff_path(config.sample.save_path, ichannel, registres)
         regvolpaths[ichannel] = sample_path

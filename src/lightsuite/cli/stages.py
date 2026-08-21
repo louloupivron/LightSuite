@@ -155,16 +155,16 @@ def brain_stage_specs(config: BrainPipelineConfig) -> list[StageSpec]:
             manual=True,
         ),
         StageSpec(
+            "init-registration",
+            "Init registration",
+            "regopts.json → original_trans",
+        ),
+        StageSpec(
             "align-slices",
             "Align slices",
             "slice_correspondence.json",
             optional=True,
             manual=True,
-        ),
-        StageSpec(
-            "init-registration",
-            "Init registration",
-            "regopts.json → original_trans",
         ),
         StageSpec(
             "match-points",

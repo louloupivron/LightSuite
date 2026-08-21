@@ -59,6 +59,14 @@ def test_brain_stage_specs_include_slice_stages_by_default(tmp_path: Path) -> No
     assert "refine-auto-points" not in ids
 
 
+def test_brain_stage_specs_init_registration_before_align_slices(tmp_path: Path) -> None:
+    cfg_path = tmp_path / "brain.yaml"
+    _write_brain_config(cfg_path, tmp_path)
+    cfg = load_config(cfg_path)
+    ids = [spec.id for spec in brain_stage_specs(cfg)]
+    assert ids.index("init-registration") < ids.index("align-slices")
+
+
 def test_brain_stage_specs_include_align_slices_when_correspondence_disabled(
     tmp_path: Path,
 ) -> None:
