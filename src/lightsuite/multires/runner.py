@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 import numpy as np
@@ -44,10 +45,11 @@ from lightsuite.multires.spec_geometry import (
     transformed_bounds_from_spec,
 )
 from lightsuite.multires.volume import load_manifest_xy_crop, write_sitk_hyperstack_tiff
+from lightsuite.reporter import emit_pipeline_message, format_duration
 
 
 def _status(message: str) -> None:
-    print(message, flush=True)
+    emit_pipeline_message(message)
 
 
 def _volume_stem(path: Path) -> str:
@@ -194,6 +196,7 @@ def _write_geometry_artifacts(
 
     roi_tform = landmark_fit.roi_to_overview_tform if landmark_fit is not None else None
     if level == MultiresGeometryCheckLevel.SLICE_QC:
+        emit_pipeline_message("Check-geometry: loading mid-plane overlap crops for slice QC…")
         center_um = tuple(float(v) for v in 0.5 * (overlap_min + overlap_max))
         overview_start, overview_size = crop_index_range_from_physical_box(
             manifest.overview,
@@ -263,8 +266,13 @@ def _write_geometry_artifacts(
             geometry_mode=mode.value,
             alignment_metrics=alignment_metrics,
         )
+        if alignment_metrics.get("slice_ncc") is not None:
+            emit_pipeline_message(
+                f"Check-geometry: slice NCC {alignment_metrics['slice_ncc']:.3f}"
+            )
     elif level == MultiresGeometryCheckLevel.FULL:
         assert prepared is not None
+        emit_pipeline_message("Check-geometry: writing full overlap QC plot and preview crop…")
         save_geometry_overlap_qc_plot(
             overview=prepared.fixed_cropped,
             roi=prepared.moving,
@@ -280,6 +288,7 @@ def _write_geometry_artifacts(
         geometry_report_paths["cropped_overview_preview"] = str(cropped_path)
 
     report_path.write_text(json.dumps(serializable, indent=2), encoding="utf-8")
+    emit_pipeline_message(f"Check-geometry: wrote geometry report → {report_path.name}")
 
     experiment_slug = sanitize_experiment_name(cfg.multires.registration.experiment_name)
     landmark_session_path = None
@@ -321,15 +330,46 @@ def check_multires_geometry(
     level: MultiresGeometryCheckLevel = MultiresGeometryCheckLevel.FULL,
 ) -> MultiresRegOptsCheckpoint:
     """Validate FOV overlap and write geometry QA artifacts."""
+    t0 = time.perf_counter()
+    mode = cfg.multires.geometry_mode
+    emit_pipeline_message(
+        f"Check-geometry: starting ({level.value}, geometry mode {mode.value})…"
+    )
+
+    emit_pipeline_message("Check-geometry: resolving pair manifest…")
     manifest, manifest_path = resolve_pair_manifest(cfg)
     manifest_dir = manifest_path.parent
+    overview_stem = _volume_stem(Path(manifest.overview.volume_path))
+    roi_stem = _volume_stem(Path(manifest.roi.volume_path))
+    emit_pipeline_message(
+        f"Check-geometry: pair {manifest.pair_label} — {overview_stem} vs {roi_stem} "
+        f"({format_duration(time.perf_counter() - t0)})"
+    )
 
     if level in (MultiresGeometryCheckLevel.METADATA_ONLY, MultiresGeometryCheckLevel.SLICE_QC):
+        if mode != MultiresGeometryMode.METADATA:
+            emit_pipeline_message(
+                "Check-geometry: loading landmarks and fitting coarse transform…"
+            )
+        emit_pipeline_message("Check-geometry: computing overlap bounds…")
+        t_overlap = time.perf_counter()
         overlap_min, overlap_max, crop_start_index, landmark_fit = _lightweight_geometry_context(
             cfg,
             manifest,
         )
-        return _write_geometry_artifacts(
+        overlap_msg = (
+            f"crop start {crop_start_index}, "
+            f"overlap size "
+            f"{[float(overlap_max[i] - overlap_min[i]) for i in range(3)]} µm"
+        )
+        if landmark_fit is not None:
+            overlap_msg += f", landmark RMS {landmark_fit.rms_error_um:.2f} µm"
+        emit_pipeline_message(
+            f"Check-geometry: overlap bounds ready in {format_duration(time.perf_counter() - t_overlap)} "
+            f"({overlap_msg})"
+        )
+        emit_pipeline_message(f"Check-geometry: writing QA artifacts ({level.value})…")
+        checkpoint = _write_geometry_artifacts(
             cfg=cfg,
             manifest=manifest,
             manifest_dir=manifest_dir,
@@ -339,10 +379,30 @@ def check_multires_geometry(
             landmark_fit=landmark_fit,
             level=level,
         )
+        emit_pipeline_message(
+            f"Check-geometry: complete in {format_duration(time.perf_counter() - t0)}"
+        )
+        return checkpoint
 
+    emit_pipeline_message(
+        "Check-geometry: loading overview overlap crop and resampling ROI…"
+    )
+    t_prep = time.perf_counter()
     prepared = prepare_multires_registration_pair(cfg, manifest=manifest)
     overlap_min, overlap_max = prepared.overlap_box
-    return _write_geometry_artifacts(
+    fixed_size = prepared.fixed_cropped.GetSize()
+    moving_size = prepared.moving.GetSize()
+    prep_msg = (
+        f"overview crop {tuple(fixed_size)}, ROI resampled {tuple(moving_size)}"
+    )
+    if prepared.landmark_fit is not None:
+        prep_msg += f", landmark RMS {prepared.landmark_fit.rms_error_um:.2f} µm"
+    emit_pipeline_message(
+        f"Check-geometry: overlap volumes ready in {format_duration(time.perf_counter() - t_prep)} "
+        f"({prep_msg})"
+    )
+    emit_pipeline_message("Check-geometry: writing QA artifacts (full)…")
+    checkpoint = _write_geometry_artifacts(
         cfg=cfg,
         manifest=manifest,
         manifest_dir=manifest_dir,
@@ -353,6 +413,8 @@ def check_multires_geometry(
         level=MultiresGeometryCheckLevel.FULL,
         prepared=prepared,
     )
+    emit_pipeline_message(f"Check-geometry: complete in {format_duration(time.perf_counter() - t0)}")
+    return checkpoint
 
 
 def run_multires_registration(cfg: MultiresPipelineConfig) -> MultiresRegOptsCheckpoint:
