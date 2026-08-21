@@ -9,6 +9,8 @@ import numpy as np
 import tifffile
 import yaml
 
+import pytest
+
 from lightsuite.config.loader import (
     load_multires_config,
     save_mesospim_lateral_flip_to_multires_config,
@@ -173,6 +175,36 @@ def test_run_multires_inspect_geometry_headless(tmp_path: Path) -> None:
     result = run_multires_inspect_geometry(cfg, headless=True)
     assert result.has_overlap
     assert result.lateral_flip == (-1, 1)
+
+
+def test_run_multires_inspect_geometry_rejects_smartspim(tmp_path: Path) -> None:
+    overview = tmp_path / "overview"
+    roi = tmp_path / "roi"
+    overview.mkdir()
+    roi.mkdir()
+    config_path = tmp_path / "multires.yaml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "sample": {"name": "sample", "save_path": str(tmp_path / "out")},
+                "multires": {
+                    "vendor": {"suite": "smartspim"},
+                    "pair_label": "test",
+                    "channels": {
+                        "488": {
+                            "overview": str(overview),
+                            "roi": str(roi),
+                        }
+                    },
+                    "registration": {"reference_channel": "488"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    cfg = load_multires_config(config_path)
+    with pytest.raises(RuntimeError, match="mesoSPIM"):
+        run_multires_inspect_geometry(cfg, headless=True)
 
 
 def test_save_mesospim_lateral_flip_updates_existing_block(tmp_path: Path) -> None:

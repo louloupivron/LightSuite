@@ -40,11 +40,13 @@ def test_stage_attach_covers_multires_inspect_registration() -> None:
     assert get_stage_attach("multires", "inspect-registration") is not None
 
 
-def test_multires_stage_specs_include_inspect_geometry(tmp_path) -> None:
+def test_multires_stage_specs_include_inspect_geometry_for_mesospim(tmp_path) -> None:
     from lightsuite.multires.config_models import MultiresPipelineConfig
 
-    manifest = tmp_path / "pair.json"
-    manifest.write_text("{}", encoding="utf-8")
+    overview = tmp_path / "overview"
+    roi = tmp_path / "roi"
+    overview.mkdir()
+    roi.mkdir()
     raw = {
         "sample": {
             "name": "test",
@@ -52,8 +54,15 @@ def test_multires_stage_specs_include_inspect_geometry(tmp_path) -> None:
             "scratch": str(tmp_path / "scratch"),
         },
         "multires": {
+            "vendor": {"suite": "mesospim"},
             "pair_label": "pair1",
-            "pair_manifest": str(manifest),
+            "channels": {
+                "488": {
+                    "overview": str(overview),
+                    "roi": str(roi),
+                }
+            },
+            "registration": {"reference_channel": "488"},
         },
     }
     (tmp_path / "results").mkdir()
@@ -66,11 +75,9 @@ def test_multires_stage_specs_include_inspect_geometry(tmp_path) -> None:
     assert ids.index("register") < ids.index("inspect-registration")
 
 
-def test_multires_manual_stages_have_attach(tmp_path) -> None:
+def test_multires_stage_specs_omit_inspect_geometry_for_smartspim(tmp_path) -> None:
     from lightsuite.multires.config_models import MultiresPipelineConfig
 
-    manifest = tmp_path / "pair.json"
-    manifest.write_text("{}", encoding="utf-8")
     raw = {
         "sample": {
             "name": "test",
@@ -78,8 +85,50 @@ def test_multires_manual_stages_have_attach(tmp_path) -> None:
             "scratch": str(tmp_path / "scratch"),
         },
         "multires": {
+            "vendor": {"suite": "smartspim"},
             "pair_label": "pair1",
-            "pair_manifest": str(manifest),
+            "channels": {
+                "488": {
+                    "overview": str(tmp_path / "overview"),
+                    "roi": str(tmp_path / "roi"),
+                }
+            },
+            "registration": {"reference_channel": "488"},
+        },
+    }
+    (tmp_path / "results").mkdir()
+    (tmp_path / "scratch").mkdir()
+    (tmp_path / "overview").mkdir()
+    (tmp_path / "roi").mkdir()
+    cfg = MultiresPipelineConfig.model_validate(raw)
+    ids = [spec.id for spec in multires_stage_specs(cfg)]
+    assert "inspect-geometry" not in ids
+    assert "check-geometry" in ids
+
+
+def test_multires_manual_stages_have_attach(tmp_path) -> None:
+    from lightsuite.multires.config_models import MultiresPipelineConfig
+
+    overview = tmp_path / "overview"
+    roi = tmp_path / "roi"
+    overview.mkdir()
+    roi.mkdir()
+    raw = {
+        "sample": {
+            "name": "test",
+            "save_path": str(tmp_path / "results"),
+            "scratch": str(tmp_path / "scratch"),
+        },
+        "multires": {
+            "vendor": {"suite": "mesospim"},
+            "pair_label": "pair1",
+            "channels": {
+                "488": {
+                    "overview": str(overview),
+                    "roi": str(roi),
+                }
+            },
+            "registration": {"reference_channel": "488"},
         },
     }
     (tmp_path / "results").mkdir()

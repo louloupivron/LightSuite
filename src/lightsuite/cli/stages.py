@@ -239,6 +239,16 @@ def spinal_stage_specs(config: SpinalCordPipelineConfig) -> list[StageSpec]:
     return stages
 
 
+def _multires_supports_inspect_geometry(config: _Config) -> bool:
+    multires = getattr(config, "multires", None)
+    if multires is None:
+        return False
+    supports = getattr(multires, "supports_inspect_geometry", None)
+    if callable(supports):
+        return bool(supports())
+    return False
+
+
 def multires_stage_specs(config: _Config) -> list[StageSpec]:
     stages: list[StageSpec] = []
     multires = getattr(config, "multires", None)
@@ -253,15 +263,16 @@ def multires_stage_specs(config: _Config) -> list[StageSpec]:
                 manual=True,
             ),
         )
-    stages.append(
-        StageSpec(
-            "inspect-geometry",
-            "Inspect geometry",
-            "multires.mesospim_geometry lateral_flip",
-            optional=True,
-            manual=True,
-        ),
-    )
+    if _multires_supports_inspect_geometry(config):
+        stages.append(
+            StageSpec(
+                "inspect-geometry",
+                "Inspect geometry",
+                "multires.mesospim_geometry lateral_flip",
+                optional=True,
+                manual=True,
+            ),
+        )
     stages.extend(
         [
             StageSpec("check-geometry", "Check geometry", "geometry/ overlap QA"),

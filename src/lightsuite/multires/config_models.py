@@ -145,6 +145,10 @@ class MultiresConfig(BaseModel):
     landmarks: MultiresLandmarkConfig = Field(default_factory=MultiresLandmarkConfig)
     registration: MultiresRegistrationSettings = Field(default_factory=MultiresRegistrationSettings)
 
+    def supports_inspect_geometry(self) -> bool:
+        """True when the lateral_flip Napari QC stage applies (mesoSPIM only)."""
+        return self.vendor.suite == MultiresVendorSuite.MESOSPIM
+
     @field_validator("pair_manifest", "overview_meta_path")
     @classmethod
     def expand_optional_paths(cls, value: Path | None) -> Path | None:

@@ -441,6 +441,13 @@ def run_multires_inspect_geometry(
     write_config: bool = False,
 ) -> GeometryQcSlice:
     """Open Napari to compare overview vs physically resampled ROI overlap."""
+    if not cfg.multires.supports_inspect_geometry():
+        suite = cfg.multires.vendor.suite.value
+        msg = (
+            "inspect-geometry is only for mesoSPIM configs (lateral_flip tuning). "
+            f"This config uses vendor {suite!r}; run check-geometry instead."
+        )
+        raise RuntimeError(msg)
     try:
         import SimpleITK as sitk  # noqa: F401
     except ImportError as exc:
