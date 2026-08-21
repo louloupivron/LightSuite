@@ -39,7 +39,7 @@ def test_brain_work_and_qc_dirs(tmp_path: Path) -> None:
     assert work.is_dir()
     assert brain_work_root(save) == save / WORK_DIRNAME
     assert brain_qc_dir(save) == save / QC_DIRNAME
-    assert brain_qc_previews_dir(save) == save / QC_DIRNAME / "previews"
+    assert brain_qc_previews_dir(save) == save / QC_DIRNAME
     assert brain_qc_file(save, AFFINE_FIT_STATS_FILENAME) == (
         save / QC_DIRNAME / AFFINE_FIT_STATS_FILENAME
     )
@@ -64,10 +64,20 @@ def test_resolve_brain_qc_falls_back_to_legacy(tmp_path: Path) -> None:
 
 def test_resolve_brain_artifact_generic(tmp_path: Path) -> None:
     save = tmp_path / "save"
-    nested = save / "qc" / "previews" / "dim1_initial_registration.png"
+    nested = save / "qc" / "dim1_initial_registration.png"
     nested.parent.mkdir(parents=True)
     nested.write_text("png", encoding="utf-8")
-    assert resolve_brain_artifact(save, "qc", "previews", "dim1_initial_registration.png") == nested
+    assert resolve_brain_artifact(save, "qc", "dim1_initial_registration.png") == nested
+
+
+def test_resolve_brain_qc_preview_legacy_subfolder(tmp_path: Path) -> None:
+    from lightsuite.registration.brain_paths import resolve_brain_qc_preview
+
+    save = tmp_path / "save"
+    legacy = save / "qc" / "previews" / "dim1_initial_registration.png"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text("png", encoding="utf-8")
+    assert resolve_brain_qc_preview(save, "dim1_initial_registration.png") == legacy
 
 
 def test_cleanup_brain_work_and_legacy(tmp_path: Path) -> None:

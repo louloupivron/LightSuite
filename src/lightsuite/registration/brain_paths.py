@@ -10,7 +10,7 @@ QC_DIRNAME = "qc"
 STATS_DIRNAME = "stats"
 IMPORTS_DIRNAME = "imports"
 VOLUME_REGISTERED_DIRNAME = "volume_registered"
-PREVIEWS_DIRNAME = "previews"
+PREVIEWS_DIRNAME = "previews"  # legacy nested layout (pre-2026)
 SAMPLE_SPACE_SUBDIR = "sample_space"
 
 # Ephemeral workspaces under ``save_path/_work/``.
@@ -71,9 +71,20 @@ def brain_qc_dir(save_path: Path) -> Path:
 
 
 def brain_qc_previews_dir(save_path: Path) -> Path:
-    path = brain_qc_dir(save_path) / PREVIEWS_DIRNAME
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+    """Return ``save_path/qc`` for registration preview PNGs."""
+    return brain_qc_dir(save_path)
+
+
+def resolve_brain_qc_preview(save_path: Path, filename: str) -> Path:
+    """Read-path for a preview PNG: ``qc/`` first, then legacy ``qc/previews/``."""
+    save_path = Path(save_path).expanduser()
+    direct = save_path / QC_DIRNAME / filename
+    if direct.is_file():
+        return direct
+    legacy = save_path / QC_DIRNAME / PREVIEWS_DIRNAME / filename
+    if legacy.is_file():
+        return legacy
+    return direct
 
 
 def resolve_brain_artifact(save_path: Path, *relative: str) -> Path:
@@ -220,7 +231,7 @@ def cleanup_legacy_brain_work(save_path: Path) -> None:
 
 
 def cleanup_brain_qc_audit_json(save_path: Path) -> None:
-    """Remove QC diagnostic JSON checkpoints (preview PNGs under qc/previews/ are kept)."""
+    """Remove QC diagnostic JSON checkpoints (preview PNGs under ``qc/`` are kept)."""
     root = Path(save_path).expanduser()
     for name in _QC_AUDIT_JSON_FILES:
         remove_path(root / QC_DIRNAME / name)

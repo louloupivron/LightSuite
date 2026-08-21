@@ -75,7 +75,7 @@ def test_initialize_brain_registration(tmp_path: Path) -> None:
     assert len(result.original_trans) == 4
     assert result.downfac_reg == 0.5
     assert result.autocpsample is not None
-    preview = save / "qc" / "previews" / "dim1_initial_registration.png"
+    preview = save / "qc" / "dim1_initial_registration.png"
     assert preview.is_file()
     assert preview.stat().st_size > 10_000
     diag_path = save / "qc" / "init_registration_diagnostics.json"

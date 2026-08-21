@@ -100,7 +100,7 @@ def classify_init_registration_status(
     if warped_boundary_voxels == 0:
         warnings.append(
             "No atlas boundaries overlapped the sample after warping — check orientation "
-            "and qc/previews/dim{1,2,3}_initial_registration.png."
+            "and qc/dim{1,2,3}_initial_registration.png."
         )
     if inlier_fraction < 0.35:
         warnings.append(
