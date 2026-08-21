@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import numpy as np
@@ -429,6 +430,7 @@ def load_manifest_xyz_crop(
     start_xyz: list[int],
     crop_size_xyz: list[int],
     manifest_dir: Path | None = None,
+    progress_label: str | None = None,
 ) -> sitk.Image:
     """Load a 3D XYZ crop plane-by-plane without materialising the full stack."""
     from lightsuite.multires.spec_geometry import index_xyz_to_physical
@@ -440,10 +442,21 @@ def load_manifest_xyz_crop(
         raise ValueError(msg)
 
     stack = np.empty((sz, sy, sx), dtype=np.float32)
-    from lightsuite.reporter import check_stage_cancelled
+    from lightsuite.reporter import check_stage_cancelled, report_step_progress
 
+    t0 = time.perf_counter()
+    progress_every = max(1, min(50, sz // 10)) if progress_label else 0
     for dz in range(sz):
         check_stage_cancelled()
+        if progress_label:
+            report_step_progress(
+                dz + 1,
+                sz,
+                label=progress_label,
+                t0=t0,
+                every=progress_every,
+                unit="plane",
+            )
         stack[dz] = load_manifest_xy_crop(
             spec,
             z_index=iz0 + dz,
@@ -468,6 +481,7 @@ def stream_resample_to_reference(
     reference_to_moving: np.ndarray | None = None,
     z_chunk: int | None = None,
     max_slab_bytes: int = 1_500_000_000,
+    progress_label: str | None = None,
 ) -> sitk.Image:
     """Resample a manifest volume onto ``reference`` without loading the full moving stack.
 
@@ -514,10 +528,23 @@ def stream_resample_to_reference(
         z_chunk = max(1, int(max_moving_planes / planes_per_ref))
 
     chunk = max(1, int(z_chunk))
-    from lightsuite.reporter import check_stage_cancelled
+    from lightsuite.reporter import check_stage_cancelled, report_step_progress
 
+    n_chunks = max(1, (sz + chunk - 1) // chunk)
+    t0 = time.perf_counter()
+    chunk_index = 0
     for z0 in range(0, sz, chunk):
         check_stage_cancelled()
+        chunk_index += 1
+        if progress_label:
+            report_step_progress(
+                chunk_index,
+                n_chunks,
+                label=progress_label,
+                t0=t0,
+                every=1,
+                unit="chunk",
+            )
         z1 = min(sz, z0 + chunk)
         chunk_size = [sx, sy, z1 - z0]
         chunk_ref = sitk.RegionOfInterest(reference, chunk_size, [0, 0, z0])

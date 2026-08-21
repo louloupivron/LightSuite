@@ -58,6 +58,7 @@ def prepare_multires_registration_pair(
     landmark_session: MultiresLandmarkSession | None = None,
     overview_spec: ManifestVolumeSpec | None = None,
     roi_spec: ManifestVolumeSpec | None = None,
+    progress_prefix: str | None = None,
 ) -> MultiresPreparedPair:
     """Build fixed/moving overlap crops by streaming planes from disk.
 
@@ -121,11 +122,14 @@ def prepare_multires_registration_pair(
         max_slab_bytes=cfg.multires.registration.max_slab_bytes,
     )
     check_stage_cancelled()
+    overview_label = f"{progress_prefix} overview crop" if progress_prefix else None
+    roi_label = f"{progress_prefix} ROI resample" if progress_prefix else None
     fixed_cropped = load_manifest_xyz_crop(
         overview_spec,
         start_xyz=crop_start_index,
         crop_size_xyz=crop_size,
         manifest_dir=manifest_dir,
+        progress_label=overview_label,
     )
     check_stage_cancelled()
     moving = stream_resample_to_reference(
@@ -134,6 +138,7 @@ def prepare_multires_registration_pair(
         manifest_dir=manifest_dir,
         reference_to_moving=reference_to_moving,
         max_slab_bytes=cfg.multires.registration.max_slab_bytes,
+        progress_label=roi_label,
     )
 
     return MultiresPreparedPair(

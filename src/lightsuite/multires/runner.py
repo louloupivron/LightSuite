@@ -391,11 +391,16 @@ def check_multires_geometry(
         return checkpoint
 
     emit_pipeline_message(
-        "Check-geometry: loading overview overlap crop and resampling ROI…"
+        "Check-geometry: loading overview overlap crop, then resampling ROI "
+        "(plane/chunk progress below)…"
     )
     check_stage_cancelled()
     t_prep = time.perf_counter()
-    prepared = prepare_multires_registration_pair(cfg, manifest=manifest)
+    prepared = prepare_multires_registration_pair(
+        cfg,
+        manifest=manifest,
+        progress_prefix="Check-geometry",
+    )
     overlap_min, overlap_max = prepared.overlap_box
     fixed_size = prepared.fixed_cropped.GetSize()
     moving_size = prepared.moving.GetSize()
@@ -451,6 +456,7 @@ def run_multires_registration(cfg: MultiresPipelineConfig) -> MultiresRegOptsChe
         manifest=manifest,
         overview_spec=overview_spec,
         roi_spec=roi_spec,
+        progress_prefix="Register",
     )
     check_stage_cancelled()
     overview_stem = _volume_stem(Path(overview_spec.volume_path))
@@ -481,6 +487,7 @@ def run_multires_registration(cfg: MultiresPipelineConfig) -> MultiresRegOptsChe
             manifest=manifest,
             overview_spec=channel_specs.overview,
             roi_spec=channel_specs.roi,
+            progress_prefix=f"Register {channel_name}",
         )
         channel_result = apply_registration_to_channel(
             prepared=channel_prepared,

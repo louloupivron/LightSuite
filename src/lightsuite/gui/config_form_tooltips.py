@@ -12,7 +12,12 @@ _COMMON: dict[str, str] = {
         "Output directory for checkpoints (regopts.json, transform_params.json) and "
         "registered volumes. Created automatically when stages run."
     ),
-    "workers": "Parallel worker count for preprocessing and other CPU-heavy stages.",
+    "workers": (
+        "Parallel CPU processes for preprocess slice loading only. Helps brain "
+        "channelperfile stacks and spinal planeperfile; brain planeperfile "
+        "(SmartSPIM/Terastitcher) stays at one worker to avoid disk thrashing. "
+        "Does not affect init-registration, register, export, or multires."
+    ),
 }
 
 _BRAIN: dict[str, str] = {
