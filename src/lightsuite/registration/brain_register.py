@@ -83,6 +83,7 @@ from lightsuite.registration.volume import (
     resize_atlas_volume,
 )
 from lightsuite.registration.warp import swap_xy_transform, warp_sample_to_atlas, warp_volume_affine
+from lightsuite.reporter import emit_pipeline_message, format_duration
 
 console = Console()
 
@@ -373,6 +374,7 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
     spacing_mm = checkpoint.registres_um * 1e-3
     perm = checkpoint.permute_sample_to_atlas or [1, 2, 3]
 
+    emit_pipeline_message("Register: loading sample volume(s)…")
     t0 = time.perf_counter()
     volume = load_registration_volume(Path(checkpoint.regvolpath))
     volume = permute_brain_volume(volume.astype(np.float32), perm)
@@ -392,12 +394,19 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
             )
             raise ValueError(msg)
     load_elapsed = time.perf_counter() - t0
+    emit_pipeline_message(f"Register: sample loaded in {format_duration(load_elapsed)}")
 
+    emit_pipeline_message("Register: fitting affine control points…")
     tform_aff, cpaffine, cptshistology, cpwt, affine_diag = _prepare_control_points(
         checkpoint, session, config
     )
     affine_diag.save(brain_qc_file(save_path, AFFINE_FIT_STATS_FILENAME))
+    emit_pipeline_message(
+        "Register: affine fit — "
+        f"{affine_diag.n_total} pairs, median error {affine_diag.median_error_vox:.2f} vox"
+    )
 
+    emit_pipeline_message("Register: loading atlas volumes…")
     atlas_content = resolve_brain_atlas_content(
         config.atlas,
         scratch=config.sample.scratch,
@@ -420,6 +429,9 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
         checkpoint.downfac_reg or (config.atlas.resolution_um / checkpoint.registres_um)
     )
     tvreg_shape = resize_atlas_volume(tv, downfac, nearest=False).shape
+    emit_pipeline_message(
+        f"Register: atlas loaded ({tv.shape[0]}×{tv.shape[1]}×{tv.shape[2]} native)"
+    )
     original_trans_xyz = np.asarray(
         session.ori_trans if session.ori_trans is not None else checkpoint.original_trans,
         dtype=float,
@@ -521,6 +533,7 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
     )
 
     tform_warp = affine_with_source_offset(tform_aff, atlas_crop_start)
+    emit_pipeline_message("Register: warping atlas with affine transform…")
     t0 = time.perf_counter()
     tvaffine = warp_volume_affine(
         tv,
@@ -537,10 +550,14 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
         output_origin=warp_output_origin,
     )
     affine_warp_elapsed = time.perf_counter() - t0
+    emit_pipeline_message(
+        f"Register: affine warp done in {format_duration(affine_warp_elapsed)}"
+    )
 
     hi = float(np.quantile(volume_work, 0.999))
     voltoshow = np.clip(volume_work / max(hi, 1e-6) * 255.0, 0, 255).astype(np.uint8)
     preview_dir = brain_qc_previews_dir(save_path)
+    emit_pipeline_message("Register: writing affine preview PNGs…")
     save_registration_stage_previews(
         preview_dir,
         config.sample.name,
@@ -558,6 +575,11 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
     moving_pts_mm = volume_indices_to_elastix_physical(cpaffine, spacing_mm)
     fixed_pts_mm = volume_indices_to_elastix_physical(cptshistology_padded, spacing_mm)
 
+    bspline_mode = "multistep" if use_multistep else "single-resolution"
+    dual_label = "dual-channel MI" if volume_secondary is not None else "single-channel MI"
+    emit_pipeline_message(
+        f"Register: running B-spline elastix ({bspline_mode}, {dual_label})…"
+    )
     t0 = time.perf_counter()
     bspline_result = run_bspline_registration(
         fixed_volume=volume_work,
@@ -577,7 +599,11 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
         bending_energy_weight=config.registration.bspline_bending_weight,
     )
     bspline_elapsed = time.perf_counter() - t0
+    emit_pipeline_message(
+        f"Register: B-spline elastix done in {format_duration(bspline_elapsed)}"
+    )
 
+    emit_pipeline_message("Register: warping annotation with B-spline (transformix)…")
     t0 = time.perf_counter()
     annotation_temp = brain_work_dir(save_path, TRANSFORMIX_ANNOTATION_TEMP)
     avreg_padded = run_transformix(
@@ -588,6 +614,9 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
         nearest=True,
     )
     transformix_elapsed = time.perf_counter() - t0
+    emit_pipeline_message(
+        f"Register: annotation warp done in {format_duration(transformix_elapsed)}"
+    )
     avreg = crop_from_warp_canvas(avreg_padded, warp_pad, inner_shape)
     annotation_label_voxels = int(np.sum(np.rint(avreg) > 1))
     final_landmark_mm = read_elastix_landmark_metric_mm(bspline_result.output_dir)
@@ -597,6 +626,7 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
         else None
     )
 
+    emit_pipeline_message("Register: writing B-spline preview PNGs…")
     save_registration_stage_previews(
         preview_dir,
         config.sample.name,
@@ -606,6 +636,7 @@ def run_brain_registration(config: BrainPipelineConfig, *, use_multistep: bool =
         atlas_provider=atlas_display_provider_from_config(config.atlas),
     )
 
+    emit_pipeline_message("Register: inverting B-spline transform…")
     inverse_dir = brain_work_dir(save_path, ELASTIX_INVERSE_TEMP)
     inverted = invert_elastix_transform(elastix_temp, inverse_dir)
     if (inverse_dir / "inversion_parameters_gentle.txt").is_file():
