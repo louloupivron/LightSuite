@@ -50,6 +50,7 @@ from lightsuite.registration.volume import (
     permute_brain_volume,
     resize_atlas_volume,
 )
+from lightsuite.reporter import emit_pipeline_message, format_duration
 
 console = Console()
 
@@ -66,10 +67,14 @@ def initialize_brain_registration(
         msg = f"Missing checkpoint {regopts_path}. Run 'lightsuite brain preprocess' first."
         raise FileNotFoundError(msg)
 
+    emit_pipeline_message("Init-registration: loading sample volume…")
     checkpoint = RegOptsCheckpoint.load(regopts_path)
     backvol = load_registration_volume(Path(checkpoint.regvolpath))
     downfac = config.atlas.resolution_um / checkpoint.registres_um
 
+    emit_pipeline_message(
+        f"Init-registration: loading atlas and resampling to {checkpoint.registres_um:g} µm…"
+    )
     atlas_content = resolve_brain_atlas_content(
         config.atlas,
         scratch=config.sample.scratch,
@@ -100,6 +105,7 @@ def initialize_brain_registration(
         )
 
     newvol = normalize_registration_volume(backvol)
+    emit_pipeline_message("Init-registration: extracting sample point cloud…")
     t0 = time.perf_counter()
     volumereg = permute_brain_volume(newvol, permvec)
     ls_cloud, sample_stages = extract_sample_points_stages(
@@ -108,12 +114,21 @@ def initialize_brain_registration(
         subsample_fraction=config.registration.sample_cloud_subsample,
     )
     sample_cloud_elapsed = time.perf_counter() - t0
+    emit_pipeline_message(
+        "Init-registration: sample cloud — "
+        f"{ls_cloud.shape[0]:,} points in {format_duration(sample_cloud_elapsed)}"
+    )
 
+    emit_pipeline_message("Init-registration: extracting atlas point cloud…")
     t0 = time.perf_counter()
     tv_for_points = tvreg.copy()
     tv_for_points[avreg == 0] = 0
     tv_cloud = extract_atlas_points_gradient(tv_for_points, avreg, sigma=20.0, threshold=5.0)
     atlas_cloud_elapsed = time.perf_counter() - t0
+    emit_pipeline_message(
+        "Init-registration: atlas cloud — "
+        f"{tv_cloud.shape[0]:,} points in {format_duration(atlas_cloud_elapsed)}"
+    )
 
     if ls_cloud.shape[0] < 10 or tv_cloud.shape[0] < 10:
         msg = "Too few points extracted for coarse registration."
@@ -130,6 +145,8 @@ def initialize_brain_registration(
     if bcpd_path is None and tv_cloud.shape[0] > 100_000:
         tv_cloud = downsample_point_cloud(tv_cloud, 100_000)
 
+    alignment_label = "BCPD" if bcpd_path is not None else "ICP fallback"
+    emit_pipeline_message(f"Init-registration: coarse similarity alignment ({alignment_label})…")
     t0 = time.perf_counter()
     transform_icp, transform_matlab, backend = estimate_similarity_transform(
         tv_cloud,
@@ -140,7 +157,12 @@ def initialize_brain_registration(
     alignment_elapsed = time.perf_counter() - t0
     scale = similarity_scale(transform_icp)
     metrics = coarse_alignment_metrics(ls_cloud, tv_cloud, transform_icp)
+    emit_pipeline_message(
+        f"Init-registration: {backend.upper()} alignment done in "
+        f"{format_duration(alignment_elapsed)} (scale {scale:.3f})"
+    )
 
+    emit_pipeline_message("Init-registration: matching auto control points…")
     t0 = time.perf_counter()
     cpsample, cpatlas = triage_and_match_clouds(
         ls_cloud,
@@ -150,7 +172,12 @@ def initialize_brain_registration(
         bcpd_search_roots=search_roots,
     )
     triage_elapsed = time.perf_counter() - t0
+    emit_pipeline_message(
+        f"Init-registration: {cpsample.shape[0]:,} auto pairs in "
+        f"{format_duration(triage_elapsed)}"
+    )
 
+    emit_pipeline_message("Init-registration: writing preview PNGs…")
     t0 = time.perf_counter()
     preview_dir = brain_qc_previews_dir(save_path)
     warped_boundary = save_initial_registration_previews(
