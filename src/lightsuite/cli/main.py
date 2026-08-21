@@ -278,7 +278,7 @@ def brain_split_smartspim_channels(
         "symlink",
         "--mode",
         "-m",
-        help="How to place files into ChN folders: symlink, hardlink, copy, or move.",
+        help="How to place files into ChN folders: symlink (default), hardlink, or move (no copies).",
     ),
     max_channels: int = typer.Option(
         3,
@@ -306,7 +306,7 @@ def brain_split_smartspim_channels(
     try:
         mode_enum = SplitMode(mode.lower())
     except ValueError as exc:
-        msg = "--mode must be one of: symlink, hardlink, copy, move"
+        msg = "--mode must be one of: symlink, hardlink, move"
         raise typer.BadParameter(msg) from exc
 
     output_path = Path(output).expanduser() if output else None

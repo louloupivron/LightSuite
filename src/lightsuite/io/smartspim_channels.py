@@ -9,7 +9,7 @@ SmartSPIM often writes interleaved planes in one directory::
 
 LightSuite ``planeperfile`` multi-channel configs expect one folder per channel
 (``Ch0/``, ``Ch1/``, …). This helper creates those folders with symlinks (default),
-hardlinks, copies, or moves.
+hardlinks, or moves — never full file copies.
 """
 
 from __future__ import annotations
@@ -33,7 +33,6 @@ _CHANNEL_RE = re.compile(
 class SplitMode(str, Enum):
     SYMLINK = "symlink"
     HARDLINK = "hardlink"
-    COPY = "copy"
     MOVE = "move"
 
 
@@ -111,8 +110,6 @@ def _place_file(src: Path, dest: Path, mode: SplitMode) -> None:
         dest.symlink_to(src.resolve())
     elif mode == SplitMode.HARDLINK:
         dest.hardlink_to(src)
-    elif mode == SplitMode.COPY:
-        shutil.copy2(src, dest)
     elif mode == SplitMode.MOVE:
         shutil.move(str(src), str(dest))
     else:
@@ -137,7 +134,7 @@ def split_smartspim_all_channels(
     output_dir:
         Parent for ``ChN`` folders. Defaults to ``source_dir`` (in-place subfolders).
     mode:
-        ``symlink`` (default), ``hardlink``, ``copy``, or ``move``.
+        ``symlink`` (default), ``hardlink``, or ``move`` (no file copies).
     max_channels:
         Highest allowed channel index + 1 (default 3 → Ch0–Ch2).
     require_equal_plane_counts:
@@ -147,6 +144,12 @@ def split_smartspim_all_channels(
         msg = f"max_channels must be between 1 and {MAX_CHANNELS}, got {max_channels}"
         raise ValueError(msg)
 
+    if isinstance(mode, str) and mode.lower() == "copy":
+        msg = (
+            "copy mode is not supported (would duplicate data). "
+            "Use symlink (default), hardlink, or move."
+        )
+        raise ValueError(msg)
     mode_enum = SplitMode(mode) if not isinstance(mode, SplitMode) else mode
     source_dir = source_dir.expanduser().resolve()
     out = (output_dir or source_dir).expanduser().resolve()

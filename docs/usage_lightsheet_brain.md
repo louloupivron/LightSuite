@@ -513,7 +513,7 @@ Some SmartSPIM exports keep all channels in one folder (`Z000000_Ch0.tif`, `Z000
 
 ```bash
 uv run lightsuite brain split-smartspim-channels -s /data/Jules/All_Channels
-# creates All_Channels/Ch0, Ch1, … (symlinks by default)
+# creates All_Channels/Ch0, Ch1, … (symlinks by default; no file copies)
 ```
 
 Then point `source.channels` at those `ChN` directories. Cell-detection JSON → `points.csv`: see [`convert_smartspim_detection_to_lightsuite.ipynb`](../examples/notebooks/convert_smartspim_detection_to_lightsuite.ipynb) or `lightsuite brain convert-smartspim-points`.

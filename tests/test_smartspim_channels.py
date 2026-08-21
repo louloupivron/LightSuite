@@ -82,10 +82,18 @@ def test_split_to_external_output(tmp_path: Path) -> None:
     out = tmp_path / "by_channel"
     for ch in (0, 1, 2):
         _touch(src / f"Z000000_Ch{ch}.tif")
-    result = split_smartspim_all_channels(src, output_dir=out, mode=SplitMode.COPY)
+    result = split_smartspim_all_channels(src, output_dir=out, mode=SplitMode.SYMLINK)
     assert set(result.channel_dirs) == {0, 1, 2}
-    assert (out / "Ch2" / "Z000000_Ch2.tif").is_file()
+    assert (out / "Ch2" / "Z000000_Ch2.tif").is_symlink()
+    assert (out / "Ch2" / "Z000000_Ch2.tif").resolve() == (src / "Z000000_Ch2.tif").resolve()
     assert (src / "Z000000_Ch2.tif").is_file()
+
+
+def test_split_rejects_copy_mode(tmp_path: Path) -> None:
+    src = tmp_path / "All_Channels"
+    _touch(src / "Z000000_Ch0.tif")
+    with pytest.raises(ValueError, match="copy mode is not supported"):
+        split_smartspim_all_channels(src, mode="copy")
 
 
 def test_discover_rejects_interleaved_smartspim_planes(tmp_path: Path) -> None:
