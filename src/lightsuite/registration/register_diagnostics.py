@@ -8,23 +8,8 @@ from pathlib import Path
 from typing import Literal
 
 from rich.console import Console
-from rich.panel import Panel
 
 RegistrationStatus = Literal["good", "moderate", "poor", "failed"]
-
-_STATUS_STYLE: dict[RegistrationStatus, str] = {
-    "good": "green",
-    "moderate": "yellow",
-    "poor": "red",
-    "failed": "bold red",
-}
-
-_STATUS_LABEL: dict[RegistrationStatus, str] = {
-    "good": "GOOD",
-    "moderate": "MODERATE",
-    "poor": "POOR",
-    "failed": "FAILED",
-}
 
 
 @dataclass
@@ -76,66 +61,10 @@ class RegistrationDiagnostics:
         return cls(**raw)
 
     def print_summary(self, *, console: Console | None = None) -> None:
+        """Log warnings only (status/metrics stay in the diagnostics JSON)."""
+        if not self.warnings:
+            return
         out = console or Console()
-        sy, sx, sz = self.sample_shape
-        ay, ax, az = self.atlas_shape
-        schedule = "multistep" if self.use_multistep else "single-step"
-        mi_mode = (
-            f"dual primary={self.dual_channel_mi_weight_primary:g} "
-            f"secondary={self.dual_channel_mi_weight_secondary:g}"
-            if self.use_dual_channel_mi
-            else "single-channel"
-        )
-        lines = [
-            f"[bold]Volumes[/bold]  sample {sy}×{sx}×{sz}  ·  atlas {ay}×{ax}×{az}  "
-            f"@ {self.registration_resolution_um:g} µm",
-            f"[bold]Orientation[/bold]  {self.orientation}",
-            (
-                f"[bold]Control points[/bold]  {self.n_landmark_pairs:,} landmarks  "
-                f"({self.n_manual_pairs:,} manual, {self.n_auto_pairs:,} auto)  "
-                f"·  cpwt {self.control_point_weight:g}"
-            ),
-            (
-                f"[bold]B-spline[/bold]  {schedule}  ·  {mi_mode}  ·  "
-                f"grid {self.bspline_spatial_scale_mm:g} mm  ·  "
-                f"bending {self.bspline_bending_weight:g}"
-            ),
-            "",
-            "[bold]Affine fit[/bold]  (median / p95 / max landmark residual, voxels)",
-            (
-                f"  all pairs        {self.affine_median_error_vox:5.1f}  /  "
-                f"{self.affine_p95_error_vox:5.1f}  /  {self.affine_max_error_vox:5.1f}"
-            ),
-        ]
-        if self.affine_median_manual_vox is not None:
-            lines.append(f"  manual pairs     {self.affine_median_manual_vox:5.1f}")
-        if self.affine_median_auto_vox is not None:
-            lines.append(f"  auto pairs       {self.affine_median_auto_vox:5.1f}")
-        if self.affine_median_coarse_auto_vox is not None:
-            lines.append(
-                f"  auto vs coarse   {self.affine_median_coarse_auto_vox:5.1f}  "
-                "(before affine)"
-            )
-        lines.append("")
-        if self.bspline_landmark_metric_vox is not None:
-            lines.append(
-                "[bold]B-spline landmarks[/bold]  "
-                f"{self.bspline_landmark_metric_vox:5.1f} vox  "
-                f"({self.bspline_landmark_metric_mm:.3f} mm)"
-            )
-        else:
-            lines.append("[bold]B-spline landmarks[/bold]  (metric unavailable)")
-        lines.append(
-            f"[bold]Annotation overlap[/bold]  {self.annotation_label_voxels:,} label voxels  "
-            f"·  {self.bspline_elapsed_s + self.transformix_elapsed_s:.1f}s elastix"
-        )
-
-        style = _STATUS_STYLE[self.status]
-        label = _STATUS_LABEL[self.status]
-        lines.append("")
-        lines.append(f"[bold]Status[/bold]  [{style}]{label}[/{style}] — {self.status_message}")
-
-        out.print(Panel("\n".join(lines), title="Registration", border_style=style))
         for warning in self.warnings:
             out.print(f"[yellow]Warning:[/yellow] {warning}")
 
