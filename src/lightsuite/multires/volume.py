@@ -25,13 +25,17 @@ def tiff_shape(path: Path) -> tuple[int, int, int]:
     raise ValueError(msg)
 
 
-def discover_volume_shape(volume_path: Path) -> tuple[int, int, int]:
+def discover_volume_shape(
+    volume_path: Path,
+    *,
+    expected_planes: int | None = None,
+) -> tuple[int, int, int]:
     """Infer ZYX shape from a hyperstack TIFF or plane-per-file folder."""
     volume_path = volume_path.expanduser().resolve()
     if volume_path.is_file():
         return tiff_shape(volume_path)
     if volume_path.is_dir():
-        planes = _sorted_plane_files(volume_path)
+        planes = _sorted_plane_files(volume_path, expected_planes=expected_planes)
         if not planes:
             msg = f"No TIFF planes found in {volume_path}"
             raise FileNotFoundError(msg)
@@ -48,11 +52,52 @@ def empty_image_from_shape(shape_zyx: tuple[int, int, int]) -> sitk.Image:
     return sitk.GetImageFromArray(arr)
 
 
-def _sorted_plane_files(folder: Path) -> list[Path]:
+def _sorted_plane_files(folder: Path, *, expected_planes: int | None = None) -> list[Path]:
     paths: list[Path] = []
     for pattern in ("*.tif", "*.tiff", "*.TIF", "*.TIFF"):
         paths.extend(folder.glob(pattern))
-    return sorted(paths, key=lambda p: p.name)
+    paths = sorted(paths, key=lambda p: p.name)
+    return _resolve_smartspim_plane_files(paths, expected_planes=expected_planes)
+
+
+def _resolve_smartspim_plane_files(
+    paths: list[Path],
+    *,
+    expected_planes: int | None = None,
+) -> list[Path]:
+    """Keep one SmartSPIM laser channel when ``All_Channels`` holds interleaved planes."""
+    if not paths:
+        return paths
+
+    from collections import defaultdict
+
+    from lightsuite.io.smartspim_channels import parse_smartspim_channel_plane
+
+    by_channel: dict[int, list[Path]] = defaultdict(list)
+    for path in paths:
+        parsed = parse_smartspim_channel_plane(path)
+        if parsed is not None:
+            by_channel[parsed[0]].append(path)
+
+    if not by_channel:
+        return paths
+
+    for channel in sorted(by_channel):
+        ch_paths = sorted(by_channel[channel], key=lambda p: p.name.lower())
+        if expected_planes is not None and len(ch_paths) == expected_planes:
+            return ch_paths
+
+    if expected_planes is not None and len(paths) >= 2 * expected_planes and len(by_channel) >= 2:
+        ch_paths = sorted(by_channel[min(by_channel)], key=lambda p: p.name.lower())
+        if len(ch_paths) == expected_planes:
+            return ch_paths
+
+    if expected_planes is None and len(by_channel) >= 2:
+        counts = {channel: len(by_channel[channel]) for channel in by_channel}
+        if len(set(counts.values())) == 1:
+            return sorted(by_channel[min(by_channel)], key=lambda p: p.name.lower())
+
+    return paths
 
 
 def _normalize_tiff_array(arr: np.ndarray, path: Path) -> np.ndarray:
@@ -137,8 +182,8 @@ def _read_tiff_xy_plane(
     return np.asarray(plane, dtype=np.float32)
 
 
-def _load_plane_per_file_stack(folder: Path) -> np.ndarray:
-    planes = _sorted_plane_files(folder)
+def _load_plane_per_file_stack(folder: Path, *, expected_planes: int | None = None) -> np.ndarray:
+    planes = _sorted_plane_files(folder, expected_planes=expected_planes)
     if not planes:
         msg = f"No TIFF planes in {folder}"
         raise FileNotFoundError(msg)
@@ -158,7 +203,7 @@ def _load_plane_per_file_stack(folder: Path) -> np.ndarray:
     return stack
 
 
-def load_volume_array(volume_path: Path) -> np.ndarray:
+def load_volume_array(volume_path: Path, *, expected_planes: int | None = None) -> np.ndarray:
     """Load a 3D volume as ZYX float32 from a TIFF file or plane-per-file folder."""
     volume_path = volume_path.expanduser().resolve()
     if volume_path.is_file():
@@ -166,7 +211,9 @@ def load_volume_array(volume_path: Path) -> np.ndarray:
             np.float32, copy=False
         )
     if volume_path.is_dir():
-        return _load_plane_per_file_stack(volume_path).astype(np.float32, copy=False)
+        return _load_plane_per_file_stack(volume_path, expected_planes=expected_planes).astype(
+            np.float32, copy=False
+        )
     msg = f"Volume path not found: {volume_path}"
     raise FileNotFoundError(msg)
 
@@ -191,7 +238,7 @@ def load_manifest_volume(
         volume_path = (manifest_dir / volume_path).resolve()
 
     if load_pixels:
-        arr = load_volume_array(volume_path)
+        arr = load_volume_array(volume_path, expected_planes=int(spec.shape_zyx[0]))
         if tuple(arr.shape) != tuple(spec.shape_zyx):
             msg = (
                 f"Loaded shape ZYX {arr.shape} != manifest shape_zyx {spec.shape_zyx} "
@@ -302,7 +349,7 @@ def load_manifest_xy_slice(
         return _read_tiff_xy_plane(volume_path, z_index=iz, shape_zyx=(nz, ny, nx))
 
     if volume_path.is_dir():
-        planes = _sorted_plane_files(volume_path)
+        planes = _sorted_plane_files(volume_path, expected_planes=nz)
         if iz >= len(planes):
             msg = f"Z index {iz} out of range for {len(planes)} planes in {volume_path}"
             raise IndexError(msg)
@@ -358,7 +405,7 @@ def load_manifest_xy_crop(
         return np.asarray(plane[iy0:iy1, ix0:ix1], dtype=np.float32)
 
     if volume_path.is_dir():
-        planes = _sorted_plane_files(volume_path)
+        planes = _sorted_plane_files(volume_path, expected_planes=nz)
         if iz >= len(planes):
             msg = f"Z index {iz} out of range for {len(planes)} planes in {volume_path}"
             raise IndexError(msg)

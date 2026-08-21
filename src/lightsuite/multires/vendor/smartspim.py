@@ -391,8 +391,8 @@ def volume_spec_from_smartspim_export(
     centers = meta.tile_centers_stage
     check_stage_scale(centers, meta=meta, geometry=geometry)
 
-    nz, ny, nx = discover_volume_shape(volume_path)
     num_images = _resolve_num_images(meta.tile_num_images)
+    nz, ny, nx = discover_volume_shape(volume_path, expected_planes=num_images)
     if nz != num_images:
         msg = (
             f"Volume plane count ({nz}) does not match metadata NumImages ({num_images}) "

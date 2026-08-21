@@ -11,7 +11,10 @@ import yaml
 from lightsuite.config.loader import load_multires_config
 from lightsuite.multires.manifest import load_pair_manifest
 from lightsuite.multires.models import MANIFEST_FORMAT
-from lightsuite.multires.vendor.smartspim import build_smartspim_multichannel_pair_manifest
+from lightsuite.multires.vendor.smartspim import (
+    build_smartspim_multichannel_pair_manifest,
+    volume_spec_from_smartspim_export,
+)
 
 
 def _write_smartspim_meta_txt(path: Path, *, num_images: int = 5) -> None:
@@ -28,6 +31,25 @@ def _write_smartspim_stack_folder(path: Path, *, num_planes: int = 5) -> None:
     for iz in range(num_planes):
         plane = np.zeros((1600, 2000), dtype=np.uint16)
         tifffile.imwrite(path / f"plane_{iz:04d}.tif", plane)
+
+
+def _write_interleaved_smartspim_stack_folder(path: Path, *, num_planes: int = 5) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    for iz in range(num_planes):
+        for ch in (0, 1):
+            plane = np.zeros((1600, 2000), dtype=np.uint16)
+            tifffile.imwrite(path / f"Z{iz:06d}_Ch{ch}.tif", plane)
+
+
+def test_volume_spec_filters_interleaved_smartspim_channels(tmp_path: Path) -> None:
+    folder = tmp_path / "All_Channels"
+    meta = tmp_path / "metadata.txt"
+    num_planes = 5
+    _write_interleaved_smartspim_stack_folder(folder, num_planes=num_planes)
+    _write_smartspim_meta_txt(meta, num_images=num_planes)
+
+    spec = volume_spec_from_smartspim_export(volume_path=folder, metadata_path=meta)
+    assert spec.shape_zyx[0] == num_planes
 
 
 def test_build_smartspim_multichannel_pair_manifest(tmp_path: Path) -> None:
