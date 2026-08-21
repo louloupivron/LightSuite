@@ -537,6 +537,13 @@ class ConfigEditorDock:
     def is_dirty(self) -> bool:
         return self._dirty
 
+    def save_if_dirty(self) -> bool:
+        """Persist the editor when dirty; return True if a save was written."""
+        if not self._dirty or self._config_path is None:
+            return False
+        self._save_to_path(self._config_path)
+        return True
+
     def set_config_path(self, path: Path | None) -> None:
         self._config_path = path.expanduser().resolve() if path is not None else None
         self._update_path_label()

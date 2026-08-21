@@ -93,7 +93,7 @@ def classify_init_registration_status(
         )
     if atlas_cloud_points < 1_000:
         warnings.append("Few atlas features extracted — verify atlas_dir contents.")
-    if not 0.75 <= similarity_scale <= 1.35:
+    if not (0.75 <= round(similarity_scale, 3) <= 1.35):
         warnings.append(
             f"Similarity scale {similarity_scale:.3f} outside expected 0.75–1.35 range."
         )

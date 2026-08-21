@@ -225,9 +225,14 @@ def _atlas_search_dirs(explicit: Path | None) -> list[Path]:
     return dirs
 
 
-def _check_bcpd(config: BrainPipelineConfig | None) -> CheckResult:
+def _check_bcpd(
+    config: BrainPipelineConfig | None,
+    *,
+    config_path: Path | str | None = None,
+) -> CheckResult:
     explicit = config.registration.bcpd_path if config else None
-    found = find_bcpd_executable(explicit)
+    search_roots = [Path(config_path).expanduser().resolve().parent] if config_path else None
+    found = find_bcpd_executable(explicit, search_roots=search_roots)
     if found is not None:
         return CheckResult("BCPD (coarse registration)", True, str(found), required=False)
     return CheckResult(
@@ -318,13 +323,15 @@ def run_doctor(
     strict: bool = False,
     spinal_config: SpinalCordPipelineConfig | None = None,
     multires_config: object | None = None,
+    *,
+    config_path: Path | str | None = None,
 ) -> DoctorReport:
     report = DoctorReport()
     report.add(_check_python())
     report.add(_check_package_install())
     report.add(_check_elastix_binary("elastix"))
     report.add(_check_elastix_binary("transformix"))
-    report.add(_check_bcpd(config))
+    report.add(_check_bcpd(config, config_path=config_path))
     if spinal_config is not None:
         report.add(_check_fiederling_atlas(spinal_config))
         report.add(_check_spinal_sample_resolution(spinal_config))
@@ -384,6 +391,7 @@ def doctor_command(config_path: str | None = None, strict: bool = False) -> None
         strict=strict,
         spinal_config=spinal_config,
         multires_config=multires_config,
+        config_path=config_path,
     )
 
     table = Table(title="LightSuite doctor")

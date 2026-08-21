@@ -47,7 +47,7 @@ def test_atlas_to_sample_affinetform_fixes_translation_vs_raw_inv() -> None:
     assert abs(sample_to_atlas[1, 3] - 4.5) < abs(wrong_affine[1, 3] - 4.5)
 
 
-@patch("lightsuite.registration.align.find_bcpd_executable", return_value=None)
+@patch("lightsuite.registration.align.resolve_bcpd_executable", return_value=None)
 def test_triage_uses_icp_transform_frame(_mock_bcpd: object) -> None:
     rng = np.random.default_rng(0)
     sample = rng.random((200, 3)) * 40.0
@@ -79,7 +79,7 @@ def test_triage_finds_pairs_with_huge_atlas_cloud() -> None:
     assert pairs[0].shape[0] > 100
 
 
-@patch("lightsuite.registration.align.find_bcpd_executable", return_value=None)
+@patch("lightsuite.registration.align.resolve_bcpd_executable", return_value=None)
 def test_estimate_similarity_transform_returns_both_frames(_mock_bcpd: object) -> None:
     rng = np.random.default_rng(1)
     sample = rng.random((500, 3)) * 30.0

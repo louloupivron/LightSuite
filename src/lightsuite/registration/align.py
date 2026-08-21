@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 
 import numpy as np
 import open3d as o3d
 from scipy.spatial import cKDTree
 
-from lightsuite.registration.bcpd import atlas_to_sample_affinetform, find_bcpd_executable, register_bcpd
+from lightsuite.registration.bcpd import (
+    atlas_to_sample_affinetform,
+    register_bcpd,
+    resolve_bcpd_executable,
+)
 from lightsuite.registration.pc_downsample import downsample_for_bcpd_similarity, downsample_for_triage
 from lightsuite.registration.warp import (
     matlab_voxel_affine_from_icp,
@@ -225,6 +230,7 @@ def estimate_similarity_transform(
     *,
     max_distance: float = 25.0,
     bcpd_path: str | Path | None = None,
+    bcpd_search_roots: Sequence[Path | str] | None = None,
 ) -> tuple[np.ndarray, np.ndarray, str]:
     """Estimate sample->atlas similarity transform.
 
@@ -232,7 +238,7 @@ def estimate_similarity_transform(
     operate on 0-based XYZ point indices and ``matlab_transform`` is stored
     in regopts.json.
     """
-    executable = find_bcpd_executable(bcpd_path)
+    executable = resolve_bcpd_executable(bcpd_path, search_roots=bcpd_search_roots)
     if executable is not None:
         transform_icp, matlab_transform = _estimate_similarity_bcpd(
             atlas_points,
@@ -370,9 +376,10 @@ def triage_and_match_clouds(
     transform_icp: np.ndarray,
     *,
     bcpd_path: str | Path | None = None,
+    bcpd_search_roots: Sequence[Path | str] | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Select candidate corresponding points after coarse alignment."""
-    executable = find_bcpd_executable(bcpd_path)
+    executable = resolve_bcpd_executable(bcpd_path, search_roots=bcpd_search_roots)
     if executable is not None:
         return _triage_bcpd(sample_points, atlas_points, transform_icp, executable)
     return _triage_icp(sample_points, atlas_points, transform_icp)

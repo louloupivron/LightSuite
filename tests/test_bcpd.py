@@ -38,6 +38,40 @@ def test_find_bcpd_prefers_native_binary_over_win_exe(tmp_path: Path, monkeypatc
     assert found == native.resolve()
 
 
+def test_find_bcpd_resolves_relative_path_against_search_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_dir = tmp_path / "configs"
+    bin_dir = tmp_path / "tools" / "win"
+    config_dir.mkdir(parents=True)
+    bin_dir.mkdir(parents=True)
+    executable = bin_dir / "bcpd.exe"
+    executable.write_bytes(b"MZ")
+
+    monkeypatch.delenv("PATH", raising=False)
+    found = find_bcpd_executable("../tools/win/bcpd.exe", search_roots=[config_dir])
+    assert found == executable.resolve()
+
+
+def test_find_bcpd_accepts_directory_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    bin_dir = tmp_path / "bcpd-master" / "win"
+    bin_dir.mkdir(parents=True)
+    executable = bin_dir / "bcpd.exe"
+    executable.write_bytes(b"MZ")
+
+    monkeypatch.delenv("PATH", raising=False)
+    found = find_bcpd_executable(bin_dir, search_roots=None)
+    assert found == executable.resolve()
+
+
+def test_resolve_bcpd_executable_reuses_existing_path(tmp_path: Path) -> None:
+    executable = tmp_path / "bcpd.exe"
+    executable.write_bytes(b"MZ")
+    from lightsuite.registration.bcpd import resolve_bcpd_executable
+
+    assert resolve_bcpd_executable(executable) == executable.resolve()
+
+
 def test_fit_similarity_prefers_matlab_row_convention() -> None:
     rng = np.random.default_rng(0)
     moving = rng.random((40, 3)) * 30.0

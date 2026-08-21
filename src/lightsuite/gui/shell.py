@@ -669,6 +669,16 @@ class LightsuiteShell:
         if self.project is None or self._is_busy():
             return
 
+        if self._config_editor.is_dirty():
+            if self._config_editor.config_path is None:
+                self.log("Save the config before running stages.")
+                return
+            self._config_editor.save_if_dirty()
+
+        self.refresh_statuses()
+        if self.project is None:
+            return
+
         workflow = self.project.workflow
         config = self.project.config
         if (

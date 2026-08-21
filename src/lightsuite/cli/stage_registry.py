@@ -76,7 +76,7 @@ def _brain_align_slices(config: Any, ctx: StageContext) -> Any:
 def _brain_init_registration(config: Any, ctx: StageContext) -> Any:
     from lightsuite.registration.init_brain import initialize_brain_registration
 
-    return initialize_brain_registration(config)
+    return initialize_brain_registration(config, config_path=ctx.config_path)
 
 
 def _brain_match_points(config: Any, ctx: StageContext) -> Any:
@@ -352,6 +352,8 @@ def run_stage(workflow: str, stage_id: str, config: Any, ctx: StageContext) -> A
     if stage_id in aliases and resolved_id in get_workflow(workflow).runners:
         stage_id = resolved_id
     spec = get_workflow(workflow)
+    if ctx.config_path is not None:
+        config = spec.load_config(ctx.config_path)
     try:
         runner = spec.runners[stage_id]
     except KeyError as exc:

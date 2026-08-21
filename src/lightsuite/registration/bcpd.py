@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import os
 import platform
 import shutil
 import subprocess
 import tempfile
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Literal
 
@@ -49,23 +51,85 @@ def _native_bcpd_candidates(configured: Path) -> list[Path]:
     return candidates
 
 
-def find_bcpd_executable(path: str | Path | None = None) -> Path | None:
-    """Locate the BCPD binary on PATH or at an explicit location."""
-    is_windows = platform.system().lower().startswith("win")
+def _bcpd_binary_names(*, is_windows: bool) -> tuple[str, ...]:
+    return ("bcpd.exe", "bcpd") if is_windows else ("bcpd", "bcpd.exe")
 
-    if path is not None:
-        configured = Path(path).expanduser()
-        if configured.is_file():
-            if not is_windows and configured.suffix.lower() == ".exe":
-                for candidate in _native_bcpd_candidates(configured):
-                    if candidate.is_file():
-                        return candidate.resolve()
-                found = shutil.which("bcpd")
-                if found:
-                    return Path(found).resolve()
-            return configured.resolve()
 
-    for name in ("bcpd.exe", "bcpd") if is_windows else ("bcpd", "bcpd.exe"):
+def _normalize_configured_path(path: str | Path | None) -> Path | None:
+    if path is None:
+        return None
+    text = str(path).strip()
+    if not text:
+        return None
+    return Path(text).expanduser()
+
+
+def _path_search_roots(search_roots: Sequence[Path | str] | None) -> list[Path]:
+    roots: list[Path] = []
+    for item in search_roots or ():
+        root = Path(item).expanduser()
+        if root.is_dir():
+            roots.append(root.resolve())
+    return roots
+
+
+def _candidate_configured_paths(configured: Path, *, is_windows: bool) -> list[Path]:
+    candidates = [configured]
+    if configured.is_dir():
+        candidates.extend(configured / name for name in _bcpd_binary_names(is_windows=is_windows))
+    elif is_windows and configured.suffix.lower() != ".exe":
+        candidates.append(configured.with_suffix(".exe"))
+    return candidates
+
+
+def _resolve_existing_executable(configured: Path, *, is_windows: bool) -> Path | None:
+    configured_dir = configured.is_dir()
+    candidates = _candidate_configured_paths(configured, is_windows=is_windows)
+    for index, candidate in enumerate(candidates):
+        if not candidate.is_file():
+            continue
+        if (
+            not is_windows
+            and candidate.suffix.lower() == ".exe"
+            and not configured_dir
+        ):
+            for native in _native_bcpd_candidates(candidate):
+                if native.is_file():
+                    return native.resolve()
+            found = shutil.which("bcpd")
+            if found:
+                return Path(found).resolve()
+            if index == 0:
+                return candidate.resolve()
+            continue
+        return candidate.resolve()
+    return None
+
+
+def _windows_path_entries() -> list[str]:
+    """Return PATH-like entries from the Windows registry (user + machine)."""
+    try:
+        import winreg
+    except ImportError:
+        return []
+
+    entries: list[str] = []
+    for hive, subkey in (
+        (winreg.HKEY_CURRENT_USER, r"Environment"),
+        (winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment"),
+    ):
+        try:
+            with winreg.OpenKey(hive, subkey) as key:
+                value, _ = winreg.QueryValueEx(key, "Path")
+        except OSError:
+            continue
+        if isinstance(value, str):
+            entries.extend(part for part in value.split(";") if part.strip())
+    return entries
+
+
+def _find_on_path(*, is_windows: bool) -> Path | None:
+    for name in _bcpd_binary_names(is_windows=is_windows):
         found = shutil.which(name)
         if found:
             resolved = Path(found).resolve()
@@ -73,10 +137,77 @@ def find_bcpd_executable(path: str | Path | None = None) -> Path | None:
                 continue
             return resolved
 
+    if not is_windows:
+        return None
+
+    seen: set[Path] = set()
+    for entry in _windows_path_entries():
+        directory = Path(entry.strip()).expanduser()
+        try:
+            directory = directory.resolve()
+        except OSError:
+            continue
+        if not directory.is_dir() or directory in seen:
+            continue
+        seen.add(directory)
+        for name in _bcpd_binary_names(is_windows=True):
+            candidate = directory / name
+            if candidate.is_file():
+                return candidate.resolve()
+    return None
+
+
+def find_bcpd_executable(
+    path: str | Path | None = None,
+    *,
+    search_roots: Sequence[Path | str] | None = None,
+) -> Path | None:
+    """Locate the BCPD binary on PATH or at an explicit location."""
+    is_windows = platform.system().lower().startswith("win")
+
+    env_path = os.environ.get("LIGHTSUITE_BCPD_PATH", "").strip()
+    if env_path:
+        resolved = _resolve_existing_executable(Path(env_path).expanduser(), is_windows=is_windows)
+        if resolved is not None:
+            return resolved
+
+    configured = _normalize_configured_path(path)
+    if configured is not None:
+        if configured.is_absolute():
+            resolved = _resolve_existing_executable(configured, is_windows=is_windows)
+            if resolved is not None:
+                return resolved
+        else:
+            for root in _path_search_roots(search_roots):
+                resolved = _resolve_existing_executable(
+                    (root / configured).resolve(),
+                    is_windows=is_windows,
+                )
+                if resolved is not None:
+                    return resolved
+            resolved = _resolve_existing_executable(configured, is_windows=is_windows)
+            if resolved is not None:
+                return resolved
+
+    found = _find_on_path(is_windows=is_windows)
+    if found is not None:
+        return found
+
     local = Path("./bcpd")
     if local.is_file():
         return local.resolve()
     return None
+
+
+def resolve_bcpd_executable(
+    bcpd_path: str | Path | None = None,
+    *,
+    search_roots: Sequence[Path | str] | None = None,
+) -> Path | None:
+    """Resolve a configured or discovered BCPD executable."""
+    if isinstance(bcpd_path, Path) and bcpd_path.is_file():
+        return bcpd_path.resolve()
+    return find_bcpd_executable(bcpd_path, search_roots=search_roots)
 
 
 def to_matlab_voxel_points(points: np.ndarray) -> np.ndarray:

@@ -23,7 +23,7 @@ from lightsuite.registration.align import (
     similarity_scale,
     triage_and_match_clouds,
 )
-from lightsuite.registration.bcpd import find_bcpd_executable
+from lightsuite.registration.bcpd import resolve_bcpd_executable
 from lightsuite.registration.brain_paths import (
     INIT_DIAGNOSTICS_FILENAME,
     brain_qc_file,
@@ -54,7 +54,11 @@ from lightsuite.registration.volume import (
 console = Console()
 
 
-def initialize_brain_registration(config: BrainPipelineConfig) -> RegOptsCheckpoint:
+def initialize_brain_registration(
+    config: BrainPipelineConfig,
+    *,
+    config_path: Path | str | None = None,
+) -> RegOptsCheckpoint:
     """Coarse-align sample to atlas and update regopts checkpoint."""
     save_path = config.sample.save_path.expanduser()
     regopts_path = save_path / "regopts.json"
@@ -115,7 +119,14 @@ def initialize_brain_registration(config: BrainPipelineConfig) -> RegOptsCheckpo
         msg = "Too few points extracted for coarse registration."
         raise RuntimeError(msg)
 
-    bcpd_path = find_bcpd_executable(config.registration.bcpd_path)
+    search_roots: list[Path] = []
+    if config_path is not None:
+        search_roots.append(Path(config_path).expanduser().resolve().parent)
+
+    bcpd_path = resolve_bcpd_executable(
+        config.registration.bcpd_path,
+        search_roots=search_roots,
+    )
     if bcpd_path is None and tv_cloud.shape[0] > 100_000:
         tv_cloud = downsample_point_cloud(tv_cloud, 100_000)
 
@@ -124,6 +135,7 @@ def initialize_brain_registration(config: BrainPipelineConfig) -> RegOptsCheckpo
         tv_cloud,
         ls_cloud,
         bcpd_path=bcpd_path,
+        bcpd_search_roots=search_roots,
     )
     alignment_elapsed = time.perf_counter() - t0
     scale = similarity_scale(transform_icp)
@@ -135,6 +147,7 @@ def initialize_brain_registration(config: BrainPipelineConfig) -> RegOptsCheckpo
         tv_cloud,
         transform_icp,
         bcpd_path=bcpd_path,
+        bcpd_search_roots=search_roots,
     )
     triage_elapsed = time.perf_counter() - t0
 
