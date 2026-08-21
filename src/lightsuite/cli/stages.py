@@ -249,11 +249,19 @@ def _multires_supports_inspect_geometry(config: _Config) -> bool:
     return False
 
 
+def _multires_supports_match_points(config: _Config) -> bool:
+    multires = getattr(config, "multires", None)
+    if multires is None:
+        return False
+    supports = getattr(multires, "supports_match_points", None)
+    if callable(supports):
+        return bool(supports())
+    return False
+
+
 def multires_stage_specs(config: _Config) -> list[StageSpec]:
     stages: list[StageSpec] = []
-    multires = getattr(config, "multires", None)
-    landmarks = getattr(multires, "landmarks", None) if multires else None
-    if landmarks is not None and getattr(landmarks, "session_path", None) is not False:
+    if _multires_supports_match_points(config):
         stages.append(
             StageSpec(
                 "match-points",

@@ -150,6 +150,12 @@ class MultiresConfig(BaseModel):
         """True when the lateral_flip Napari QC stage applies (mesoSPIM only)."""
         return self.vendor.suite == MultiresVendorSuite.MESOSPIM
 
+    def supports_match_points(self) -> bool:
+        """True when the Napari landmark match-points stage applies (hybrid geometry only)."""
+        if self.geometry_mode != MultiresGeometryMode.HYBRID:
+            return False
+        return self.landmarks.session_path is not False
+
     @field_validator("pair_manifest", "overview_meta_path")
     @classmethod
     def expand_optional_paths(cls, value: Path | None) -> Path | None:

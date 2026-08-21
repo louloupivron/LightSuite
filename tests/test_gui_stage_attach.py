@@ -75,6 +75,74 @@ def test_multires_stage_specs_include_inspect_geometry_for_mesospim(tmp_path) ->
     assert ids.index("register") < ids.index("inspect-registration")
 
 
+def test_multires_stage_specs_omit_match_points_for_metadata_mode(tmp_path) -> None:
+    from lightsuite.multires.config_models import MultiresPipelineConfig
+
+    overview = tmp_path / "overview"
+    roi = tmp_path / "roi"
+    overview.mkdir()
+    roi.mkdir()
+    raw = {
+        "sample": {
+            "name": "test",
+            "save_path": str(tmp_path / "results"),
+            "scratch": str(tmp_path / "scratch"),
+        },
+        "multires": {
+            "vendor": {"suite": "smartspim"},
+            "pair_label": "pair1",
+            "geometry_mode": "metadata",
+            "channels": {
+                "488": {
+                    "overview": str(overview),
+                    "roi": str(roi),
+                }
+            },
+            "registration": {"reference_channel": "488"},
+        },
+    }
+    (tmp_path / "results").mkdir()
+    (tmp_path / "scratch").mkdir()
+    cfg = MultiresPipelineConfig.model_validate(raw)
+    ids = [spec.id for spec in multires_stage_specs(cfg)]
+    assert "match-points" not in ids
+    assert "check-geometry" in ids
+
+
+def test_multires_stage_specs_include_match_points_for_hybrid_mode(tmp_path) -> None:
+    from lightsuite.multires.config_models import MultiresPipelineConfig
+
+    overview = tmp_path / "overview"
+    roi = tmp_path / "roi"
+    overview.mkdir()
+    roi.mkdir()
+    raw = {
+        "sample": {
+            "name": "test",
+            "save_path": str(tmp_path / "results"),
+            "scratch": str(tmp_path / "scratch"),
+        },
+        "multires": {
+            "vendor": {"suite": "smartspim"},
+            "pair_label": "pair1",
+            "geometry_mode": "hybrid",
+            "channels": {
+                "488": {
+                    "overview": str(overview),
+                    "roi": str(roi),
+                }
+            },
+            "registration": {"reference_channel": "488"},
+        },
+    }
+    (tmp_path / "results").mkdir()
+    (tmp_path / "scratch").mkdir()
+    cfg = MultiresPipelineConfig.model_validate(raw)
+    ids = [spec.id for spec in multires_stage_specs(cfg)]
+    assert "match-points" in ids
+    assert ids.index("match-points") < ids.index("check-geometry")
+
+
 def test_multires_stage_specs_omit_inspect_geometry_for_smartspim(tmp_path) -> None:
     from lightsuite.multires.config_models import MultiresPipelineConfig
 
