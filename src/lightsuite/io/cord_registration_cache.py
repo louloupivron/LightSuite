@@ -178,18 +178,106 @@ def _expected_registration_shape(
     return target
 
 
-def _registration_tiff_matches(path: Path, expected_shape: tuple[int, int, int]) -> bool:
-    if not path.is_file():
-        return False
+def _probe_from_manifest(manifest: dict[str, Any]) -> CordSourceProbe | None:
+    """Rebuild a source probe from a register-cache manifest (no raw TIFF reads)."""
+    native = manifest.get("native_orisize")
+    tiff_type = manifest.get("tiff_type")
+    fingerprint = manifest.get("fingerprint")
+    if not isinstance(native, list) or len(native) != 3:
+        return None
+    if not isinstance(tiff_type, str):
+        return None
+    if not isinstance(fingerprint, dict):
+        return None
     try:
-        data = tifffile.imread(path)
-        if data.ndim == 2:
-            data = data[:, :, np.newaxis]
-        if data.ndim != 3:
-            return False
-        return tuple(int(v) for v in data.shape) == expected_shape
-    except (OSError, ValueError, tifffile.TiffFileError):
+        layout = CordTiffLayout(tiff_type)
+    except ValueError:
+        return None
+    nchans = fingerprint.get("nchans", 1)
+    n_skipped = fingerprint.get("n_skipped_slices", 0)
+    return CordSourceProbe(
+        native_orisize=(int(native[0]), int(native[1]), int(native[2])),
+        n_channels=int(nchans),
+        layout=layout,
+        n_skipped_slices=int(n_skipped),
+    )
+
+
+def _probe_from_checkpoint(checkpoint: CordRegOptsCheckpoint) -> CordSourceProbe:
+    return CordSourceProbe(
+        native_orisize=(int(checkpoint.orisize[0]), int(checkpoint.orisize[1]), int(checkpoint.orisize[2])),
+        n_channels=int(checkpoint.nchans),
+        layout=CordTiffLayout(checkpoint.tiff_type),
+    )
+
+
+def _plane_per_file_slice_count(config: SpinalCordPipelineConfig) -> int | None:
+    """Return the number of plane TIFFs via directory listing only (single-folder stacks)."""
+    folder = config.sample.source.path
+    if folder is None:
+        return None
+    channel_folders = config.sample.source.channel_roots
+    try:
+        layout = resolve_cord_tiff_layout(
+            folder,
+            config.sample.source.tiff_type,
+            channel_folders=channel_folders,
+        )
+    except (FileNotFoundError, ValueError):
+        return None
+    if layout != CordTiffLayout.PLANE_PER_FILE:
+        return None
+    roots = list(channel_folders) if channel_folders else [folder]
+    if len(roots) != 1:
+        return None
+    return len(_sorted_tiff_files(roots[0]))
+
+
+def _manifest_fingerprint_matches(
+    config: SpinalCordPipelineConfig,
+    manifest: dict[str, Any],
+) -> bool:
+    """True when manifest fingerprint matches config and plane count is unchanged."""
+    probe = _probe_from_manifest(manifest)
+    if probe is None:
         return False
+    if compute_cord_register_fingerprint(config, probe) != manifest.get("fingerprint"):
+        return False
+    if probe.layout == CordTiffLayout.PLANE_PER_FILE:
+        listed = _plane_per_file_slice_count(config)
+        if listed is not None:
+            expected = probe.native_orisize[2] + probe.n_skipped_slices
+            if listed != expected:
+                return False
+    return True
+
+
+def _tiff_stack_shape(path: Path) -> tuple[int, int, int] | None:
+    """Return (Y, X, Z) for a volume TIFF without decoding pixel data."""
+    if not path.is_file():
+        return None
+    try:
+        with tifffile.TiffFile(path) as tif:
+            if tif.series:
+                shape = tif.series[0].shape
+                if len(shape) == 2:
+                    return (int(shape[0]), int(shape[1]), 1)
+                if len(shape) == 3:
+                    return (int(shape[0]), int(shape[1]), int(shape[2]))
+            if not tif.pages:
+                return None
+            page = tif.pages[0]
+            if len(tif.pages) == 1:
+                return (int(page.shape[0]), int(page.shape[1]), 1)
+            return (int(page.shape[0]), int(page.shape[1]), len(tif.pages))
+    except (OSError, ValueError, tifffile.TiffFileError):
+        return None
+    return None
+
+
+def _registration_tiff_matches(path: Path, expected_shape: tuple[int, int, int]) -> bool:
+    shape = _tiff_stack_shape(path)
+    return shape == expected_shape
 
 
 def _regvolpaths_valid(
@@ -221,15 +309,22 @@ def _load_manifest(cache_dir: Path) -> dict[str, Any] | None:
 def register_cache_valid(
     cache_dir: Path,
     config: SpinalCordPipelineConfig,
-    probe: CordSourceProbe,
+    probe: CordSourceProbe | None = None,
 ) -> bool:
     """Return True when cached registration TIFFs match the current sample inputs."""
     manifest = _load_manifest(cache_dir)
     if manifest is None:
         return False
-    fingerprint = compute_cord_register_fingerprint(config, probe)
-    if manifest.get("fingerprint") != fingerprint:
-        return False
+    if probe is None:
+        if not _manifest_fingerprint_matches(config, manifest):
+            return False
+        probe = _probe_from_manifest(manifest)
+        if probe is None:
+            return False
+    else:
+        fingerprint = compute_cord_register_fingerprint(config, probe)
+        if manifest.get("fingerprint") != fingerprint:
+            return False
     regvolpaths = manifest.get("regvolpaths")
     if not isinstance(regvolpaths, dict):
         return False
@@ -241,19 +336,12 @@ def register_cache_valid(
     )
 
 
-def _checkpoint_matches_inputs(
+def _checkpoint_matches_config(
     checkpoint: CordRegOptsCheckpoint,
     config: SpinalCordPipelineConfig,
-    probe: CordSourceProbe,
 ) -> bool:
     sampleres = normalize_res_um(config.sample.voxel_um)
     regres = normalize_res_um([config.registration.resolution_um] * 3)
-    if checkpoint.nchans != probe.n_channels:
-        return False
-    if list(checkpoint.orisize) != list(probe.native_orisize):
-        return False
-    if checkpoint.tiff_type != probe.layout.value:
-        return False
     if checkpoint.data_folder != str(config.sample.source.path):
         return False
     if not np.allclose(checkpoint.sampleres_um, sampleres.tolist()):
@@ -261,6 +349,82 @@ def _checkpoint_matches_inputs(
     if not np.allclose(checkpoint.registrationres_um, regres.tolist()):
         return False
     return True
+
+
+def _checkpoint_matches_inputs(
+    checkpoint: CordRegOptsCheckpoint,
+    config: SpinalCordPipelineConfig,
+    probe: CordSourceProbe,
+) -> bool:
+    if not _checkpoint_matches_config(checkpoint, config):
+        return False
+    if checkpoint.nchans != probe.n_channels:
+        return False
+    if list(checkpoint.orisize) != list(probe.native_orisize):
+        return False
+    if checkpoint.tiff_type != probe.layout.value:
+        return False
+    return True
+
+
+def _try_load_register_cache(
+    config: SpinalCordPipelineConfig,
+    cache_dir: Path,
+) -> CordRegistrationVolume | None:
+    """Load cached registration TIFFs without probing raw source planes."""
+    manifest = _load_manifest(cache_dir)
+    if manifest is None or not _manifest_fingerprint_matches(config, manifest):
+        return None
+    probe = _probe_from_manifest(manifest)
+    if probe is None:
+        return None
+    regvolpaths = manifest.get("regvolpaths")
+    if not isinstance(regvolpaths, dict):
+        return None
+    expected_shape = _expected_registration_shape(probe, config)
+    paths = {str(k): str(v) for k, v in regvolpaths.items()}
+    if not _regvolpaths_valid(
+        paths,
+        n_channels=probe.n_channels,
+        expected_shape=expected_shape,
+    ):
+        return None
+    console.print(
+        "[green]Using cached registration-grid sample TIFFs[/green] "
+        "(inputs unchanged; written by check-orientation or a prior run)."
+    )
+    return _load_cached_volume(paths, probe=probe, layout=probe.layout)
+
+
+def _try_load_regopts_cache(
+    config: SpinalCordPipelineConfig,
+    save_path: Path,
+) -> CordRegistrationVolume | None:
+    """Load registration TIFFs referenced by regopts.json without probing raw planes."""
+    regopts_path = save_path / "regopts.json"
+    if not regopts_path.is_file():
+        return None
+    checkpoint = CordRegOptsCheckpoint.load(regopts_path)
+    if not _checkpoint_matches_config(checkpoint, config):
+        return None
+    probe = _probe_from_checkpoint(checkpoint)
+    if probe.layout == CordTiffLayout.PLANE_PER_FILE:
+        listed = _plane_per_file_slice_count(config)
+        if listed is not None and listed != probe.native_orisize[2]:
+            return None
+    regvolpaths = checkpoint.regvolpaths or {}
+    expected_shape = _expected_registration_shape(probe, config)
+    if not _regvolpaths_valid(
+        regvolpaths,
+        n_channels=probe.n_channels,
+        expected_shape=expected_shape,
+    ):
+        return None
+    console.print(
+        "[green]Using cached registration-grid sample TIFFs[/green] "
+        "(from regopts.json; inputs unchanged)."
+    )
+    return _load_cached_volume(regvolpaths, probe=probe, layout=probe.layout)
 
 
 def _write_register_cache(
@@ -315,6 +479,19 @@ def _load_cached_volume(
     )
 
 
+def manifest_register_fingerprint(
+    config: SpinalCordPipelineConfig,
+) -> dict[str, Any] | None:
+    """Return the register-cache fingerprint when manifest matches config (no raw TIFF reads)."""
+    manifest = _load_manifest(cord_cache_dir(config))
+    if manifest is None or not _manifest_fingerprint_matches(config, manifest):
+        return None
+    probe = _probe_from_manifest(manifest)
+    if probe is None:
+        return None
+    return compute_cord_register_fingerprint(config, probe)
+
+
 def load_or_cache_cord_registration(
     config: SpinalCordPipelineConfig,
     *,
@@ -323,45 +500,17 @@ def load_or_cache_cord_registration(
     """Load the registration-grid sample volume, reusing cache when inputs are unchanged."""
     cache_dir = cord_cache_dir(config)
     save_path = cord_save_path(config)
-    probe = probe_cord_source(config)
-    fingerprint = compute_cord_register_fingerprint(config, probe)
-    expected_shape = _expected_registration_shape(probe, config)
 
     if not force:
-        regopts_path = save_path / "regopts.json"
-        if regopts_path.is_file():
-            checkpoint = CordRegOptsCheckpoint.load(regopts_path)
-            regvolpaths = checkpoint.regvolpaths or {}
-            if (
-                _checkpoint_matches_inputs(checkpoint, config, probe)
-                and _regvolpaths_valid(
-                    regvolpaths,
-                    n_channels=probe.n_channels,
-                    expected_shape=expected_shape,
-                )
-            ):
-                console.print(
-                    "[green]Using cached registration-grid sample TIFFs[/green] "
-                    "(from regopts.json; inputs unchanged)."
-                )
-                return _load_cached_volume(
-                    regvolpaths,
-                    probe=probe,
-                    layout=probe.layout,
-                )
+        cached = _try_load_regopts_cache(config, save_path)
+        if cached is not None:
+            return cached
+        cached = _try_load_register_cache(config, cache_dir)
+        if cached is not None:
+            return cached
 
-        if register_cache_valid(cache_dir, config, probe):
-            manifest = _load_manifest(cache_dir)
-            assert manifest is not None
-            console.print(
-                "[green]Using cached registration-grid sample TIFFs[/green] "
-                "(inputs unchanged; written by check-orientation or a prior run)."
-            )
-            return _load_cached_volume(
-                {str(k): str(v) for k, v in manifest["regvolpaths"].items()},
-                probe=probe,
-                layout=probe.layout,
-            )
+    probe = probe_cord_source(config)
+    fingerprint = compute_cord_register_fingerprint(config, probe)
 
     sample = read_spinal_cord_sample(config)
     regvolpaths = _write_register_cache(
