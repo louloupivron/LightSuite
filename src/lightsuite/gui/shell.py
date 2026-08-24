@@ -768,7 +768,10 @@ class LightsuiteShell:
             return
         self._stage_cancel_event.set()
         self._cancel_button.setEnabled(False)
-        self.log("Cancelling stage…")
+        self.log(
+            "Cancelling stage… (stops at the next checkpoint; "
+            "in-flight plane workers are abandoned)"
+        )
 
     def _on_stage_finished(self, stage_id: str, _result: Any) -> None:
         self._worker = None

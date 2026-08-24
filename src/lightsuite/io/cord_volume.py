@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 import time
 from collections.abc import Iterator, Sequence
-from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -24,6 +23,7 @@ from lightsuite.reporter import (
     check_stage_cancelled,
     emit_pipeline_message,
     format_duration,
+    iter_cancellable_process_map,
     report_step_progress,
 )
 
@@ -71,16 +71,13 @@ def _iter_cord_plane_slices(
         )
         for path in files
     ]
-    if workers <= 1:
-        for job in jobs:
-            check_stage_cancelled()
-            yield process_slice_job(job).plane_xy
-        return
-    chunksize = max(1, len(jobs) // (workers * 4))
-    with ProcessPoolExecutor(max_workers=workers) as pool:
-        for result in pool.map(process_slice_job, jobs, chunksize=chunksize):
-            check_stage_cancelled()
-            yield result.plane_xy
+    for result in iter_cancellable_process_map(
+        process_slice_job,
+        jobs,
+        max_workers=max(1, workers),
+        chunksize=1,
+    ):
+        yield result.plane_xy
 
 
 @dataclass(frozen=True)
@@ -215,6 +212,7 @@ def filter_spinal_cord_slices(
     bad: list[SkippedSlice] = []
     good: list[Path] = []
     for iz, path in enumerate(files, start=1):
+        check_stage_cancelled()
         try:
             plane = read_plane_tiff(path)
             if plane.shape != (ny0, nx0):
@@ -422,7 +420,7 @@ def _load_one_plane_per_file_channel(
         )
         emit_pipeline_message(
             f"[{label}] resizing Z from {backvol.shape[2]} to {target_loaded[2]} planes "
-            "(can take several minutes on large stacks)…"
+            "(can take several minutes on large stacks; cancel applies after this step)…"
         )
         t_resize = time.perf_counter()
         finvol = resize(

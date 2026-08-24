@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import time
 from collections.abc import Iterator
-from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -18,6 +17,7 @@ from lightsuite.reporter import (
     check_stage_cancelled,
     emit_pipeline_message,
     format_duration,
+    iter_cancellable_process_map,
     report_step_progress,
 )
 from lightsuite.io.discover import (
@@ -134,16 +134,12 @@ def _iter_processed_slices(
     jobs: list[SliceLoadJob],
     workers: int,
 ) -> Iterator[SliceProcessResult]:
-    if workers <= 1:
-        for job in jobs:
-            check_stage_cancelled()
-            yield process_slice_job(job)
-        return
-
-    with ProcessPoolExecutor(max_workers=workers) as pool:
-        for result in pool.map(process_slice_job, jobs, chunksize=1):
-            check_stage_cancelled()
-            yield result
+    yield from iter_cancellable_process_map(
+        process_slice_job,
+        jobs,
+        max_workers=max(1, workers),
+        chunksize=1,
+    )
 
 
 def _allocate_xy_stack(

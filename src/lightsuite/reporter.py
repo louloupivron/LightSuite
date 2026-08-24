@@ -7,9 +7,9 @@ import contextvars
 import io
 import threading
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from rich.console import Console
 
@@ -93,6 +93,38 @@ def report_step_progress(
         f"{prefix}{unit} {current}/{total} ({pct:.0f}%) — "
         f"{format_duration(elapsed)} elapsed, ~{format_duration(eta)} left{worker_note}"
     )
+
+
+def iter_cancellable_process_map(
+    fn: Callable[..., Any],
+    items: Sequence[Any],
+    *,
+    max_workers: int,
+    chunksize: int = 1,
+) -> Iterator[Any]:
+    """Map ``fn`` over ``items`` in a process pool, aborting promptly on cancel.
+
+    Unlike ``with ProcessPoolExecutor(...):``, cancel does **not** wait for already
+    submitted worker jobs to finish (``shutdown(wait=False, cancel_futures=True)``).
+    """
+    from concurrent.futures import ProcessPoolExecutor
+
+    if max_workers <= 1:
+        for item in items:
+            check_stage_cancelled()
+            yield fn(item)
+        return
+
+    pool = ProcessPoolExecutor(max_workers=max_workers)
+    try:
+        for result in pool.map(fn, items, chunksize=max(1, chunksize)):
+            check_stage_cancelled()
+            yield result
+    except BaseException:
+        pool.shutdown(wait=False, cancel_futures=True)
+        raise
+    else:
+        pool.shutdown(wait=True)
 
 
 @contextlib.contextmanager
