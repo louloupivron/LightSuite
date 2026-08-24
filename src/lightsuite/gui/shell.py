@@ -704,15 +704,6 @@ class LightsuiteShell:
 
         workflow = self.project.workflow
         config = self.project.config
-        if (
-            workflow == "spinal"
-            and stage_id == "preprocess"
-            and cord_orientation_missing(config)
-        ):
-            self._pending_auto_stage = "preprocess"
-            self.log("Cord orientation required — opening check-orientation before preprocess.")
-            self._attach_interactive_stage("check-orientation")
-            return
 
         self._stage_cancel_event = threading.Event()
         try:
@@ -790,6 +781,16 @@ class LightsuiteShell:
             exc = error_info
         if isinstance(exc, StageCancelledError):
             self.log("Stage cancelled.")
+            return
+        from lightsuite.registration.cord_orientation import CordOrientationRequiredError
+
+        if isinstance(exc, CordOrientationRequiredError):
+            self.log(
+                "Downsampled registration volume ready. Opening check-orientation to set "
+                "rostrocaudal direction…"
+            )
+            self._pending_auto_stage = "preprocess"
+            self._attach_interactive_stage("check-orientation")
             return
         self.log(f"Stage failed: {exc}")
         self.log(traceback.format_exc())
