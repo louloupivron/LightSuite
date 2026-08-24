@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
+import numpy as np
+import tifffile
 import yaml
 
 from lightsuite.config.loader import load_spinal_config
@@ -109,6 +111,66 @@ def test_orphan_registration_tiff_without_manifest(tmp_path: Path) -> None:
     assert second.volume.shape == first.volume.shape
     assert manifest.is_file()
     assert register_cache_valid(cache_dir, cfg)
+
+
+def test_orphan_registration_tiff_in_save_path_root(tmp_path: Path) -> None:
+    """Detect and reuse registration TIFF when placed in save_path root (brain-style)."""
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "spinal_cord"
+    _ensure_fixtures(fixture_root)
+    config_path = _write_config(tmp_path, fixture_root)
+    cfg = load_spinal_config(config_path)
+
+    first = load_or_cache_cord_registration(cfg)
+    cache_dir = Path(cfg.sample.save_path) / "cache"
+    tiff_in_cache = cache_dir / "chan_1_sample_register_20um.tif"
+    tiff_in_save = Path(cfg.sample.save_path) / "chan_1_sample_register_20um.tif"
+
+    # Move TIFF to save_path root and remove cache folder
+    import shutil
+
+    shutil.copy2(tiff_in_cache, tiff_in_save)
+    shutil.rmtree(cache_dir)
+
+    with patch(
+        "lightsuite.io.cord_registration_cache.read_spinal_cord_sample",
+        side_effect=AssertionError("root TIFF should be reused without raw reload"),
+    ):
+        second = load_or_cache_cord_registration(cfg)
+
+    assert second.from_cache is True
+    assert second.volume.shape == first.volume.shape
+
+
+def test_orphan_multipage_z_tiff(tmp_path: Path) -> None:
+    """Detect and load registration TIFF written as Z pages (Fiji/ImageJ/TiffWriter)."""
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "spinal_cord"
+    _ensure_fixtures(fixture_root)
+    config_path = _write_config(tmp_path, fixture_root)
+    cfg = load_spinal_config(config_path)
+
+    first = load_or_cache_cord_registration(cfg)
+    cache_dir = Path(cfg.sample.save_path) / "cache"
+    tiff_path = cache_dir / "chan_1_sample_register_20um.tif"
+
+    # Rewrite tiff_path as multi-page Z stack
+    ny, nx, nz = first.volume.shape[:3]
+    with tifffile.TiffWriter(tiff_path) as tw:
+        for z in range(nz):
+            tw.write(first.volume[:, :, z, 0], photometric="minisblack")
+
+    manifest = cache_dir / REGISTER_CACHE_MANIFEST
+    if manifest.is_file():
+        manifest.unlink()
+
+    with patch(
+        "lightsuite.io.cord_registration_cache.read_spinal_cord_sample",
+        side_effect=AssertionError("Z-page TIFF should be reused without raw reload"),
+    ):
+        second = load_or_cache_cord_registration(cfg)
+
+    assert second.from_cache is True
+    assert second.volume.shape == first.volume.shape
+    assert np.array_equal(second.volume, first.volume)
 
 
 def test_preprocess_reuses_cache_after_orientation_load(tmp_path: Path) -> None:
