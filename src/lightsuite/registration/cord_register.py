@@ -40,7 +40,7 @@ from lightsuite.registration.elastix.mhd import scale_volume_for_elastix_mi, wri
 from lightsuite.registration.elastix.params import write_parameter_file
 from lightsuite.registration.elastix.points import write_landmark_file
 from lightsuite.registration.elastix.runner import clear_elastix_workspace, run_transformix
-from lightsuite.reporter import emit_pipeline_message, format_duration
+from lightsuite.reporter import check_stage_cancelled, emit_pipeline_message, format_duration
 
 
 def run_spinal_registration(config: SpinalCordPipelineConfig) -> Path:
@@ -100,6 +100,7 @@ def run_spinal_registration(config: SpinalCordPipelineConfig) -> Path:
         "Register: warping atlas template onto straightened sample grid "
         f"(z-init + affine from {elastix_affine_path.name})…"
     )
+    check_stage_cancelled()
     t0 = time.perf_counter()
     # Always warp the atlas into the straightened-sample grid via the initial z-scale +
     # elastix affine. This is the same warp used by the match-points GUI (where the user
@@ -172,6 +173,7 @@ def run_spinal_registration(config: SpinalCordPipelineConfig) -> Path:
         f"Register: running B-spline elastix ({metric_label}, "
         f"resolution={config.registration.resolution_um:g} µm)…"
     )
+    check_stage_cancelled()
     t0 = time.perf_counter()
     cmd = [
         "elastix",
@@ -203,6 +205,7 @@ def run_spinal_registration(config: SpinalCordPipelineConfig) -> Path:
     )
 
     emit_pipeline_message("Register: warping annotation with B-spline (transformix)…")
+    check_stage_cancelled()
     t0 = time.perf_counter()
     avreg = run_transformix(
         moving_volume=avaffine,
@@ -223,6 +226,7 @@ def run_spinal_registration(config: SpinalCordPipelineConfig) -> Path:
     emit_pipeline_message(f"Register: wrote QC preview {qc_dir / 'registration_bspline.png'}")
 
     emit_pipeline_message("Register: inverting B-spline transform…")
+    check_stage_cancelled()
     t0 = time.perf_counter()
     inv_path = invert_elastix_transform(
         elastix_temp,

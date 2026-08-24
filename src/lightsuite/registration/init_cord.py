@@ -38,7 +38,7 @@ from lightsuite.registration.straightening import (
     transform_cord_points_slices,
 )
 from lightsuite.registration.warp import warp_volume_affine
-from lightsuite.reporter import emit_pipeline_message, format_duration
+from lightsuite.reporter import check_stage_cancelled, emit_pipeline_message, format_duration
 
 console = Console()
 
@@ -110,6 +110,7 @@ def initialize_cord_registration(config: SpinalCordPipelineConfig) -> CordRegOpt
     checkpoint = CordRegOptsCheckpoint.load(regopts_path)
     align = SpinalAlignmentCheckpoint.load(align_path)
 
+    check_stage_cancelled()
     emit_pipeline_message("Init-registration: loading registration-grid sample and atlas…")
     t0 = time.perf_counter()
     regvol = tifffile.imread(checkpoint.regvol_path).astype(np.uint16)
@@ -125,6 +126,7 @@ def initialize_cord_registration(config: SpinalCordPipelineConfig) -> CordRegOpt
     )
 
     nslices = checkpoint.ikeeprange[1] - checkpoint.ikeeprange[0] + 1
+    check_stage_cancelled()
     emit_pipeline_message(
         f"Init-registration: computing straightening transforms for {nslices} slices…"
     )
@@ -168,6 +170,7 @@ def initialize_cord_registration(config: SpinalCordPipelineConfig) -> CordRegOpt
         )
 
     tvtemp = ndimage.median_filter(tv, size=3)
+    check_stage_cancelled()
     emit_pipeline_message("Init-registration: warping atlas with z-scale similarity transform…")
     t0 = time.perf_counter()
     atlasuse = warp_volume_affine(
@@ -206,6 +209,7 @@ def initialize_cord_registration(config: SpinalCordPipelineConfig) -> CordRegOpt
     )
 
     emit_pipeline_message("Init-registration: running elastix affine registration…")
+    check_stage_cancelled()
     t0 = time.perf_counter()
     affine_result = run_affine_registration(
         fixed_volume=straightvol.astype(np.float32),

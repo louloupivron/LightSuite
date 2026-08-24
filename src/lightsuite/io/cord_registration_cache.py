@@ -28,7 +28,7 @@ from lightsuite.io.cord_volume import (
 from lightsuite.io.discover import discover_tiff_stack
 from lightsuite.preprocess.cord_checkpoint import CordRegOptsCheckpoint
 from lightsuite.registration.cord_paths import cord_cache_dir, cord_save_path
-from lightsuite.reporter import emit_pipeline_message, format_duration
+from lightsuite.reporter import check_stage_cancelled, emit_pipeline_message, format_duration
 
 REGISTER_CACHE_MANIFEST = "register_cache.json"
 
@@ -554,9 +554,11 @@ def _load_cached_volume(
     )
     t0 = time.perf_counter()
     first = tifffile.imread(channels[0][1])
+    check_stage_cancelled()
     volume = np.zeros((*first.shape, len(channels)), dtype=np.uint16)
     volume[:, :, :, 0] = first
     for idx, (ich, path) in enumerate(channels[1:], start=2):
+        check_stage_cancelled()
         volume[:, :, :, idx - 1] = tifffile.imread(path)
         if len(channels) > 1:
             emit_pipeline_message(
@@ -624,6 +626,7 @@ def load_or_cache_cord_registration(
     probe = probe_cord_source(config)
     fingerprint = compute_cord_register_fingerprint(config, probe)
 
+    check_stage_cancelled()
     sample = read_spinal_cord_sample(config)
     regvolpaths = _write_register_cache(
         cache_dir,

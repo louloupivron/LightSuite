@@ -567,7 +567,12 @@ class LightsuiteShell:
             return None
         return str(stage_id), status
 
-    def _stage_context(self, stage_id: str | None = None) -> StageContext:
+    def _stage_context(
+        self,
+        stage_id: str | None = None,
+        *,
+        cancel_event: threading.Event | None = None,
+    ) -> StageContext:
         if self.project is None:
             msg = "No project loaded"
             raise RuntimeError(msg)
@@ -579,6 +584,7 @@ class LightsuiteShell:
             headless=True,
             force_preprocess=False,
             export_spaces=export_spaces,
+            cancel_event=cancel_event,
         )
 
     def _teardown_active_stage(self, *, defer_layer_clear: bool = False) -> None:
@@ -621,6 +627,7 @@ class LightsuiteShell:
             return
         self._teardown_active_stage()
         self._opening_stage = True
+        self._stage_cancel_event = threading.Event()
         self._set_running(True)
         self.log(self._loading_message(stage_id))
         self._flush_ui()
@@ -630,10 +637,13 @@ class LightsuiteShell:
             headless=False,
             force_preprocess=False,
             on_log=self._emit_log,
+            cancel_event=self._stage_cancel_event,
         )
         config = self.project.config
+        busy_controller: Any = None
 
         def _open_stage() -> None:
+            nonlocal busy_controller
             try:
                 try:
                     validate_gui_dependencies()
@@ -654,6 +664,10 @@ class LightsuiteShell:
                     except ImportError:
                         pass
                     return
+                register_busy_finished = getattr(controller, "register_busy_finished", None)
+                if callable(register_busy_finished):
+                    busy_controller = controller
+                    register_busy_finished(lambda: self._set_running(False))
                 controller.mount(self.viewer)
                 self._active_controller = controller
                 self._active_stage_id = stage_id
@@ -664,7 +678,8 @@ class LightsuiteShell:
                     self.log(f"Opened interactive stage: {stage_id}")
             finally:
                 self._opening_stage = False
-                self._set_running(False)
+                if busy_controller is None:
+                    self._set_running(False)
 
         from qtpy.QtCore import QTimer
 
@@ -699,9 +714,11 @@ class LightsuiteShell:
             self._attach_interactive_stage("check-orientation")
             return
 
+        self._stage_cancel_event = threading.Event()
         try:
-            ctx = self._stage_context(stage_id)
+            ctx = self._stage_context(stage_id, cancel_event=self._stage_cancel_event)
         except ValueError as exc:
+            self._stage_cancel_event = None
             self.log(str(exc))
             return
 
@@ -712,7 +729,6 @@ class LightsuiteShell:
                 with capture_pipeline_output(reporter):
                     return run_stage(workflow, stage_id, config, ctx)
 
-        self._stage_cancel_event = threading.Event()
         self._set_running(True)
         if stage_id == "export" and self._export_row.isVisible():
             try:

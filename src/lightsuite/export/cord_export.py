@@ -10,6 +10,8 @@ import numpy as np
 import tifffile
 from rich.console import Console
 
+console = Console()
+
 from lightsuite.atlas.fiederling import load_fiederling_atlas_volumes, upsample_to_fiederling_native
 from lightsuite.config.models import SpinalCordPipelineConfig
 from lightsuite.export.cord_sample_space import export_cord_sample_space
@@ -43,8 +45,7 @@ from lightsuite.analysis.cord_runner import (
     CordRegionStatsRunResult,
     maybe_run_cord_region_stats,
 )
-
-console = Console()
+from lightsuite.reporter import check_stage_cancelled, emit_pipeline_message, format_duration
 
 
 @dataclass(frozen=True)
@@ -83,7 +84,8 @@ def export_registered_cord_volumes(
     channel_paths: list[Path] = []
 
     if "atlas" in spaces_set:
-        console.print("Loading cached registration-grid volumes (atlas export)...")
+        check_stage_cancelled()
+        emit_pipeline_message("Export: loading cached registration-grid volumes (atlas export)…")
         finvol = load_registration_volumes(checkpoint)
 
         perm = [p - 1 for p in transform_params.how_to_perm]
@@ -116,6 +118,7 @@ def export_registered_cord_volumes(
         t0 = time.perf_counter()
 
         for ich in range(finvol.shape[3]):
+            check_stage_cancelled()
             currvol = transform_cord_images_slices(finvol[:, :, :, ich], tforms, raout)
             volumereg = run_transformix(
                 moving_volume=currvol.astype(np.float32),
@@ -142,8 +145,9 @@ def export_registered_cord_volumes(
             export_stack = export_layout_from_native(registered_native)
             tifffile.imwrite(out_path, export_stack, imagej=True)
             channel_paths.append(out_path)
-            console.print(
-                f"Channel {ich + 1}/{finvol.shape[3]} exported in {time.perf_counter() - t0:.2f}s"
+            emit_pipeline_message(
+                f"Export: channel {ich + 1}/{finvol.shape[3]} exported in "
+                f"{format_duration(time.perf_counter() - t0)}"
             )
 
         annotation_paths = CordRegisteredInspectPaths(
@@ -158,6 +162,7 @@ def export_registered_cord_volumes(
         tifffile.imwrite(template_path, template_stack.astype(np.uint16), imagej=True)
 
     if "sample" in spaces_set:
+        check_stage_cancelled()
         export_cord_sample_space(
             config,
             transform_params=transform_params,

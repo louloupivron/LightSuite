@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
@@ -37,6 +38,7 @@ class StageContext:
     force_preprocess: bool = False
     export_spaces: list[str] | None = None
     on_log: Callable[[str], None] | None = None
+    cancel_event: threading.Event | None = None
 
 
 StageRunner = Callable[[Any, StageContext], Any]
