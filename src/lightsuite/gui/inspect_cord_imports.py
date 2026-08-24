@@ -206,6 +206,15 @@ def add_cord_view_layers(
         _add_point_layers(viewer, volumes.point_layers)
 
 
+def iter_cord_import_paths(save_path: Path, pattern: str) -> list[Path]:
+    paths: list[Path] = []
+    for sub in ("volume_registered", "imports", ""):
+        folder = save_path / sub if sub else save_path
+        if folder.is_dir():
+            paths.extend(sorted(folder.glob(pattern)))
+    return sorted(dict.fromkeys(p.resolve() for p in paths))
+
+
 def _discover_cord_import_inspect_paths_atlas(
     config: SpinalCordPipelineConfig,
 ) -> CordImportInspectPaths:
@@ -226,9 +235,12 @@ def _discover_cord_import_inspect_paths_atlas(
     registered = discover_registered_cord_paths(config)
 
     point_npz_paths: dict[str, Path] = {}
-    for path in sorted(vr.glob("*_atlas_coords.npz")):
+    for path in iter_cord_import_paths(save_path, "*_atlas_coords.npz"):
         label = label_from_stem(path.stem, "_atlas_coords")
-        point_npz_paths[label] = path.resolve()
+        point_npz_paths.setdefault(label, path.resolve())
+    for path in iter_cord_import_paths(save_path, "*_atlas_coords.csv"):
+        label = label_from_stem(path.stem, "_atlas_coords")
+        point_npz_paths.setdefault(label, path.resolve())
 
     if not registered.registered_channels and not point_npz_paths:
         msg = (
@@ -259,10 +271,12 @@ def _discover_cord_import_inspect_paths_sample(
     sample_paths = discover_cord_sample_space_paths(config)
 
     point_npz_paths: dict[str, Path] = {}
-    if vr.is_dir():
-        for path in sorted(vr.glob("*_sample_coords.npz")):
-            label = label_from_stem(path.stem, "_sample_coords")
-            point_npz_paths[label] = path.resolve()
+    for path in iter_cord_import_paths(save_path, "*_sample_coords.npz"):
+        label = label_from_stem(path.stem, "_sample_coords")
+        point_npz_paths.setdefault(label, path.resolve())
+    for path in iter_cord_import_paths(save_path, "*_sample_coords.csv"):
+        label = label_from_stem(path.stem, "_sample_coords")
+        point_npz_paths.setdefault(label, path.resolve())
 
     if not sample_paths.channel_paths and not point_npz_paths:
         msg = (
@@ -331,13 +345,14 @@ def _load_cord_import_inspect_volumes_atlas(
         raise ValueError(msg)
 
     point_layers: dict[str, np.ndarray] = {}
-    for label, npz_path in paths.point_npz_paths.items():
-        point_layers[label] = load_points_npz(npz_path)
-    for path in sorted(paths.volume_registered_dir.glob("*_atlas_coords.csv")):
-        label = label_from_stem(path.stem, "_atlas_coords")
-        if label in point_layers:
-            continue
-        point_layers[label] = load_points_csv(path)
+    for label, pt_path in paths.point_npz_paths.items():
+        if pt_path.suffix.lower() == ".npz":
+            try:
+                point_layers[label] = load_atlas_points(pt_path, key="atlasptcoords")
+            except (KeyError, ValueError):
+                point_layers[label] = load_points_npz(pt_path)
+        elif pt_path.suffix.lower() == ".csv":
+            point_layers[label] = load_points_csv(pt_path)
 
     return CordImportInspectVolumes(
         template=template,
@@ -356,10 +371,13 @@ def _load_cord_import_inspect_volumes_sample(
     volumes = load_cord_sample_space_volumes(config, paths=sample_paths)
 
     point_layers: dict[str, np.ndarray] = dict(volumes.point_layers)
-    for label, npz_path in paths.point_npz_paths.items():
+    for label, pt_path in paths.point_npz_paths.items():
         if label in point_layers:
             continue
-        point_layers[label] = load_atlas_points(npz_path, key=SAMPLE_POINTS_KEY)
+        if pt_path.suffix.lower() == ".npz":
+            point_layers[label] = load_atlas_points(pt_path, key=SAMPLE_POINTS_KEY)
+        elif pt_path.suffix.lower() == ".csv":
+            point_layers[label] = load_points_csv(pt_path)
 
     tofliprc = load_cord_tofliprc(config.sample.save_path)
     template, annotation, channels, point_layers, hemisphere = align_sample_space_for_atlas_qc(

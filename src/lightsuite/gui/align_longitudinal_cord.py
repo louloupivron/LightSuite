@@ -120,6 +120,8 @@ def attach_spinal_align_longitudinal(
             state["_view_shape"] = sample.shape
 
     def _sync_navigation_widget() -> None:
+        if state.get("_teardown"):
+            return
         state["_nav_syncing"] = True
         try:
             navigation.slice_index.max = _n_slices()
@@ -128,6 +130,8 @@ def attach_spinal_align_longitudinal(
             navigation.atlas_plane.min = pmin
             navigation.atlas_plane.max = pmax
             navigation.atlas_plane.value = _current_atlas_plane()
+        except (RuntimeError, AttributeError):
+            pass
         finally:
             state["_nav_syncing"] = False
 
@@ -146,6 +150,8 @@ def attach_spinal_align_longitudinal(
                 return
 
     def _navigate_to(slice_index: int | None = None, *, refocus_canvas: bool = False) -> None:
+        if state.get("_teardown"):
+            return
         if slice_index is not None:
             state["slice"] = max(1, min(_n_slices(), int(slice_index)))
             state["_atlas_plane"] = _default_plane(state["slice"])
@@ -153,8 +159,9 @@ def attach_spinal_align_longitudinal(
             _refresh()
 
             def _after_keyboard_nav() -> None:
-                _sync_navigation_widget()
-                _refocus_canvas()
+                if not state.get("_teardown"):
+                    _sync_navigation_widget()
+                    _refocus_canvas()
 
             QTimer.singleShot(0, _after_keyboard_nav)
         else:
@@ -196,15 +203,23 @@ def attach_spinal_align_longitudinal(
 
     @navigation.atlas_plane.changed.connect
     def _atlas_plane_widget_changed() -> None:
-        if state["_nav_syncing"]:
+        if state.get("_nav_syncing") or state.get("_teardown"):
             return
-        _set_atlas_plane(navigation.atlas_plane.value)
+        try:
+            val = navigation.atlas_plane.value
+        except (RuntimeError, AttributeError):
+            return
+        _set_atlas_plane(val)
 
     @navigation.slice_index.changed.connect
     def _slice_index_widget_changed() -> None:
-        if state["_nav_syncing"]:
+        if state.get("_nav_syncing") or state.get("_teardown"):
             return
-        _navigate_to(navigation.slice_index.value)
+        try:
+            val = navigation.slice_index.value
+        except (RuntimeError, AttributeError):
+            return
+        _navigate_to(val)
 
     @magicgui(call_button="◀  Previous anchor")
     def previous_slice() -> None:
@@ -273,6 +288,9 @@ def attach_spinal_align_longitudinal(
         _refresh()
         _sync_navigation_widget()
 
+    def _teardown() -> None:
+        state["_teardown"] = True
+
     return DockStageController(
         dock_widgets=[
             (navigation, "Navigation"),
@@ -282,6 +300,7 @@ def attach_spinal_align_longitudinal(
             (save_controls, "Save"),
         ],
         _refresh_fn=_initial_refresh,
+        _teardown_fn=_teardown,
         result=data.correspondence_path,
     )
 

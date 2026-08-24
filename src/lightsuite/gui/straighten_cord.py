@@ -14,6 +14,7 @@ from rich.console import Console
 from lightsuite.config.models import SpinalCordPipelineConfig
 from lightsuite.gui.stage_controller import (
     DockStageController,
+    close_stage_or_viewer,
     require_napari,
     run_attached_stage,
 )
@@ -212,7 +213,7 @@ def attach_spinal_straighten(
 ) -> DockStageController:
     """Attach spinal cord straightening controls to an existing napari viewer."""
     from napari.utils.notifications import show_info
-    from qtpy.QtCore import Qt
+    from qtpy.QtCore import Qt, QTimer
     from qtpy.QtGui import QFont, QKeySequence, QShortcut
     from qtpy.QtWidgets import (
         QHBoxLayout,
@@ -490,7 +491,7 @@ def attach_spinal_straighten(
     layout.setContentsMargins(6, 6, 6, 6)
     layout.setSpacing(4)
     action_row = QHBoxLayout()
-    save_btn = QPushButton("Save (s)")
+    save_btn = QPushButton("Save & Close (s)")
     fit_btn = QPushButton("Toggle fit (p)")
     clear_last_btn = QPushButton("Clear last")
     clear_all_btn = QPushButton("Clear all")
@@ -512,6 +513,7 @@ def attach_spinal_straighten(
         path = save_alignment_checkpoint(data, save_path)
         console.print(f"[green]Saved[/green] {path}")
         show_info(f"Saved {path}")
+        QTimer.singleShot(0, lambda: close_stage_or_viewer(viewer))
 
     save_btn.clicked.connect(do_save)
     fit_btn.clicked.connect(toggle_fit_preview)

@@ -247,16 +247,28 @@ def _load_points_csv(path: Path) -> np.ndarray:
             msg = f"CSV missing header row: {path}"
             raise ValueError(msg)
         field_map = {name.strip().lower(): name for name in reader.fieldnames}
-        for required in ("atlas_x", "atlas_y", "atlas_z"):
-            if required not in field_map:
-                msg = f"CSV missing column {required!r} in {path}"
-                raise KeyError(msg)
+        col_triplets = [
+            ("atlas_x", "atlas_y", "atlas_z"),
+            ("sample_x", "sample_y", "sample_z"),
+            ("reg_x", "reg_y", "reg_z"),
+            ("x", "y", "z"),
+            ("point_x", "point_y", "point_z"),
+            ("coord_x", "coord_y", "coord_z"),
+        ]
+        matched_keys: tuple[str, str, str] | None = None
+        for kx, ky, kz in col_triplets:
+            if kx in field_map and ky in field_map and kz in field_map:
+                matched_keys = (field_map[kx], field_map[ky], field_map[kz])
+                break
+        if matched_keys is None:
+            msg = f"CSV missing x, y, z point columns in {path} (headers: {reader.fieldnames})"
+            raise KeyError(msg)
         rows = list(reader)
     if not rows:
         msg = f"No point rows in {path}"
         raise ValueError(msg)
-    keys = field_map["atlas_x"], field_map["atlas_y"], field_map["atlas_z"]
-    return np.column_stack([[float(row[k]) for row in rows] for k in keys])
+    kx, ky, kz = matched_keys
+    return np.column_stack([[float(row[k]) for row in rows] for k in (kx, ky, kz)])
 
 
 def label_from_stem(stem: str, suffix: str) -> str:
