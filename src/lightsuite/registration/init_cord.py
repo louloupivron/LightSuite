@@ -17,6 +17,8 @@ from lightsuite.registration.cord_affine import (
 )
 from lightsuite.registration.cord_longitudinal import (
     CORD_LONGITUDINAL_AXIS,
+    describe_cord_z_transinit_source,
+    format_cord_z_transinit,
     load_longitudinal_correspondence,
     resolve_cord_z_transinit,
 )
@@ -36,6 +38,7 @@ from lightsuite.registration.straightening import (
     transform_cord_points_slices,
 )
 from lightsuite.registration.warp import warp_volume_affine
+from lightsuite.reporter import emit_pipeline_message, format_duration
 
 console = Console()
 
@@ -106,13 +109,25 @@ def initialize_cord_registration(config: SpinalCordPipelineConfig) -> CordRegOpt
 
     checkpoint = CordRegOptsCheckpoint.load(regopts_path)
     align = SpinalAlignmentCheckpoint.load(align_path)
+
+    emit_pipeline_message("Init-registration: loading registration-grid sample and atlas…")
+    t0 = time.perf_counter()
     regvol = tifffile.imread(checkpoint.regvol_path).astype(np.uint16)
     tv = tifffile.imread(checkpoint.tv_path).astype(np.float32)
     av = tifffile.imread(checkpoint.av_path).astype(np.uint16)
     samppts = np.load(checkpoint.smpts_path)
     tvpts = np.load(checkpoint.tvpts_path)
+    load_elapsed = time.perf_counter() - t0
+    emit_pipeline_message(
+        "Init-registration: volumes loaded in "
+        f"{format_duration(load_elapsed)} "
+        f"(sample {regvol.shape}, atlas {tv.shape})"
+    )
 
     nslices = checkpoint.ikeeprange[1] - checkpoint.ikeeprange[0] + 1
+    emit_pipeline_message(
+        f"Init-registration: computing straightening transforms for {nslices} slices…"
+    )
     target_center = (0.5 * tv.shape[1], 0.5 * tv.shape[0])
     tforms = compute_straightening_transforms(
         np.array(align.fit_x),
@@ -125,7 +140,12 @@ def initialize_cord_registration(config: SpinalCordPipelineConfig) -> CordRegOpt
     t0 = time.perf_counter()
     sizetv = (tv.shape[0], tv.shape[1])
     straightvol = transform_cord_images_slices(regvol, tforms, sizetv)
-    console.print(f"Straightening transforms applied in {time.perf_counter() - t0:.2f}s")
+    straighten_elapsed = time.perf_counter() - t0
+    emit_pipeline_message(
+        "Init-registration: straightening done in "
+        f"{format_duration(straighten_elapsed)} "
+        f"(output {straightvol.shape})"
+    )
 
     centers = np.column_stack([align.fit_x, align.fit_y])
     ikeepori = _remove_outliers(samppts, centers)
@@ -134,20 +154,22 @@ def initialize_cord_registration(config: SpinalCordPipelineConfig) -> CordRegOpt
     _ = _reduce_points(tvpts, 10_000)
 
     correspondence = load_longitudinal_correspondence(save_path)
+    transinit = resolve_cord_z_transinit(nslices, tv.shape[2], correspondence)
     if correspondence is None or not correspondence.has_confirmed_anchors(CORD_LONGITUDINAL_AXIS):
-        console.print(
-            "[yellow]No confirmed longitudinal_correspondence.json — using centered z-init. "
-            "Run 'lightsuite spinal align-longitudinal' for partial-cord samples.[/yellow]"
+        emit_pipeline_message(
+            "Init-registration: no confirmed longitudinal_correspondence.json — "
+            "using centered z-init (run align-longitudinal for partial-cord samples)"
         )
     else:
-        console.print(
-            f"Using longitudinal correspondence "
-            f"({len(correspondence.confirmed_anchors(CORD_LONGITUDINAL_AXIS))} confirmed anchors)"
+        emit_pipeline_message(
+            "Init-registration: longitudinal z-init from "
+            f"{describe_cord_z_transinit_source(nslices, tv.shape[2], correspondence)} "
+            f"({format_cord_z_transinit(transinit)})"
         )
 
-    transinit = resolve_cord_z_transinit(nslices, tv.shape[2], correspondence)
-
     tvtemp = ndimage.median_filter(tv, size=3)
+    emit_pipeline_message("Init-registration: warping atlas with z-scale similarity transform…")
+    t0 = time.perf_counter()
     atlasuse = warp_volume_affine(
         tvtemp,
         transinit,
@@ -165,9 +187,11 @@ def initialize_cord_registration(config: SpinalCordPipelineConfig) -> CordRegOpt
         work_dir=cord_work_dir(config, "transformix", "init", "similarity"),
         nearest=True,
     )
-    console.print(
-        f"QC volume shapes: straightvol {straightvol.shape}, avsim {avsim.shape} "
-        f"(atlas {av.shape} z-scaled to sample grid)"
+    similarity_elapsed = time.perf_counter() - t0
+    emit_pipeline_message(
+        "Init-registration: similarity warp done in "
+        f"{format_duration(similarity_elapsed)} "
+        f"(atlas {av.shape} → straightvol {straightvol.shape})"
     )
 
     volmax = float(np.quantile(straightvol, 0.999))
@@ -177,7 +201,12 @@ def initialize_cord_registration(config: SpinalCordPipelineConfig) -> CordRegOpt
         avsim.astype(np.uint16),
         qc_dir / "registration_initial_similarity.png",
     )
+    emit_pipeline_message(
+        f"Init-registration: wrote QC preview {qc_dir / 'registration_initial_similarity.png'}"
+    )
 
+    emit_pipeline_message("Init-registration: running elastix affine registration…")
+    t0 = time.perf_counter()
     affine_result = run_affine_registration(
         fixed_volume=straightvol.astype(np.float32),
         moving_volume=atlasuse,
@@ -186,6 +215,15 @@ def initialize_cord_registration(config: SpinalCordPipelineConfig) -> CordRegOpt
         work_dir=cord_work_dir(config, "elastix", "affine"),
         output_path=cord_affine_transform_write_path(config),
     )
+    affine_elapsed = time.perf_counter() - t0
+    emit_pipeline_message(
+        "Init-registration: affine elastix done in "
+        f"{format_duration(affine_elapsed)} "
+        f"({affine_result.copied_transform_path.name})"
+    )
+
+    emit_pipeline_message("Init-registration: applying affine warp to atlas annotation…")
+    t0 = time.perf_counter()
     avshow = warp_cord_atlas_to_straightvol(
         av,
         transinit=transinit,
@@ -201,14 +239,18 @@ def initialize_cord_registration(config: SpinalCordPipelineConfig) -> CordRegOpt
         affine_result.copied_transform_path,
         spacing_mm,
     )
-    console.print(
-        f"QC volume shapes after affine: avshow {avshow.shape} "
-        f"(matches straightvol {straightvol.shape})"
+    affine_warp_elapsed = time.perf_counter() - t0
+    emit_pipeline_message(
+        "Init-registration: affine annotation warp done in "
+        f"{format_duration(affine_warp_elapsed)}"
     )
     save_cord_annotation_preview(
         volplot,
         avshow.astype(np.uint16),
         qc_dir / "registration_initial_affine.png",
+    )
+    emit_pipeline_message(
+        f"Init-registration: wrote QC preview {qc_dir / 'registration_initial_affine.png'}"
     )
 
     straightvol_path = cache_dir / "straightvol.tif"
@@ -220,5 +262,8 @@ def initialize_cord_registration(config: SpinalCordPipelineConfig) -> CordRegOpt
     checkpoint.slicetforms_path = str(slicetforms_path)
     checkpoint.affine_atlas_to_samp = transaff.tolist()
     checkpoint.save(regopts_path)
-    console.print(f"Updated checkpoint: {regopts_path}")
+    emit_pipeline_message(
+        "Init-registration: wrote straightvol, slicetforms, and affine transform; "
+        f"updated {regopts_path}"
+    )
     return checkpoint

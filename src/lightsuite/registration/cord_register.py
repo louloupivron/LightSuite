@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 import numpy as np
 import tifffile
-from rich.console import Console
 from scipy import ndimage
 
 from lightsuite.config.models import SpinalCordPipelineConfig
@@ -20,6 +20,8 @@ from lightsuite.preprocess.cord_checkpoint import (
 )
 from lightsuite.registration.cord_affine import warp_cord_atlas_to_straightvol
 from lightsuite.registration.cord_longitudinal import (
+    describe_cord_z_transinit_source,
+    format_cord_z_transinit,
     load_longitudinal_correspondence,
     resolve_cord_z_transinit,
 )
@@ -38,8 +40,7 @@ from lightsuite.registration.elastix.mhd import scale_volume_for_elastix_mi, wri
 from lightsuite.registration.elastix.params import write_parameter_file
 from lightsuite.registration.elastix.points import write_landmark_file
 from lightsuite.registration.elastix.runner import clear_elastix_workspace, run_transformix
-
-console = Console()
+from lightsuite.reporter import emit_pipeline_message, format_duration
 
 
 def run_spinal_registration(config: SpinalCordPipelineConfig) -> Path:
@@ -56,13 +57,28 @@ def run_spinal_registration(config: SpinalCordPipelineConfig) -> Path:
         msg = "Missing init-registration outputs in regopts.json."
         raise RuntimeError(msg)
 
+    emit_pipeline_message("Register: loading straightened sample and atlas volumes…")
+    t0 = time.perf_counter()
     straightvol = tifffile.imread(checkpoint.straightvol_path).astype(np.float32)
     tv = tifffile.imread(checkpoint.tv_path).astype(np.float32)
     av = tifffile.imread(checkpoint.av_path).astype(np.uint16)
+    load_elapsed = time.perf_counter() - t0
+    emit_pipeline_message(
+        "Register: volumes loaded in "
+        f"{format_duration(load_elapsed)} "
+        f"(straightvol {straightvol.shape}, atlas {tv.shape})"
+    )
+
     transaff = np.asarray(checkpoint.affine_atlas_to_samp, dtype=float)
     nslices = checkpoint.ikeeprange[1] - checkpoint.ikeeprange[0] + 1
     correspondence = load_longitudinal_correspondence(save_path)
     transinit = resolve_cord_z_transinit(nslices, tv.shape[2], correspondence)
+    emit_pipeline_message(
+        "Register: longitudinal z-init from "
+        f"{describe_cord_z_transinit_source(nslices, tv.shape[2], correspondence)} "
+        f"({format_cord_z_transinit(transinit)})"
+    )
+
     elastix_affine_path = cord_affine_transform_path(config)
     cpwt = config.registration.control_point_weight
 
@@ -73,10 +89,18 @@ def run_spinal_registration(config: SpinalCordPipelineConfig) -> Path:
         session = ControlPointSession.load(cp_path)
         cptsatlas, cptshistology = session.paired_points_xyz()
         if cptshistology.shape[0] > 0:
-            console.print(f"Found {cptshistology.shape[0]} user-defined control points.")
+            emit_pipeline_message(
+                f"Register: using {cptshistology.shape[0]} control-point pair(s) "
+                f"(weight={cpwt:g})"
+            )
 
     spacing_mm = config.registration.resolution_um * 1e-3
     tvtemp = ndimage.median_filter(tv, size=3)
+    emit_pipeline_message(
+        "Register: warping atlas template onto straightened sample grid "
+        f"(z-init + affine from {elastix_affine_path.name})…"
+    )
+    t0 = time.perf_counter()
     # Always warp the atlas into the straightened-sample grid via the initial z-scale +
     # elastix affine. This is the same warp used by the match-points GUI (where the user
     # placed the atlas landmarks) and the exact inverse applied by export, so control
@@ -101,6 +125,12 @@ def run_spinal_registration(config: SpinalCordPipelineConfig) -> Path:
         work_dir=cord_work_dir(config, "transformix", "register", "av_affine"),
         nearest=True,
     )
+    affine_warp_elapsed = time.perf_counter() - t0
+    emit_pipeline_message(
+        "Register: atlas affine warp done in "
+        f"{format_duration(affine_warp_elapsed)} "
+        f"(moving {tvaffine.shape} → fixed {straightvol.shape})"
+    )
 
     volmax = float(np.quantile(straightvol, 0.999))
     volplot = np.clip(straightvol / max(volmax, 1.0) * 255.0, 0, 255).astype(np.uint8)
@@ -117,9 +147,9 @@ def run_spinal_registration(config: SpinalCordPipelineConfig) -> Path:
 
     has_control_points = cptsatlas.size > 0 and cptshistology.size > 0
     if cpwt > 0 and not has_control_points:
-        console.print(
-            "No control points found; running B-spline with mutual information only "
-            f"(control_point_weight={cpwt} ignored until match-points is run)."
+        emit_pipeline_message(
+            "Register: no control points found — B-spline will use mutual information only "
+            f"(control_point_weight={cpwt:g} ignored until match-points is run)"
         )
 
     param_path = elastix_temp / "cord_bspline_parameters.txt"
@@ -137,6 +167,12 @@ def run_spinal_registration(config: SpinalCordPipelineConfig) -> Path:
     write_mhd(scale_volume_for_elastix_mi(straightvol), fixed_mhd, [spacing_mm] * 3)
     write_mhd(scale_volume_for_elastix_mi(tvaffine), moving_mhd, [spacing_mm] * 3)
 
+    metric_label = "MI + landmarks" if has_control_points else "MI only"
+    emit_pipeline_message(
+        f"Register: running B-spline elastix ({metric_label}, "
+        f"resolution={config.registration.resolution_um:g} µm)…"
+    )
+    t0 = time.perf_counter()
     cmd = [
         "elastix",
         "-f",
@@ -160,7 +196,14 @@ def run_spinal_registration(config: SpinalCordPipelineConfig) -> Path:
     if not transforms:
         msg = "No B-spline transform written."
         raise RuntimeError(msg)
+    bspline_elapsed = time.perf_counter() - t0
+    emit_pipeline_message(
+        f"Register: B-spline elastix done in {format_duration(bspline_elapsed)} "
+        f"({transforms[0].name})"
+    )
 
+    emit_pipeline_message("Register: warping annotation with B-spline (transformix)…")
+    t0 = time.perf_counter()
     avreg = run_transformix(
         moving_volume=avaffine,
         transform_path=transforms[0],
@@ -168,20 +211,34 @@ def run_spinal_registration(config: SpinalCordPipelineConfig) -> Path:
         spacing_mm=spacing_mm,
         nearest=True,
     )
+    transformix_elapsed = time.perf_counter() - t0
+    emit_pipeline_message(
+        f"Register: annotation warp done in {format_duration(transformix_elapsed)}"
+    )
     save_cord_annotation_preview(
         volplot,
         avreg.astype(np.uint16),
         qc_dir / "registration_bspline.png",
     )
+    emit_pipeline_message(f"Register: wrote QC preview {qc_dir / 'registration_bspline.png'}")
 
+    emit_pipeline_message("Register: inverting B-spline transform…")
+    t0 = time.perf_counter()
     inv_path = invert_elastix_transform(
         elastix_temp,
         cord_work_dir(config, "elastix", "inverse"),
     )
+    invert_elapsed = time.perf_counter() - t0
+    emit_pipeline_message(f"Register: B-spline inversion done in {format_duration(invert_elapsed)}")
+
     bspline_out = cord_bspline_transform_write_path(config)
     bspline_out.write_text(inv_path.read_text(encoding="utf-8"), encoding="utf-8")
     bspline_fwd_out = cord_bspline_forward_transform_write_path(config)
     bspline_fwd_out.write_text(transforms[0].read_text(encoding="utf-8"), encoding="utf-8")
+    emit_pipeline_message(
+        "Register: wrote transforms "
+        f"{bspline_out.name} (sample→atlas inverse) and {bspline_fwd_out.name} (atlas→sample)"
+    )
 
     transaff_inv = np.linalg.inv(transaff)
     params = CordTransformParamsCheckpoint(
@@ -202,5 +259,5 @@ def run_spinal_registration(config: SpinalCordPipelineConfig) -> Path:
     )
     out = save_path / "transform_params.json"
     params.save(out)
-    console.print(f"Wrote {out}")
+    emit_pipeline_message(f"Register: wrote checkpoint {out}")
     return out
