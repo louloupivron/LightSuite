@@ -169,3 +169,26 @@ def test_discover_cord_import_inspect_paths_sample(tmp_path: Path) -> None:
     assert volumes.annotation.shape == shape
     assert volumes.registered_channels[1].shape == shape
     assert volumes.point_layers["cells"].shape == (2, 3)
+
+
+def test_discover_cord_import_inspect_csv_in_imports_folder(tmp_path: Path) -> None:
+    config_path = _write_minimal_config(tmp_path)
+    cfg = load_spinal_config(config_path)
+    save = tmp_path / "registered"
+    # Remove the NPZ and put CSV under imports/
+    vr = save / "volume_registered"
+    (vr / "cells_atlas_coords.npz").unlink()
+
+    imports_dir = save / "imports"
+    imports_dir.mkdir()
+    (imports_dir / "somata_atlas_coords.csv").write_text(
+        "atlas_x,atlas_y,atlas_z\n1.5,2.5,3.5\n4.5,5.5,6.5\n",
+        encoding="utf-8",
+    )
+
+    paths = discover_cord_import_inspect_paths(cfg, space="atlas")
+    assert "somata" in paths.point_npz_paths
+    volumes = load_cord_import_inspect_volumes(cfg, paths=paths, space="atlas")
+    assert "somata" in volumes.point_layers
+    assert volumes.point_layers["somata"].shape == (2, 3)
+

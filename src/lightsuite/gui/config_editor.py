@@ -787,6 +787,8 @@ class ConfigEditorDock:
             ]
             for field, key in brain_fields:
                 self._set_field_tooltip(field, tips.get(key, ""))
+            for spin in (self._converter_voxel_x, self._converter_voxel_y, self._converter_voxel_z):
+                self._set_field_tooltip(spin, tips.get("converter_voxel_um", ""))
         elif self._workflow == "spinal":
             spinal_fields: list[tuple[Any, str]] = [
                 (self._atlas_dir, "atlas_dir"),
@@ -801,6 +803,8 @@ class ConfigEditorDock:
             ]
             for field, key in spinal_fields:
                 self._set_field_tooltip(field, tips.get(key, ""))
+            for spin in (self._converter_voxel_x, self._converter_voxel_y, self._converter_voxel_z):
+                self._set_field_tooltip(spin, tips.get("converter_voxel_um", ""))
 
     def _refresh_atlas_provider_combo(self, source: str, *, preferred_provider: str) -> None:
         current = str(self._atlas_provider_combo.currentData() or "")

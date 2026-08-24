@@ -172,6 +172,24 @@ _SPINAL: dict[str, str] = {
     "import_segmentation": (
         "Enable when importing Imaris/other spot lists after registration."
     ),
+    "segmentation_suite": (
+        "Where segmentation came from. Native = list annotation layers below. Vendor suites run "
+        "Convert annotations after preprocess. Imaris splits Component Name into one layer each "
+        "(label is the filename prefix). Custom needs convert_to_lightsuite(source, output, *, reference)."
+    ),
+    "converter_source": "Raw vendor export path (JSON / CSV / XLSX / …).",
+    "converter_label": (
+        "Single-layer name for SmartSPIM/FIJI/Arivis, or Imaris filename prefix "
+        "(components become <label>_<component>_points.csv)."
+    ),
+    "converter_voxel_um": (
+        "Imaris/FIJI calibration [x, y, z] µm — same units as Position columns in the export "
+        "(often 1,1,1 for Imaris; not always sample.voxel_um)."
+    ),
+    "converter_custom": (
+        "Python file for suite=custom. Must define convert_to_lightsuite; output is "
+        "always validated against sample_reference.json."
+    ),
     "intensity_metrics": (
         "Per-region intensity statistics in region_stats.csv: median, mean, std, variance, "
         "and/or volume per segment. Imported points are always counted when present."

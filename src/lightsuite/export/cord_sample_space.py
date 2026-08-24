@@ -144,10 +144,15 @@ def discover_cord_sample_space_paths(config: SpinalCordPipelineConfig) -> CordSa
         raise FileNotFoundError(msg)
 
     point_npz_paths: dict[str, Path] = {}
-    volume_registered = save_path / "volume_registered"
-    for path in sorted(volume_registered.glob("*_sample_coords.npz")):
-        label = _label_from_stem(path.stem, "_sample_coords")
-        point_npz_paths[label] = path.resolve()
+    for sub in ("volume_registered", "imports", ""):
+        folder = save_path / sub if sub else save_path
+        if folder.is_dir():
+            for path in sorted(folder.glob("*_sample_coords.npz")):
+                label = _label_from_stem(path.stem, "_sample_coords")
+                point_npz_paths.setdefault(label, path.resolve())
+            for path in sorted(folder.glob("*_sample_coords.csv")):
+                label = _label_from_stem(path.stem, "_sample_coords")
+                point_npz_paths.setdefault(label, path.resolve())
 
     if hemisphere_path is not None and not hemisphere_path.is_file():
         hemisphere_path = None
@@ -201,8 +206,13 @@ def load_cord_sample_space_volumes(
             raise ValueError(msg)
 
     point_layers: dict[str, np.ndarray] = {}
-    for label, npz_path in paths.point_npz_paths.items():
-        point_layers[label] = load_atlas_points(npz_path, key=SAMPLE_POINTS_KEY)
+    for label, pt_path in paths.point_npz_paths.items():
+        if pt_path.suffix.lower() == ".npz":
+            point_layers[label] = load_atlas_points(pt_path, key=SAMPLE_POINTS_KEY)
+        elif pt_path.suffix.lower() == ".csv":
+            from lightsuite.gui.brain_view_data import load_points_csv
+
+            point_layers[label] = load_points_csv(pt_path)
 
     hemisphere: np.ndarray | None = None
     if paths.hemisphere_path is not None and paths.hemisphere_path.is_file():
