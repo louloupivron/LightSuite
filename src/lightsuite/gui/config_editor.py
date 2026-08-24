@@ -670,6 +670,8 @@ class ConfigEditorDock:
 
         self._set_form_row_visible(form, self._pair_label_edit, is_multires)
         self._set_form_row_visible(form, self._multires_vendor_combo, is_multires)
+        self._set_form_row_visible(form, self._multires_custom_entry.widget, False)
+        self._set_form_row_visible(form, self._pair_manifest.widget, False)
         if is_multires:
             self._update_multires_vendor_field_visibility()
         self._set_form_row_visible(form, self._reference_channel_edit, is_multires)
