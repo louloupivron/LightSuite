@@ -36,6 +36,7 @@ class StageContext:
     headless: bool = False
     force_preprocess: bool = False
     export_spaces: list[str] | None = None
+    on_log: Callable[[str], None] | None = None
 
 
 StageRunner = Callable[[Any, StageContext], Any]

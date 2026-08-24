@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,7 @@ from lightsuite.gui.stage_controller import (
     require_magicgui,
     run_attached_stage,
 )
+from lightsuite.reporter import CallbackReporter, capture_pipeline_output, emit_pipeline_message
 from lightsuite.io.cord_registration_cache import (
     load_or_cache_cord_registration,
     manifest_register_fingerprint,
@@ -217,22 +219,24 @@ def load_cord_orientation_check_data(config: SpinalCordPipelineConfig) -> CordOr
     preview = _load_orientation_preview(config)
     if preview is not None:
         preview.direction = _resolve_stored_direction(config)
-        console.print(
-            "[green]Using cached orientation preview[/green] "
+        emit_pipeline_message(
+            "Using cached orientation preview "
             f"({ORIENTATION_PREVIEW_FILENAME}; inputs unchanged)."
         )
         return preview
 
+    emit_pipeline_message(
+        "Check-orientation: building longitudinal max projections from sample and atlas…"
+    )
     data = _build_orientation_data_from_volumes(config)
     _save_orientation_preview(config, data)
     return data
 
 
-def attach_spinal_orientation(
+def _build_spinal_orientation_controller(
     viewer: Any,
     config: SpinalCordPipelineConfig,
-    *,
-    data: CordOrientationData | None = None,
+    data: CordOrientationData,
 ) -> DockStageController:
     """Attach cord orientation controls to an existing napari viewer."""
     from napari.utils.notifications import show_info
@@ -240,8 +244,6 @@ def attach_spinal_orientation(
 
     magicgui = require_magicgui()
     save_path = cord_save_path(config)
-    if data is None:
-        data = load_cord_orientation_check_data(config)
 
     def _sample_projection(direction: str) -> np.ndarray:
         if direction == CAUDOROSTRAL:
@@ -289,6 +291,8 @@ def attach_spinal_orientation(
         show_info(f"Saved {path} (direction={data.direction})")
         QTimer.singleShot(0, lambda: close_stage_or_viewer(viewer))
 
+    _set_direction(data.direction)
+
     return DockStageController(
         dock_widgets=[
             (rostrocaudal_button, "Rostrocaudal"),
@@ -298,6 +302,91 @@ def attach_spinal_orientation(
         _refresh_fn=lambda: _set_direction(data.direction),
         result=save_path,
     )
+
+
+@dataclass
+class _AsyncCordOrientationController:
+    """Load orientation projections off the Qt main thread, then mount controls."""
+
+    viewer: Any
+    config: SpinalCordPipelineConfig
+    on_log: Callable[[str], None] | None = None
+    _inner: DockStageController | None = field(default=None, init=False, repr=False)
+    _workers: list[Any] = field(default_factory=list, init=False, repr=False)
+    _cancelled: bool = field(default=False, init=False, repr=False)
+    open_log_message: str | None = field(
+        default="Loading orientation preview in background (see log for progress)…",
+        init=False,
+    )
+    result: Path | None = field(default=None, init=False)
+
+    def __post_init__(self) -> None:
+        self.result = cord_save_path(self.config)
+
+    def mount(self, viewer: Any) -> None:
+        if self._inner is not None:
+            self._inner.mount(viewer)
+            return
+        viewer.status = "Loading orientation preview… (see log for progress)"
+        from lightsuite.gui.qt_workers import start_background_task
+
+        reporter = CallbackReporter(on_message=self.on_log) if self.on_log else None
+
+        def _work() -> CordOrientationData:
+            with capture_pipeline_output(reporter):
+                return load_cord_orientation_check_data(self.config)
+
+        def _on_success(data: CordOrientationData) -> None:
+            if self._cancelled:
+                return
+            self._inner = _build_spinal_orientation_controller(viewer, self.config, data)
+            self._inner.mount(viewer)
+            if self.on_log is not None:
+                self.on_log("Orientation preview ready.")
+
+        def _on_failure(exc: BaseException) -> None:
+            if self._cancelled:
+                return
+            message = f"Failed to load orientation preview: {exc}"
+            if self.on_log is not None:
+                self.on_log(message)
+            try:
+                from napari.utils.notifications import show_warning
+
+                show_warning(message)
+            except ImportError:
+                pass
+
+        self._workers.append(
+            start_background_task(_work, on_success=_on_success, on_failure=_on_failure)
+        )
+
+    def refresh(self) -> None:
+        if self._inner is not None:
+            self._inner.refresh()
+
+    def teardown(self, viewer: Any) -> None:
+        self._cancelled = True
+        from lightsuite.gui.qt_workers import cancel_background_workers
+
+        cancel_background_workers(self._workers)
+        self._workers.clear()
+        if self._inner is not None:
+            self._inner.teardown(viewer)
+
+
+def attach_spinal_orientation(
+    viewer: Any,
+    config: SpinalCordPipelineConfig,
+    *,
+    ctx: Any | None = None,
+    data: CordOrientationData | None = None,
+) -> DockStageController | _AsyncCordOrientationController:
+    """Attach cord orientation controls to an existing napari viewer."""
+    if data is not None:
+        return _build_spinal_orientation_controller(viewer, config, data)
+    on_log = getattr(ctx, "on_log", None) if ctx is not None else None
+    return _AsyncCordOrientationController(viewer=viewer, config=config, on_log=on_log)
 
 
 def run_spinal_orientation(

@@ -7,20 +7,19 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-from rich.console import Console
 
 from lightsuite.config.models import CordTiffLayout, SpinalCordPipelineConfig
 from lightsuite.io.cord_volume import (
     SkippedSlice,
+    _sorted_tiff_files,
     load_channel_per_file_stack,
     load_multichannel_single_stack,
     load_plane_per_file_stack,
     normalize_res_um,
     resolve_cord_tiff_layout,
-    _sorted_tiff_files,
 )
-
-console = Console()
+from lightsuite.io.discover import downsample_duration_hint
+from lightsuite.reporter import emit_pipeline_message, format_duration
 
 
 @dataclass(frozen=True)
@@ -58,12 +57,20 @@ def read_spinal_cord_sample(config: SpinalCordPipelineConfig) -> CordSampleVolum
         channel_folders=channel_folders,
     )
     if requested == CordTiffLayout.AUTO and layout != CordTiffLayout.AUTO:
-        console.print(f"Auto-detected TIFF layout: {layout.value}")
-    if channel_folders and len(channel_folders) > 1:
-        console.print(f"Multi-channel planeperfile: {len(channel_folders)} folders")
+        emit_pipeline_message(f"Auto-detected TIFF layout: {layout.value}")
+    roots = list(channel_folders) if channel_folders else [folder]
+    n_channels = len(roots)
+    if n_channels > 1:
+        emit_pipeline_message(f"Multi-channel planeperfile: {n_channels} folders")
     sampleres = normalize_res_um(config.sample.voxel_um)
     regres = normalize_res_um([config.registration.resolution_um] * 3)
     skip_corrupt = config.sample.source.skip_corrupt_slices
+
+    if layout == CordTiffLayout.PLANE_PER_FILE:
+        nz_estimate = len(_sorted_tiff_files(roots[0]))
+        emit_pipeline_message(
+            downsample_duration_hint(nz_estimate, n_channels, Path(roots[0]))
+        )
 
     t0 = time.perf_counter()
     if layout == CordTiffLayout.PLANE_PER_FILE:
@@ -80,7 +87,7 @@ def read_spinal_cord_sample(config: SpinalCordPipelineConfig) -> CordSampleVolum
         if len(files) != 1:
             msg = "multichannel_single layout expects exactly one TIFF file."
             raise ValueError(msg)
-        console.print(f"Loading multichannel_single stack: {files[0].name}")
+        emit_pipeline_message(f"Loading multichannel_single stack: {files[0].name}")
         volume, native_orisize, layout = load_multichannel_single_stack(
             files[0],
             sampleres_um=sampleres,
@@ -88,7 +95,7 @@ def read_spinal_cord_sample(config: SpinalCordPipelineConfig) -> CordSampleVolum
         )
         skipped = []
     else:
-        console.print(f"Loading channel-per-file stack from {folder}")
+        emit_pipeline_message(f"Loading channel-per-file stack from {folder}")
         volume, native_orisize, layout = load_channel_per_file_stack(
             folder,
             sampleres_um=sampleres,
@@ -105,17 +112,17 @@ def read_spinal_cord_sample(config: SpinalCordPipelineConfig) -> CordSampleVolum
 
     elapsed = time.perf_counter() - t0
     y, x, z, nchan = volume.shape
-    console.print(
-        f"Parsed spinal cord sample in {elapsed:.1f} s. "
+    emit_pipeline_message(
+        f"Parsed spinal cord sample in {format_duration(elapsed)}. "
         f"Size {y} x {x} x {z} with {nchan} channel(s)"
     )
     if native_orisize != volume.shape[:3]:
         ny, nx, nz = native_orisize
-        console.print(
+        emit_pipeline_message(
             f"  (native size was {ny} x {nx} x {nz} px; downsampled to registration grid)"
         )
     if skipped:
-        console.print(f"  {len(skipped)} slice(s) skipped as corrupt")
+        emit_pipeline_message(f"  {len(skipped)} slice(s) skipped as corrupt")
 
     return CordSampleVolume(
         volume=volume.astype(np.uint16),

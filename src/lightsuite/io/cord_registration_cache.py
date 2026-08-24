@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import tifffile
-from rich.console import Console
 
 from lightsuite.config.models import CordTiffLayout, SpinalCordPipelineConfig, TiffLayout
 from lightsuite.io.cord_reader import CordSampleVolume, read_spinal_cord_sample
@@ -28,8 +28,7 @@ from lightsuite.io.cord_volume import (
 from lightsuite.io.discover import discover_tiff_stack
 from lightsuite.preprocess.cord_checkpoint import CordRegOptsCheckpoint
 from lightsuite.registration.cord_paths import cord_cache_dir, cord_save_path
-
-console = Console()
+from lightsuite.reporter import emit_pipeline_message, format_duration
 
 REGISTER_CACHE_MANIFEST = "register_cache.json"
 
@@ -295,6 +294,50 @@ def _regvolpaths_valid(
     return True
 
 
+def _expected_regvolpaths(
+    cache_dir: Path,
+    config: SpinalCordPipelineConfig,
+    *,
+    n_channels: int,
+) -> dict[str, str]:
+    resolution_um = config.registration.resolution_um
+    return {
+        str(ich): str(registration_volume_path(cache_dir, ich, resolution_um))
+        for ich in range(1, n_channels + 1)
+    }
+
+
+def _probe_inputs_unchanged(
+    config: SpinalCordPipelineConfig,
+    probe: CordSourceProbe,
+) -> bool:
+    """Return False when raw source layout changed since the cached TIFFs were built."""
+    if probe.layout == CordTiffLayout.PLANE_PER_FILE:
+        listed = _plane_per_file_slice_count(config)
+        if listed is not None:
+            expected = probe.native_orisize[2] + probe.n_skipped_slices
+            if listed != expected:
+                return False
+    return True
+
+
+def _write_register_cache_manifest(
+    cache_dir: Path,
+    *,
+    probe: CordSourceProbe,
+    regvolpaths: dict[str, str],
+    fingerprint: dict[str, Any],
+) -> None:
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    manifest = {
+        "fingerprint": fingerprint,
+        "regvolpaths": regvolpaths,
+        "native_orisize": list(probe.native_orisize),
+        "tiff_type": probe.layout.value,
+    }
+    _manifest_path(cache_dir).write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+
 def _manifest_path(cache_dir: Path) -> Path:
     return cache_dir / REGISTER_CACHE_MANIFEST
 
@@ -313,24 +356,35 @@ def register_cache_valid(
 ) -> bool:
     """Return True when cached registration TIFFs match the current sample inputs."""
     manifest = _load_manifest(cache_dir)
-    if manifest is None:
-        return False
-    if probe is None:
-        if not _manifest_fingerprint_matches(config, manifest):
-            return False
-        probe = _probe_from_manifest(manifest)
+    if manifest is not None:
         if probe is None:
+            if not _manifest_fingerprint_matches(config, manifest):
+                return False
+            probe = _probe_from_manifest(manifest)
+            if probe is None:
+                return False
+        else:
+            fingerprint = compute_cord_register_fingerprint(config, probe)
+            if manifest.get("fingerprint") != fingerprint:
+                return False
+        regvolpaths = manifest.get("regvolpaths")
+        if not isinstance(regvolpaths, dict):
             return False
-    else:
-        fingerprint = compute_cord_register_fingerprint(config, probe)
-        if manifest.get("fingerprint") != fingerprint:
-            return False
-    regvolpaths = manifest.get("regvolpaths")
-    if not isinstance(regvolpaths, dict):
+        expected_shape = _expected_registration_shape(probe, config)
+        return _regvolpaths_valid(
+            {str(k): str(v) for k, v in regvolpaths.items()},
+            n_channels=probe.n_channels,
+            expected_shape=expected_shape,
+        )
+
+    if probe is None:
+        probe = probe_cord_source(config)
+    if not _probe_inputs_unchanged(config, probe):
         return False
     expected_shape = _expected_registration_shape(probe, config)
+    regvolpaths = _expected_regvolpaths(cache_dir, config, n_channels=probe.n_channels)
     return _regvolpaths_valid(
-        {str(k): str(v) for k, v in regvolpaths.items()},
+        regvolpaths,
         n_channels=probe.n_channels,
         expected_shape=expected_shape,
     )
@@ -373,27 +427,57 @@ def _try_load_register_cache(
 ) -> CordRegistrationVolume | None:
     """Load cached registration TIFFs without probing raw source planes."""
     manifest = _load_manifest(cache_dir)
-    if manifest is None or not _manifest_fingerprint_matches(config, manifest):
+    if manifest is not None and _manifest_fingerprint_matches(config, manifest):
+        probe = _probe_from_manifest(manifest)
+        if probe is None:
+            return None
+        regvolpaths = manifest.get("regvolpaths")
+        if not isinstance(regvolpaths, dict):
+            return None
+        expected_shape = _expected_registration_shape(probe, config)
+        paths = {str(k): str(v) for k, v in regvolpaths.items()}
+        if not _regvolpaths_valid(
+            paths,
+            n_channels=probe.n_channels,
+            expected_shape=expected_shape,
+        ):
+            return None
+        emit_pipeline_message(
+            "Using cached registration-grid sample TIFFs "
+            "(inputs unchanged; written by check-orientation or a prior run)."
+        )
+        return _load_cached_volume(paths, probe=probe, layout=probe.layout)
+    return _try_load_orphan_register_cache(config, cache_dir)
+
+
+def _try_load_orphan_register_cache(
+    config: SpinalCordPipelineConfig,
+    cache_dir: Path,
+) -> CordRegistrationVolume | None:
+    """Reuse on-disk registration TIFFs when manifest is missing (brain-style cache check)."""
+    probe = probe_cord_source(config)
+    if not _probe_inputs_unchanged(config, probe):
         return None
-    probe = _probe_from_manifest(manifest)
-    if probe is None:
-        return None
-    regvolpaths = manifest.get("regvolpaths")
-    if not isinstance(regvolpaths, dict):
-        return None
+    fingerprint = compute_cord_register_fingerprint(config, probe)
     expected_shape = _expected_registration_shape(probe, config)
-    paths = {str(k): str(v) for k, v in regvolpaths.items()}
+    regvolpaths = _expected_regvolpaths(cache_dir, config, n_channels=probe.n_channels)
     if not _regvolpaths_valid(
-        paths,
+        regvolpaths,
         n_channels=probe.n_channels,
         expected_shape=expected_shape,
     ):
         return None
-    console.print(
-        "[green]Using cached registration-grid sample TIFFs[/green] "
-        "(inputs unchanged; written by check-orientation or a prior run)."
+    emit_pipeline_message(
+        "Using cached registration-grid sample TIFFs "
+        "(on-disk TIFFs match current inputs; register_cache.json repaired)."
     )
-    return _load_cached_volume(paths, probe=probe, layout=probe.layout)
+    _write_register_cache_manifest(
+        cache_dir,
+        probe=probe,
+        regvolpaths=regvolpaths,
+        fingerprint=fingerprint,
+    )
+    return _load_cached_volume(regvolpaths, probe=probe, layout=probe.layout)
 
 
 def _try_load_regopts_cache(
@@ -408,10 +492,8 @@ def _try_load_regopts_cache(
     if not _checkpoint_matches_config(checkpoint, config):
         return None
     probe = _probe_from_checkpoint(checkpoint)
-    if probe.layout == CordTiffLayout.PLANE_PER_FILE:
-        listed = _plane_per_file_slice_count(config)
-        if listed is not None and listed != probe.native_orisize[2]:
-            return None
+    if not _probe_inputs_unchanged(config, probe):
+        return None
     regvolpaths = checkpoint.regvolpaths or {}
     expected_shape = _expected_registration_shape(probe, config)
     if not _regvolpaths_valid(
@@ -420,9 +502,8 @@ def _try_load_regopts_cache(
         expected_shape=expected_shape,
     ):
         return None
-    console.print(
-        "[green]Using cached registration-grid sample TIFFs[/green] "
-        "(from regopts.json; inputs unchanged)."
+    emit_pipeline_message(
+        "Using cached registration-grid sample TIFFs (from regopts.json; inputs unchanged)."
     )
     return _load_cached_volume(regvolpaths, probe=probe, layout=probe.layout)
 
@@ -444,14 +525,19 @@ def _write_register_cache(
         )
         tifffile.imwrite(out_path, sample.volume[:, :, :, ich].astype(np.uint16))
         regvolpaths[str(ich + 1)] = str(out_path)
-    manifest = {
-        "fingerprint": fingerprint,
-        "regvolpaths": regvolpaths,
-        "native_orisize": list(sample.native_orisize),
-        "tiff_type": sample.layout.value,
-    }
-    _manifest_path(cache_dir).write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-    console.print(f"Cached {len(regvolpaths)} channel registration TIFF(s) under {cache_dir}")
+    probe = CordSourceProbe(
+        native_orisize=sample.native_orisize,
+        n_channels=sample.n_channels,
+        layout=sample.layout,
+        n_skipped_slices=len(sample.skipped_slices),
+    )
+    _write_register_cache_manifest(
+        cache_dir,
+        probe=probe,
+        regvolpaths=regvolpaths,
+        fingerprint=fingerprint,
+    )
+    emit_pipeline_message(f"Cached {len(regvolpaths)} channel registration TIFF(s) under {cache_dir}")
     return regvolpaths
 
 
@@ -463,11 +549,22 @@ def _load_cached_volume(
     skipped_slices: tuple[SkippedSlice, ...] = (),
 ) -> CordRegistrationVolume:
     channels = sorted((int(k), Path(v)) for k, v in regvolpaths.items())
+    emit_pipeline_message(
+        f"Loading {len(channels)} cached registration TIFF(s) into memory…"
+    )
+    t0 = time.perf_counter()
     first = tifffile.imread(channels[0][1])
     volume = np.zeros((*first.shape, len(channels)), dtype=np.uint16)
     volume[:, :, :, 0] = first
-    for idx, (_, path) in enumerate(channels[1:], start=1):
-        volume[:, :, :, idx] = tifffile.imread(path)
+    for idx, (ich, path) in enumerate(channels[1:], start=2):
+        volume[:, :, :, idx - 1] = tifffile.imread(path)
+        if len(channels) > 1:
+            emit_pipeline_message(
+                f"  loaded channel {ich}/{len(channels)} ({path.name})"
+            )
+    emit_pipeline_message(
+        f"Cached registration volume ready in {format_duration(time.perf_counter() - t0)}"
+    )
     return CordRegistrationVolume(
         volume=volume,
         native_orisize=probe.native_orisize,
@@ -482,12 +579,23 @@ def _load_cached_volume(
 def manifest_register_fingerprint(
     config: SpinalCordPipelineConfig,
 ) -> dict[str, Any] | None:
-    """Return the register-cache fingerprint when manifest matches config (no raw TIFF reads)."""
-    manifest = _load_manifest(cord_cache_dir(config))
-    if manifest is None or not _manifest_fingerprint_matches(config, manifest):
+    """Return the register-cache fingerprint when cached TIFFs match config."""
+    cache_dir = cord_cache_dir(config)
+    manifest = _load_manifest(cache_dir)
+    if manifest is not None and _manifest_fingerprint_matches(config, manifest):
+        probe = _probe_from_manifest(manifest)
+        if probe is not None:
+            return compute_cord_register_fingerprint(config, probe)
+    probe = probe_cord_source(config)
+    if not _probe_inputs_unchanged(config, probe):
         return None
-    probe = _probe_from_manifest(manifest)
-    if probe is None:
+    expected_shape = _expected_registration_shape(probe, config)
+    regvolpaths = _expected_regvolpaths(cache_dir, config, n_channels=probe.n_channels)
+    if not _regvolpaths_valid(
+        regvolpaths,
+        n_channels=probe.n_channels,
+        expected_shape=expected_shape,
+    ):
         return None
     return compute_cord_register_fingerprint(config, probe)
 
@@ -508,6 +616,10 @@ def load_or_cache_cord_registration(
         cached = _try_load_register_cache(config, cache_dir)
         if cached is not None:
             return cached
+        emit_pipeline_message(
+            "No valid registration-grid cache — loading raw sample TIFFs "
+            "(see plane progress below)…"
+        )
 
     probe = probe_cord_source(config)
     fingerprint = compute_cord_register_fingerprint(config, probe)
