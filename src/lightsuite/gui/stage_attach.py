@@ -44,7 +44,7 @@ def _spinal_view_registration(viewer: Any, config: Any, ctx: StageContext) -> St
 def _spinal_orientation(viewer: Any, config: Any, ctx: StageContext) -> StageController:
     from lightsuite.gui.orientation_cord import attach_spinal_orientation
 
-    return attach_spinal_orientation(viewer, config)
+    return attach_spinal_orientation(viewer, config, ctx=ctx)
 
 
 def _spinal_straighten(viewer: Any, config: Any, ctx: StageContext) -> StageController:

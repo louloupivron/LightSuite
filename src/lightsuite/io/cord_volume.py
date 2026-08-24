@@ -20,7 +20,7 @@ from lightsuite.preprocess.slice_ops import read_source_plane, SliceLoadJob, pro
 
 from rich.console import Console
 
-from lightsuite.reporter import report_step_progress
+from lightsuite.reporter import emit_pipeline_message, format_duration, report_step_progress
 
 console = Console()
 
@@ -364,16 +364,16 @@ def _load_one_plane_per_file_channel(
     scale_xy = float(resfac[0])
     label = channel_label or folder.name
 
-    console.print(f"Using planeperfile loading for {label} ({len(files)} slice TIFFs)")
+    emit_pipeline_message(f"Using planeperfile loading for {label} ({len(files)} slice TIFFs)")
     if skipped:
-        console.print(f"  filtered out {len(skipped)} corrupt slice(s) before loading")
+        emit_pipeline_message(f"  filtered out {len(skipped)} corrupt slice(s) before loading")
         for row in skipped[:5]:
-            console.print(f"  skipping corrupt slice {row.slice_index}: {row.file_name}")
+            emit_pipeline_message(f"  skipping corrupt slice {row.slice_index}: {row.file_name}")
         if len(skipped) > 5:
-            console.print(f"    ... and {len(skipped) - 5} more")
+            emit_pipeline_message(f"    ... and {len(skipped) - 5} more")
 
     if target_size != native_listed:
-        console.print(
+        emit_pipeline_message(
             f"  downsampling while loading: {native_listed[0]} x {native_listed[1]} x {native_listed[2]} "
             f"-> {target_size[0]} x {target_size[1]} x {target_size[2]} px "
             f"(sampleres {sampleres_um.tolist()} um -> registration {registrationres_um.tolist()} um)"
@@ -381,7 +381,7 @@ def _load_one_plane_per_file_channel(
 
     effective_workers = _effective_cord_plane_workers(workers, len(files))
     if effective_workers > 1:
-        console.print(f"  parallel plane loading: {effective_workers} workers")
+        emit_pipeline_message(f"  parallel plane loading: {effective_workers} workers")
 
     t0 = time.perf_counter()
 
@@ -411,6 +411,11 @@ def _load_one_plane_per_file_channel(
             sampleres_um,
             registrationres_um,
         )
+        emit_pipeline_message(
+            f"[{label}] resizing Z from {backvol.shape[2]} to {target_loaded[2]} planes "
+            "(can take several minutes on large stacks)…"
+        )
+        t_resize = time.perf_counter()
         finvol = resize(
             backvol,
             target_loaded,
@@ -418,6 +423,9 @@ def _load_one_plane_per_file_channel(
             preserve_range=True,
             anti_aliasing=True,
         ).astype(np.uint16)
+        emit_pipeline_message(
+            f"[{label}] Z resize done in {format_duration(time.perf_counter() - t_resize)}"
+        )
 
     return finvol, native_listed, skipped
 
@@ -449,12 +457,12 @@ def load_plane_per_file_stack(
         )
         if dropped:
             common_nz = len(aligned_files[0])
-            console.print(
-                f"Multi-channel plane alignment: using [bold]{common_nz}[/bold] common plane(s)"
+            emit_pipeline_message(
+                f"Multi-channel plane alignment: using {common_nz} common plane(s)"
             )
             for root in roots:
                 if dropped.get(root.name, 0):
-                    console.print(
+                    emit_pipeline_message(
                         f"  {root.name}: dropped {dropped[root.name]} slice(s) without a match "
                         "in all channels"
                     )

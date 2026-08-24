@@ -622,6 +622,7 @@ class LightsuiteShell:
             config_path=self.project.config_path,
             headless=False,
             force_preprocess=False,
+            on_log=self._emit_log,
         )
         config = self.project.config
 
