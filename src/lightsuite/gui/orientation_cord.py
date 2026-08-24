@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -21,7 +22,13 @@ from lightsuite.gui.stage_controller import (
     require_magicgui,
     run_attached_stage,
 )
-from lightsuite.reporter import CallbackReporter, capture_pipeline_output, emit_pipeline_message
+from lightsuite.reporter import (
+    CallbackReporter,
+    capture_pipeline_output,
+    emit_pipeline_message,
+    stage_cancellation,
+)
+from lightsuite.exceptions import StageCancelledError
 from lightsuite.io.cord_registration_cache import (
     load_or_cache_cord_registration,
     manifest_register_fingerprint,
@@ -311,9 +318,11 @@ class _AsyncCordOrientationController:
     viewer: Any
     config: SpinalCordPipelineConfig
     on_log: Callable[[str], None] | None = None
+    cancel_event: threading.Event | None = None
     _inner: DockStageController | None = field(default=None, init=False, repr=False)
     _workers: list[Any] = field(default_factory=list, init=False, repr=False)
     _cancelled: bool = field(default=False, init=False, repr=False)
+    _on_busy_finished: Callable[[], None] | None = field(default=None, init=False, repr=False)
     open_log_message: str | None = field(
         default="Loading orientation preview in background (see log for progress)…",
         init=False,
@@ -322,6 +331,16 @@ class _AsyncCordOrientationController:
 
     def __post_init__(self) -> None:
         self.result = cord_save_path(self.config)
+
+    def register_busy_finished(self, callback: Callable[[], None]) -> None:
+        """Notify the GUI shell when background loading finishes."""
+        self._on_busy_finished = callback
+
+    def _finish_busy(self) -> None:
+        callback = self._on_busy_finished
+        self._on_busy_finished = None
+        if callback is not None:
+            callback()
 
     def mount(self, viewer: Any) -> None:
         if self._inner is not None:
@@ -333,8 +352,9 @@ class _AsyncCordOrientationController:
         reporter = CallbackReporter(on_message=self.on_log) if self.on_log else None
 
         def _work() -> CordOrientationData:
-            with capture_pipeline_output(reporter):
-                return load_cord_orientation_check_data(self.config)
+            with stage_cancellation(self.cancel_event):
+                with capture_pipeline_output(reporter):
+                    return load_cord_orientation_check_data(self.config)
 
         def _on_success(data: CordOrientationData) -> None:
             if self._cancelled:
@@ -343,19 +363,25 @@ class _AsyncCordOrientationController:
             self._inner.mount(viewer)
             if self.on_log is not None:
                 self.on_log("Orientation preview ready.")
+            self._finish_busy()
 
         def _on_failure(exc: BaseException) -> None:
             if self._cancelled:
                 return
-            message = f"Failed to load orientation preview: {exc}"
-            if self.on_log is not None:
-                self.on_log(message)
-            try:
-                from napari.utils.notifications import show_warning
+            if isinstance(exc, StageCancelledError):
+                if self.on_log is not None:
+                    self.on_log("Stage cancelled.")
+            else:
+                message = f"Failed to load orientation preview: {exc}"
+                if self.on_log is not None:
+                    self.on_log(message)
+                try:
+                    from napari.utils.notifications import show_warning
 
-                show_warning(message)
-            except ImportError:
-                pass
+                    show_warning(message)
+                except ImportError:
+                    pass
+            self._finish_busy()
 
         self._workers.append(
             start_background_task(_work, on_success=_on_success, on_failure=_on_failure)
@@ -367,12 +393,15 @@ class _AsyncCordOrientationController:
 
     def teardown(self, viewer: Any) -> None:
         self._cancelled = True
+        if self.cancel_event is not None:
+            self.cancel_event.set()
         from lightsuite.gui.qt_workers import cancel_background_workers
 
         cancel_background_workers(self._workers)
         self._workers.clear()
         if self._inner is not None:
             self._inner.teardown(viewer)
+        self._finish_busy()
 
 
 def attach_spinal_orientation(
@@ -386,7 +415,13 @@ def attach_spinal_orientation(
     if data is not None:
         return _build_spinal_orientation_controller(viewer, config, data)
     on_log = getattr(ctx, "on_log", None) if ctx is not None else None
-    return _AsyncCordOrientationController(viewer=viewer, config=config, on_log=on_log)
+    cancel_event = getattr(ctx, "cancel_event", None) if ctx is not None else None
+    return _AsyncCordOrientationController(
+        viewer=viewer,
+        config=config,
+        on_log=on_log,
+        cancel_event=cancel_event,
+    )
 
 
 def run_spinal_orientation(

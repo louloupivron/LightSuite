@@ -19,7 +19,7 @@ from lightsuite.io.cord_volume import (
     resolve_cord_tiff_layout,
 )
 from lightsuite.io.discover import downsample_duration_hint
-from lightsuite.reporter import emit_pipeline_message, format_duration
+from lightsuite.reporter import check_stage_cancelled, emit_pipeline_message, format_duration
 
 
 @dataclass(frozen=True)
@@ -66,6 +66,7 @@ def read_spinal_cord_sample(config: SpinalCordPipelineConfig) -> CordSampleVolum
     regres = normalize_res_um([config.registration.resolution_um] * 3)
     skip_corrupt = config.sample.source.skip_corrupt_slices
 
+    check_stage_cancelled()
     if layout == CordTiffLayout.PLANE_PER_FILE:
         nz_estimate = len(_sorted_tiff_files(roots[0]))
         emit_pipeline_message(

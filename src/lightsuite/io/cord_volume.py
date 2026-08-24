@@ -20,7 +20,12 @@ from lightsuite.preprocess.slice_ops import read_source_plane, SliceLoadJob, pro
 
 from rich.console import Console
 
-from lightsuite.reporter import emit_pipeline_message, format_duration, report_step_progress
+from lightsuite.reporter import (
+    check_stage_cancelled,
+    emit_pipeline_message,
+    format_duration,
+    report_step_progress,
+)
 
 console = Console()
 
@@ -68,11 +73,14 @@ def _iter_cord_plane_slices(
     ]
     if workers <= 1:
         for job in jobs:
+            check_stage_cancelled()
             yield process_slice_job(job).plane_xy
         return
     chunksize = max(1, len(jobs) // (workers * 4))
     with ProcessPoolExecutor(max_workers=workers) as pool:
-        yield from (result.plane_xy for result in pool.map(process_slice_job, jobs, chunksize=chunksize))
+        for result in pool.map(process_slice_job, jobs, chunksize=chunksize):
+            check_stage_cancelled()
+            yield result.plane_xy
 
 
 @dataclass(frozen=True)
@@ -406,6 +414,7 @@ def _load_one_plane_per_file_channel(
     if np.isclose(resfac[2], 1.0):
         finvol = backvol
     else:
+        check_stage_cancelled()
         _, target_loaded = cord_volume_downsample_spec(
             (ny0, nx0, backvol.shape[2]),
             sampleres_um,
@@ -468,6 +477,7 @@ def load_plane_per_file_stack(
                     )
 
     for ich, root in enumerate(roots, start=1):
+        check_stage_cancelled()
         label = f"channel {ich}/{len(roots)} ({root.name})" if len(roots) > 1 else None
         channel_files = aligned_files[ich - 1] if aligned_files is not None else None
         vol, native, skipped = _load_one_plane_per_file_channel(
