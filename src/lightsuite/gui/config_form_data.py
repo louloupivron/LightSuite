@@ -228,6 +228,13 @@ def _apply_import_to_raw(
         out = dict(raw)
         out.pop("import", None)
         return out
+    suite = (state_converter.suite or "native").strip().lower()
+    if suite != "native":
+        out = dict(raw)
+        import_block = dict(out.get("import") or {})
+        import_block.pop("annotations", None)
+        out["import"] = import_block
+        return import_converter_to_raw(state_converter, out)
     out = import_annotations_to_raw(state_annotations, raw)
     return import_converter_to_raw(state_converter, out)
 

@@ -171,3 +171,41 @@ def test_converter_custom_missing_entry_fails_load(tmp_path: Path) -> None:
             import_block={"converter": {"suite": "custom", "source": str(tmp_path / "x.json")}},
         )
         load_config(cfg_path)
+
+
+def test_resolve_annotation_specs_prefers_converted_summary_over_raw_vendor_annotations(tmp_path: Path) -> None:
+    from lightsuite.import_.orchestrator import resolve_annotation_specs
+
+    cfg_path = tmp_path / "brain.yaml"
+    results = tmp_path / "results"
+    source = tmp_path / "imaris.csv"
+    source.write_text(
+        "Position X,Position Y,Position Z,Component Name\n10,20,30,TA\n",
+        encoding="utf-8",
+    )
+    _write_brain_config(
+        cfg_path,
+        tmp_path,
+        import_block={
+            "converter": {
+                "suite": "imaris",
+                "source": str(source),
+                "label": "imaris",
+                "voxel_um": [1.0, 1.0, 1.0],
+            },
+            "annotations": [
+                {"format": "points_csv", "path": str(source), "label": "raw_vendor"}
+            ],
+        },
+    )
+    _write_reference(tmp_path)
+    cfg = load_config(cfg_path)
+    # Run convert stage to generate converted files
+    run_convert_annotations(import_config=cfg.import_config, save_path=results)
+
+    # resolve_annotation_specs should pick the converted layers, not the raw vendor CSV
+    specs = resolve_annotation_specs(cfg.import_config, None, save_path=results)
+    assert len(specs) == 1
+    assert specs[0].path == results / "converted" / "imaris_points.csv"
+    assert specs[0].path.name != "imaris.csv"
+

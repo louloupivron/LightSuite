@@ -50,6 +50,28 @@ class AnnotationImporter(Protocol):
         """Transform a native mask volume and write this pipeline's outputs."""
 
 
+def _load_specs_from_convert_summary(summary_path: Path) -> list[AnnotationImportConfig]:
+    payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    rows = payload.get("annotations") or []
+    specs: list[AnnotationImportConfig] = []
+    for row in rows:
+        if not isinstance(row, dict) or not row.get("path"):
+            continue
+        fmt_raw = str(row.get("format") or "points_csv")
+        try:
+            fmt = AnnotationFormat(fmt_raw)
+        except ValueError:
+            continue
+        specs.append(
+            AnnotationImportConfig(
+                format=fmt,
+                path=Path(str(row["path"])),
+                label=str(row.get("label") or ""),
+            )
+        )
+    return specs
+
+
 def resolve_annotation_specs(
     import_config: ImportConfig | None,
     annotations: list[AnnotationImportConfig] | None,
@@ -58,11 +80,29 @@ def resolve_annotation_specs(
 ) -> list[AnnotationImportConfig]:
     """Pick explicit annotations over the config block, with a shared error message.
 
-    When ``import.annotations`` is empty after a vendor ``convert-annotations`` run,
-    fall back to ``<save_path>/converted/convert_annotations_summary.json``.
+    When vendor conversion is configured or ``import.annotations`` is empty after a vendor
+    ``convert-annotations`` run, prefer ``<save_path>/converted/convert_annotations_summary.json``.
     """
     if annotations is not None:
         return annotations
+
+    from lightsuite.config.models import SegmentationSuite
+
+    is_vendor_converter = (
+        import_config is not None
+        and import_config.converter is not None
+        and import_config.converter.suite != SegmentationSuite.NATIVE
+    )
+
+    if is_vendor_converter and save_path is not None:
+        from lightsuite.import_.convert import CONVERT_SUMMARY_NAME
+
+        summary_path = Path(save_path).expanduser() / "converted" / CONVERT_SUMMARY_NAME
+        if summary_path.is_file():
+            specs = _load_specs_from_convert_summary(summary_path)
+            if specs:
+                return specs
+
     if import_config is not None and import_config.annotations:
         return import_config.annotations
 
@@ -71,24 +111,7 @@ def resolve_annotation_specs(
 
         summary_path = Path(save_path).expanduser() / "converted" / CONVERT_SUMMARY_NAME
         if summary_path.is_file():
-            payload = json.loads(summary_path.read_text(encoding="utf-8"))
-            rows = payload.get("annotations") or []
-            specs: list[AnnotationImportConfig] = []
-            for row in rows:
-                if not isinstance(row, dict) or not row.get("path"):
-                    continue
-                fmt_raw = str(row.get("format") or "points_csv")
-                try:
-                    fmt = AnnotationFormat(fmt_raw)
-                except ValueError:
-                    continue
-                specs.append(
-                    AnnotationImportConfig(
-                        format=fmt,
-                        path=Path(str(row["path"])),
-                        label=str(row.get("label") or ""),
-                    )
-                )
+            specs = _load_specs_from_convert_summary(summary_path)
             if specs:
                 return specs
 
@@ -148,9 +171,11 @@ def run_annotation_import(
     reference = importer.reference
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    from rich.markup import escape
+
     console.print(
         f"Importing {len(specs)} annotation source(s) "
-        f"(native grid {reference.shape_yxz}, voxel_um={reference.voxel_um})..."
+        f"(native grid {escape(str(reference.shape_yxz))}, voxel_um={escape(str(reference.voxel_um))})..."
     )
     t0 = time.perf_counter()
 

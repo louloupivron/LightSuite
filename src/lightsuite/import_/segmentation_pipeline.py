@@ -55,7 +55,7 @@ def run_import_segmentation_brain(config: Any) -> ImportSegmentationResult:
 
     from lightsuite.import_.brain_import import run_brain_import_annotations
 
-    imported = run_brain_import_annotations(config)
+    imported = run_brain_import_annotations(config, annotations=convert.annotations)
     return ImportSegmentationResult(convert=convert, imported=imported)
 
 
@@ -73,7 +73,7 @@ def run_import_segmentation_spinal(config: Any) -> ImportSegmentationResult:
 
     from lightsuite.import_.cord_import import run_cord_import_annotations
 
-    imported = run_cord_import_annotations(config)
+    imported = run_cord_import_annotations(config, annotations=convert.annotations)
     return ImportSegmentationResult(convert=convert, imported=imported)
 
 
@@ -92,5 +92,5 @@ def run_import_segmentation_multires(config: Any) -> ImportSegmentationResult:
 
     from lightsuite.multires.import_annotations import run_multires_import_annotations
 
-    imported = run_multires_import_annotations(config)
+    imported = run_multires_import_annotations(config, annotations=convert.annotations)
     return ImportSegmentationResult(convert=convert, imported=imported)
