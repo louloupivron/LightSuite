@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import threading
 import traceback
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,6 +23,7 @@ from lightsuite.cli.stage_registry import (
 )
 from lightsuite.cli.stages import StageState, StageStatus
 from lightsuite.config.workflow import load_project
+from lightsuite.exceptions import StageCancelledError
 from lightsuite.gui.config_editor import ConfigEditorDock
 from lightsuite.gui.qt_workers import start_background_task
 from lightsuite.gui.stage_attach import get_stage_attach
@@ -33,7 +35,7 @@ from lightsuite.gui.stage_controller import (
     require_napari,
     validate_gui_dependencies,
 )
-from lightsuite.reporter import CallbackReporter, capture_pipeline_output
+from lightsuite.reporter import CallbackReporter, capture_pipeline_output, stage_cancellation
 
 _STATE_ICONS = {
     StageState.DONE: "✓",
@@ -229,6 +231,10 @@ class LightsuiteShell:
         self._action_button = QPushButton("Run")
         self._action_button.clicked.connect(self._on_action)
         layout.addWidget(self._action_button)
+        self._cancel_button = QPushButton("Cancel stage")
+        self._cancel_button.clicked.connect(self._on_cancel_stage)
+        self._cancel_button.setVisible(False)
+        layout.addWidget(self._cancel_button)
         self._stage_list.currentItemChanged.connect(self._on_stage_selection_changed)
 
         self._log = QTextEdit()
@@ -708,8 +714,9 @@ class LightsuiteShell:
         reporter = CallbackReporter(on_message=self._emit_log)
 
         def _work() -> Any:
-            with capture_pipeline_output(reporter):
-                return run_stage(workflow, stage_id, config, ctx)
+            with stage_cancellation(self._stage_cancel_event):
+                with capture_pipeline_output(reporter):
+                    return run_stage(workflow, stage_id, config, ctx)
 
         self._set_running(True)
         if stage_id == "export" and self._export_row.isVisible():
@@ -735,10 +742,25 @@ class LightsuiteShell:
     def _set_running(self, running: bool) -> None:
         enabled = not running and self.project is not None
         self._action_button.setEnabled(enabled)
+        self._action_button.setVisible(not running)
+        self._cancel_button.setVisible(running)
+        self._cancel_button.setEnabled(running)
         self._optional_toggle.setEnabled(enabled)
         self._stage_list.setEnabled(enabled)
         if not running:
+            self._stage_cancel_event = None
+        if not running:
             self._update_action_button()
+
+    def _on_cancel_stage(self) -> None:
+        if self._stage_cancel_event is None or self._stage_cancel_event.is_set():
+            return
+        self._stage_cancel_event.set()
+        self._cancel_button.setEnabled(False)
+        self.log(
+            "Cancelling stage… (stops at the next checkpoint; "
+            "in-flight plane workers are abandoned)"
+        )
 
     def _on_stage_finished(self, stage_id: str, _result: Any) -> None:
         self._worker = None
@@ -755,6 +777,9 @@ class LightsuiteShell:
             exc = error_info[1]
         else:
             exc = error_info
+        if isinstance(exc, StageCancelledError):
+            self.log("Stage cancelled.")
+            return
         self.log(f"Stage failed: {exc}")
         self.log(traceback.format_exc())
 

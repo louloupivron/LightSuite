@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from pathlib import Path
 from unittest.mock import patch
 
@@ -13,7 +14,7 @@ from lightsuite.config.loader import load_spinal_config
 from lightsuite.exceptions import StageCancelledError
 from lightsuite.io.cord_reader import read_spinal_cord_sample
 from lightsuite.preprocess.cord import preprocess_spinal_cord_sample
-from lightsuite.reporter import stage_cancellation
+from lightsuite.reporter import iter_cancellable_process_map, stage_cancellation
 
 
 def _ensure_fixtures(root: Path) -> None:
@@ -45,6 +46,32 @@ def _write_config(tmp_path: Path, fixture_root: Path) -> Path:
     config_path = tmp_path / "spinal.yaml"
     config_path.write_text(yaml.dump(config_data), encoding="utf-8")
     return config_path
+
+
+def _slow_identity(value: int) -> int:
+    time.sleep(0.05)
+    return value
+
+
+def test_iter_cancellable_process_map_aborts_promptly() -> None:
+    cancel = threading.Event()
+    seen: list[int] = []
+    t0 = time.perf_counter()
+    with stage_cancellation(cancel):
+        with pytest.raises(StageCancelledError):
+            for value in iter_cancellable_process_map(
+                _slow_identity,
+                list(range(40)),
+                max_workers=2,
+                chunksize=1,
+            ):
+                seen.append(value)
+                if len(seen) >= 2:
+                    cancel.set()
+    elapsed = time.perf_counter() - t0
+    assert len(seen) < 20
+    # Waiting for all 40 jobs would take ~1s+; abort should be much faster.
+    assert elapsed < 1.5
 
 
 def test_read_spinal_cord_sample_respects_cancel_event(tmp_path: Path) -> None:

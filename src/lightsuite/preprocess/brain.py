@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import time
 from collections.abc import Iterator
-from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -14,7 +13,11 @@ import tifffile
 from rich.console import Console
 
 from lightsuite.config.models import BrainPipelineConfig, TiffLayout
-from lightsuite.reporter import emit_pipeline_message, report_step_progress
+from lightsuite.reporter import (
+    emit_pipeline_message,
+    iter_cancellable_process_map,
+    report_step_progress,
+)
 from lightsuite.io.discover import TiffStackDiscovery, discover_tiff_stack
 from lightsuite.io.readers.tiff_stack import TiffStackReader
 from lightsuite.preprocess.checkpoint import (
@@ -131,14 +134,12 @@ def _iter_processed_slices(
     jobs: list[SliceLoadJob],
     workers: int,
 ) -> Iterator[SliceProcessResult]:
-    if workers <= 1:
-        for job in jobs:
-            yield process_slice_job(job)
-        return
-
-    with ProcessPoolExecutor(max_workers=workers) as pool:
-        yield from pool.map(process_slice_job, jobs, chunksize=1)
-
+    yield from iter_cancellable_process_map(
+        process_slice_job,
+        jobs,
+        max_workers=max(1, workers),
+        chunksize=1,
+    )
 
 def _allocate_xy_stack(
     *,
