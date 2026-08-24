@@ -12,7 +12,9 @@ from lightsuite.registration.cord_longitudinal import (
     CORD_LONGITUDINAL_AXIS,
     build_cord_z_transinit_from_correspondence,
     build_longitudinal_anchors,
+    describe_cord_z_transinit_source,
     estimate_cord_atlas_plane,
+    format_cord_z_transinit,
     resolve_cord_z_transinit,
 )
 
@@ -89,3 +91,11 @@ def test_build_longitudinal_anchors_seeds_centered_planes() -> None:
     assert len(anchors) == 5
     assert all(anchor.atlas_plane > 0 for anchor in anchors)
     assert all(not anchor.confirmed for anchor in anchors)
+
+
+def test_format_cord_z_transinit_helpers() -> None:
+    transinit = build_cord_z_transinit(100, 200)
+    text = format_cord_z_transinit(transinit)
+    assert "z_scale=" in text
+    assert "z_offset=" in text
+    assert describe_cord_z_transinit_source(100, 200, None).startswith("centered default")

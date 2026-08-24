@@ -77,6 +77,24 @@ def resolve_cord_z_transinit(
     return build_cord_z_transinit(nslices, atlas_depth)
 
 
+def format_cord_z_transinit(transinit: np.ndarray) -> str:
+    return f"z_scale={float(transinit[2, 2]):.4f}, z_offset={float(transinit[2, 3]):.2f} vox"
+
+
+def describe_cord_z_transinit_source(
+    nslices: int,
+    atlas_depth: int,
+    correspondence: SliceCorrespondence | None,
+) -> str:
+    if (
+        correspondence is not None
+        and correspondence.has_confirmed_anchors(CORD_LONGITUDINAL_AXIS)
+    ):
+        n_anchors = len(correspondence.confirmed_anchors(CORD_LONGITUDINAL_AXIS))
+        return f"{n_anchors} confirmed longitudinal anchors"
+    return f"centered default ({nslices} sample slices → {atlas_depth} atlas planes)"
+
+
 def build_longitudinal_anchors(
     chooselist: np.ndarray,
     *,
