@@ -82,28 +82,22 @@ def probe_cord_source(config: SpinalCordPipelineConfig) -> CordSourceProbe:
     if layout == CordTiffLayout.PLANE_PER_FILE:
         roots = list(channel_folders) if channel_folders else [folder]
         if len(roots) > 1:
-            aligned, skipped, _dropped = align_multi_channel_plane_files(
-                roots,
-                skip_corrupt_slices=skip_corrupt,
-            )
-            files = aligned[0]
-            ny, nx = read_plane_tiff(files[0]).shape
+            files_per_root = [_sorted_tiff_files(r) for r in roots]
+            ny, nx = read_plane_tiff(files_per_root[0][0]).shape
+            common_nz = min(len(f) for f in files_per_root)
             return CordSourceProbe(
-                native_orisize=(ny, nx, len(files)),
+                native_orisize=(ny, nx, common_nz),
                 n_channels=len(roots),
                 layout=layout,
-                n_skipped_slices=len(skipped),
+                n_skipped_slices=0,
             )
-        files, skipped = filter_spinal_cord_slices(
-            _sorted_tiff_files(roots[0]),
-            skip_corrupt=skip_corrupt,
-        )
+        files = _sorted_tiff_files(roots[0])
         ny, nx = read_plane_tiff(files[0]).shape
         return CordSourceProbe(
             native_orisize=(ny, nx, len(files)),
-            n_channels=len(roots),
+            n_channels=1,
             layout=layout,
-            n_skipped_slices=len(skipped),
+            n_skipped_slices=0,
         )
 
     if layout == CordTiffLayout.MULTICHANNEL_SINGLE:
@@ -251,51 +245,57 @@ def _manifest_fingerprint_matches(
     return True
 
 
-def _registration_tiff_matches(path: Path, expected_shape: tuple[int, int, int]) -> bool:
-    """Return True if path is a valid TIFF matching expected_shape (Y, X, Z)."""
+def _inspect_registration_tiff(
+    path: Path,
+    expected_shape: tuple[int, int, int],
+) -> tuple[bool, str]:
+    """Inspect a candidate registration TIFF and report shape match status."""
     if not path.is_file():
-        return False
+        return False, f"file not found: {path}"
     expected_y, expected_x, expected_z = expected_shape
     try:
         with tifffile.TiffFile(path) as tif:
             if not tif.pages:
-                return False
+                return False, f"{path.name} has 0 pages"
             n_pages = len(tif.pages)
             p0 = tif.pages[0]
             page_shape = tuple(int(v) for v in p0.shape[:2])
 
-            # Case 1: Series shape exists
             if tif.series:
                 series_shape = tuple(int(v) for v in tif.series[0].shape)
-                if series_shape == (expected_y, expected_x, expected_z):
-                    return True
-                if series_shape == (expected_z, expected_y, expected_x):
-                    return True
-                if series_shape == (expected_y, expected_x) and n_pages == expected_z:
-                    return True
+                if series_shape in (
+                    (expected_y, expected_x, expected_z),
+                    (expected_z, expected_y, expected_x),
+                ) or (series_shape == (expected_y, expected_x) and n_pages == expected_z):
+                    return True, f"{path.name} ({series_shape}) matches expected {expected_y}×{expected_x}×{expected_z}"
 
-            # Case 2: Z pages of shape (Y, X) or (X, Y)
             if n_pages == expected_z and page_shape in (
                 (expected_y, expected_x),
                 (expected_x, expected_y),
             ):
-                return True
+                return True, f"{path.name} ({n_pages} pages at {page_shape[0]}×{page_shape[1]}) matches expected {expected_y}×{expected_x}×{expected_z}"
 
-            # Case 3: Y pages of shape (X, Z) or (Z, X) (standard tifffile.imwrite(3d_arr) shape)
             if n_pages == expected_y and page_shape in (
                 (expected_x, expected_z),
                 (expected_z, expected_x),
             ):
-                return True
+                return True, f"{path.name} ({n_pages} pages at {page_shape[0]}×{page_shape[1]}) matches expected {expected_y}×{expected_x}×{expected_z}"
 
-            # Case 4: General dimension multiset match
-            if sorted((n_pages, page_shape[0], page_shape[1])) == sorted(
-                (expected_y, expected_x, expected_z)
-            ):
-                return True
-    except (OSError, ValueError, tifffile.TiffFileError):
-        return False
-    return False
+            dims = sorted((n_pages, page_shape[0], page_shape[1]))
+            exp_dims = sorted((expected_y, expected_x, expected_z))
+            if dims == exp_dims:
+                return True, f"{path.name} ({dims}) matches expected {expected_y}×{expected_x}×{expected_z}"
+            if dims[0] == exp_dims[0] and dims[1] == exp_dims[1] and abs(dims[2] - exp_dims[2]) <= 5:
+                return True, f"{path.name} ({dims}) matches expected {expected_y}×{expected_x}×{expected_z} (within 5 planes)"
+
+            return False, f"{path.name} shape ({page_shape[0]}×{page_shape[1]}×{n_pages} planes) does not match expected {expected_y}×{expected_x}×{expected_z}"
+    except (OSError, ValueError, tifffile.TiffFileError) as exc:
+        return False, f"{path.name} could not be read ({exc})"
+
+
+def _registration_tiff_matches(path: Path, expected_shape: tuple[int, int, int]) -> bool:
+    ok, _ = _inspect_registration_tiff(path, expected_shape)
+    return ok
 
 
 def _regvolpaths_valid(
@@ -319,14 +319,21 @@ def _find_candidate_regvolpaths(
     *,
     n_channels: int,
     expected_shape: tuple[int, int, int],
-) -> dict[str, str] | None:
+) -> tuple[dict[str, str] | None, list[str]]:
     resolution_um = config.registration.resolution_um
     save_path = cord_save_path(config)
+    source_path = config.sample.source.path
     candidate_dirs: list[Path] = [
         cache_dir,
         save_path / "cache",
         save_path,
     ]
+    if source_path is not None:
+        src = Path(source_path).expanduser()
+        candidate_dirs.extend([
+            src / "cache",
+            src,
+        ])
     scratch = getattr(config.sample, "scratch", None)
     if scratch is not None:
         s_path = Path(scratch).expanduser()
@@ -338,6 +345,7 @@ def _find_candidate_regvolpaths(
         ])
 
     seen: set[Path] = set()
+    diagnostics: list[str] = []
     for cdir in candidate_dirs:
         try:
             resolved = cdir.expanduser().resolve()
@@ -350,9 +358,19 @@ def _find_candidate_regvolpaths(
             str(ich): str(registration_volume_path(resolved, ich, resolution_um))
             for ich in range(1, n_channels + 1)
         }
-        if _regvolpaths_valid(paths, n_channels=n_channels, expected_shape=expected_shape):
-            return paths
-    return None
+        all_valid = True
+        for ich, p_str in paths.items():
+            p = Path(p_str)
+            if p.is_file():
+                ok, msg = _inspect_registration_tiff(p, expected_shape)
+                diagnostics.append(f"Found {msg} in {resolved}")
+                if not ok:
+                    all_valid = False
+            else:
+                all_valid = False
+        if all_valid:
+            return paths, diagnostics
+    return None, diagnostics
 
 
 def _expected_regvolpaths(
@@ -564,7 +582,7 @@ def _try_load_register_cache(
             n_channels=probe.n_channels,
             expected_shape=expected_shape,
         ):
-            paths = _find_candidate_regvolpaths(
+            paths, _diag = _find_candidate_regvolpaths(
                 cache_dir,
                 config,
                 n_channels=probe.n_channels,
@@ -595,13 +613,15 @@ def _try_load_orphan_register_cache(
         return None
     fingerprint = compute_cord_register_fingerprint(config, probe)
     expected_shape = _expected_registration_shape(probe, config)
-    regvolpaths = _find_candidate_regvolpaths(
+    regvolpaths, diagnostics = _find_candidate_regvolpaths(
         cache_dir,
         config,
         n_channels=probe.n_channels,
         expected_shape=expected_shape,
     )
     if regvolpaths is None:
+        for diag in diagnostics:
+            emit_pipeline_message(f"Cache check: {diag}")
         return None
     emit_pipeline_message(
         "Using cached registration-grid sample TIFFs "
@@ -642,7 +662,7 @@ def _try_load_regopts_cache(
         n_channels=probe.n_channels,
         expected_shape=expected_shape,
     ):
-        candidate = _find_candidate_regvolpaths(
+        candidate, _diag = _find_candidate_regvolpaths(
             save_path / "cache",
             config,
             n_channels=probe.n_channels,
@@ -709,7 +729,7 @@ def manifest_register_fingerprint(
     if not _probe_inputs_unchanged(config, probe):
         return None
     expected_shape = _expected_registration_shape(probe, config)
-    regvolpaths = _find_candidate_regvolpaths(
+    regvolpaths, _diag = _find_candidate_regvolpaths(
         cache_dir,
         config,
         n_channels=probe.n_channels,
@@ -728,6 +748,12 @@ def load_or_cache_cord_registration(
     """Load the registration-grid sample volume, reusing cache when inputs are unchanged."""
     cache_dir = cord_cache_dir(config)
     save_path = cord_save_path(config)
+    resolution_label = int(round(config.registration.resolution_um))
+
+    emit_pipeline_message(
+        f"Preprocess: checking for cached registration volume "
+        f"(chan_1_sample_register_{resolution_label}um.tif)…"
+    )
 
     if not force:
         cached = _try_load_regopts_cache(config, save_path)
@@ -737,7 +763,7 @@ def load_or_cache_cord_registration(
         if cached is not None:
             return cached
         emit_pipeline_message(
-            "No valid registration-grid cache — loading raw sample TIFFs "
+            "No valid registration-grid cache found — loading raw sample TIFFs "
             "(see plane progress below)…"
         )
 
