@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -19,7 +20,10 @@ from lightsuite.gui.stage_controller import (
     require_magicgui,
     run_attached_stage,
 )
-from lightsuite.io.cord_registration_cache import load_or_cache_cord_registration
+from lightsuite.io.cord_registration_cache import (
+    load_or_cache_cord_registration,
+    manifest_register_fingerprint,
+)
 from lightsuite.preprocess.cord_checkpoint import CordRegOptsCheckpoint
 from lightsuite.registration.cord_orientation import (
     CAUDOROSTRAL,
@@ -35,6 +39,7 @@ console = Console()
 
 PANEL_GAP_X = 24
 _VALID_DIRECTIONS = (ROSTROCAUDAL, CAUDOROSTRAL)
+ORIENTATION_PREVIEW_FILENAME = "orientation_preview.npz"
 
 
 @dataclass
@@ -100,7 +105,84 @@ def _load_atlas_template(config: SpinalCordPipelineConfig) -> np.ndarray:
             return tifffile.imread(checkpoint.tv_path).astype(np.float32)
     volumes = load_fiederling_atlas_volumes(config.atlas)
     tv, _ = resize_fiederling_atlas(volumes, config.registration.resolution_um)
+    try:
+        cached.parent.mkdir(parents=True, exist_ok=True)
+        tifffile.imwrite(cached, tv.astype(np.float32))
+    except OSError:
+        pass
     return tv
+
+
+def _orientation_preview_path(config: SpinalCordPipelineConfig) -> Path:
+    return cord_cache_dir(config) / ORIENTATION_PREVIEW_FILENAME
+
+
+def _orientation_preview_key(config: SpinalCordPipelineConfig) -> dict[str, Any]:
+    return {
+        "register_fingerprint": manifest_register_fingerprint(config),
+        "atlas_dir": str(config.atlas.atlas_dir.expanduser().resolve()),
+        "channel_primary": int(config.registration.channel_primary),
+        "resolution_um": float(config.registration.resolution_um),
+    }
+
+
+def _resolve_stored_direction(config: SpinalCordPipelineConfig) -> str:
+    save_path = cord_save_path(config)
+    stored = load_cord_orientation(save_path)
+    if stored is None and config.registration.longitudinal_direction is not None:
+        stored = config.registration.longitudinal_direction
+    return stored if stored in _VALID_DIRECTIONS else ROSTROCAUDAL
+
+
+def _load_orientation_preview(config: SpinalCordPipelineConfig) -> CordOrientationData | None:
+    """Load cached longitudinal projections when register cache and atlas are unchanged."""
+    path = _orientation_preview_path(config)
+    if not path.is_file():
+        return None
+    if manifest_register_fingerprint(config) is None:
+        return None
+    try:
+        with np.load(path, allow_pickle=False) as archive:
+            stored_key = json.loads(str(archive["fingerprint_json"]))
+            if stored_key != _orientation_preview_key(config):
+                return None
+            return CordOrientationData(
+                sample_longitudinal=archive["sample_longitudinal"].astype(np.float32),
+                atlas_longitudinal=archive["atlas_longitudinal"].astype(np.float32),
+                direction=str(archive["direction"]),
+            )
+    except (OSError, ValueError, KeyError, json.JSONDecodeError):
+        return None
+
+
+def _save_orientation_preview(config: SpinalCordPipelineConfig, data: CordOrientationData) -> None:
+    path = _orientation_preview_path(config)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(
+        path,
+        fingerprint_json=json.dumps(_orientation_preview_key(config), sort_keys=True),
+        sample_longitudinal=data.sample_longitudinal.astype(np.float32),
+        atlas_longitudinal=data.atlas_longitudinal.astype(np.float32),
+        direction=np.array(data.direction),
+    )
+
+
+def _build_orientation_data_from_volumes(config: SpinalCordPipelineConfig) -> CordOrientationData:
+    registration = load_or_cache_cord_registration(config)
+    regchan = _primary_channel_index(config, registration.n_channels)
+    regvol = _longitudinal_last(registration.volume[:, :, :, regchan - 1].astype(np.float32))
+
+    atlas_vol = _load_atlas_template(config)
+    atlas_longitudinal = _longitudinal_max_projection(atlas_vol)
+    sample_longitudinal = _match_transverse_width(
+        _longitudinal_max_projection(regvol),
+        atlas_longitudinal.shape[1],
+    )
+    return CordOrientationData(
+        sample_longitudinal=sample_longitudinal,
+        atlas_longitudinal=atlas_longitudinal,
+        direction=_resolve_stored_direction(config),
+    )
 
 
 def cord_orientation_missing(config: SpinalCordPipelineConfig) -> bool:
@@ -132,28 +214,18 @@ def ensure_cord_orientation(
 
 def load_cord_orientation_check_data(config: SpinalCordPipelineConfig) -> CordOrientationData:
     """Load sample + atlas longitudinal max projections for orientation picking."""
-    registration = load_or_cache_cord_registration(config)
-    regchan = _primary_channel_index(config, registration.n_channels)
-    regvol = _longitudinal_last(registration.volume[:, :, :, regchan - 1].astype(np.float32))
+    preview = _load_orientation_preview(config)
+    if preview is not None:
+        preview.direction = _resolve_stored_direction(config)
+        console.print(
+            "[green]Using cached orientation preview[/green] "
+            f"({ORIENTATION_PREVIEW_FILENAME}; inputs unchanged)."
+        )
+        return preview
 
-    atlas_vol = _load_atlas_template(config)
-    atlas_longitudinal = _longitudinal_max_projection(atlas_vol)
-    sample_longitudinal = _match_transverse_width(
-        _longitudinal_max_projection(regvol),
-        atlas_longitudinal.shape[1],
-    )
-
-    save_path = cord_save_path(config)
-    stored = load_cord_orientation(save_path)
-    if stored is None and config.registration.longitudinal_direction is not None:
-        stored = config.registration.longitudinal_direction
-    direction = stored if stored in _VALID_DIRECTIONS else ROSTROCAUDAL
-
-    return CordOrientationData(
-        sample_longitudinal=sample_longitudinal,
-        atlas_longitudinal=atlas_longitudinal,
-        direction=direction,
-    )
+    data = _build_orientation_data_from_volumes(config)
+    _save_orientation_preview(config, data)
+    return data
 
 
 def attach_spinal_orientation(
