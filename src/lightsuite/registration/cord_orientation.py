@@ -24,6 +24,10 @@ CORD_DIRECTIONS = (ROSTROCAUDAL, CAUDOROSTRAL)
 CORD_ORIENTATION_FILENAME = "cord_orientation.txt"
 
 
+class CordOrientationRequiredError(FileNotFoundError):
+    """Raised when cord orientation must be confirmed before preprocess can finish."""
+
+
 def cord_orientation_path(save_path: Path) -> Path:
     return save_path.expanduser() / CORD_ORIENTATION_FILENAME
 
@@ -124,5 +128,5 @@ def resolve_cord_orientation(
             "GUI when needed), 'lightsuite spinal check-orientation', or set "
             "registration.longitudinal_direction in the YAML config."
         )
-        raise FileNotFoundError(msg)
+        raise CordOrientationRequiredError(msg)
     return ROSTROCAUDAL

@@ -209,8 +209,8 @@ def ensure_cord_orientation(
     """Resolve cord orientation, opening Napari when it has not been set yet."""
     save_path = cord_save_path(config)
     if not headless and cord_orientation_missing(config):
-        console.print(
-            "[bold]Cord orientation required[/bold] — opening Napari to set the "
+        emit_pipeline_message(
+            "Cord orientation required — opening Napari to set the "
             "rostrocaudal direction (writes cord_orientation.txt)."
         )
         run_spinal_orientation(config, headless=False)

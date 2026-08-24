@@ -12,7 +12,11 @@ from lightsuite.config.loader import load_spinal_config
 from lightsuite.gui.straighten_cord import run_spinal_straighten
 from lightsuite.preprocess.cord import preprocess_spinal_cord_sample
 from lightsuite.preprocess.cord_checkpoint import CordRegOptsCheckpoint, SpinalAlignmentCheckpoint
-from lightsuite.registration.cord_orientation import CAUDOROSTRAL, save_cord_orientation
+from lightsuite.registration.cord_orientation import (
+    CAUDOROSTRAL,
+    CordOrientationRequiredError,
+    save_cord_orientation,
+)
 
 
 def _ensure_fixtures(root: Path) -> None:
@@ -78,5 +82,20 @@ def test_spinal_preprocess_requires_orientation(tmp_path: Path) -> None:
     _ensure_fixtures(fixture_root)
     config_path = _write_config(tmp_path, fixture_root)
     cfg = load_spinal_config(config_path)
-    with pytest.raises(FileNotFoundError, match="cord_orientation.txt"):
+
+    # Preprocess runs downsampling first, builds cache and orientation preview,
+    # then raises CordOrientationRequiredError when orientation has not been set yet.
+    with pytest.raises(CordOrientationRequiredError, match="cord_orientation.txt"):
         preprocess_spinal_cord_sample(cfg, headless=True)
+
+    cache_dir = Path(cfg.sample.save_path) / "cache"
+    cached_tiff = cache_dir / "chan_1_sample_register_20um.tif"
+    preview_npz = cache_dir / "orientation_preview.npz"
+    assert cached_tiff.is_file(), "Preprocess must build registration cache before orientation check"
+    assert preview_npz.is_file(), "Preprocess must pre-cache orientation preview"
+
+    # Once orientation is saved, preprocess finishes using cached volume without re-downsampling
+    save_cord_orientation(cfg.sample.save_path, CAUDOROSTRAL)
+    result = preprocess_spinal_cord_sample(cfg, headless=True)
+    assert (Path(result.checkpoint.lsfolder) / "regopts.json").is_file()
+    assert result.checkpoint.tofliprc is True

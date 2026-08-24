@@ -59,6 +59,46 @@ def _brain_trim_range(ihigh: np.ndarray, tofliprc: bool, nz: int) -> list[int]:
     return ikeep
 
 
+def _cache_orientation_preview_if_needed(
+    config: SpinalCordPipelineConfig,
+    registration: Any,
+) -> None:
+    """Pre-cache orientation max projections so check-orientation opens instantly."""
+    from lightsuite.gui.orientation_cord import (
+        CordOrientationData,
+        _load_atlas_template,
+        _load_orientation_preview,
+        _longitudinal_last,
+        _longitudinal_max_projection,
+        _match_transverse_width,
+        _primary_channel_index,
+        _resolve_stored_direction,
+        _save_orientation_preview,
+    )
+
+    try:
+        if _load_orientation_preview(config) is not None:
+            return
+        regchan = _primary_channel_index(config, registration.n_channels)
+        regvol = _longitudinal_last(registration.volume[:, :, :, regchan - 1].astype(np.float32))
+        atlas_vol = _load_atlas_template(config)
+        atlas_longitudinal = _longitudinal_max_projection(atlas_vol)
+        sample_longitudinal = _match_transverse_width(
+            _longitudinal_max_projection(regvol),
+            atlas_longitudinal.shape[1],
+        )
+        _save_orientation_preview(
+            config,
+            CordOrientationData(
+                sample_longitudinal=sample_longitudinal,
+                atlas_longitudinal=atlas_longitudinal,
+                direction=_resolve_stored_direction(config),
+            ),
+        )
+    except Exception:
+        pass
+
+
 def preprocess_spinal_cord_sample(
     config: SpinalCordPipelineConfig,
     *,
@@ -69,14 +109,6 @@ def preprocess_spinal_cord_sample(
     save_path = cord_save_path(config)
     cache_dir = cord_cache_dir(config)
     save_path.mkdir(parents=True, exist_ok=True)
-
-    emit_pipeline_message(f"Preprocess: resolving longitudinal orientation for {config.sample.name}…")
-    direction = ensure_cord_orientation(config, headless=headless)
-    tofliprc = tofliprc_from_direction(direction)
-    emit_pipeline_message(
-        f"Preprocess: longitudinal orientation {direction} "
-        f"(tofliprc={tofliprc}; from cord_orientation.txt or YAML)"
-    )
 
     check_stage_cancelled()
     emit_pipeline_message(
@@ -94,6 +126,17 @@ def preprocess_spinal_cord_sample(
         emit_pipeline_message(
             f"Preprocess: built registration-grid sample in {format_duration(load_elapsed)}"
         )
+
+    _cache_orientation_preview_if_needed(config, registration)
+
+    check_stage_cancelled()
+    emit_pipeline_message(f"Preprocess: resolving longitudinal orientation for {config.sample.name}…")
+    direction = ensure_cord_orientation(config, headless=headless)
+    tofliprc = tofliprc_from_direction(direction)
+    emit_pipeline_message(
+        f"Preprocess: longitudinal orientation {direction} "
+        f"(tofliprc={tofliprc}; from cord_orientation.txt or YAML)"
+    )
 
     finvol = registration.volume
     sampleres = normalize_res_um(config.sample.voxel_um)
