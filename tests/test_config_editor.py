@@ -420,6 +420,22 @@ def test_spinal_form_roundtrip_control_point_and_import() -> None:
     assert updated["import"]["annotations"][0]["path"] == "/mask.tif"
 
 
+def test_spinal_form_always_enables_parcellate_intensities() -> None:
+    raw = {
+        "sample": {
+            "name": "cord",
+            "source": {"format": "tiff_stack", "path": "/data", "tiff_type": "planeperfile"},
+            "scratch": "/scratch",
+            "save_path": "/out",
+            "voxel_um": [1.8, 1.8, 1.8],
+        },
+        "atlas": {"atlas_dir": "/atlas"},
+        "analysis": {"parcellate_intensities": False},
+    }
+    updated = spinal_form_to_raw(spinal_form_from_raw(raw), raw)
+    assert updated["analysis"]["parcellate_intensities"] is True
+
+
 def test_multires_form_roundtrip_geometry_and_registration() -> None:
     raw = {
         "sample": {"name": "tg14", "save_path": "/out", "scratch": "/scratch"},

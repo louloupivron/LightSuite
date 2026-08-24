@@ -428,9 +428,6 @@ class ConfigEditorDock:
         stats_layout.addStretch(1)
         self._analysis_stats_spaces_wrapper = stats_host
         self._config_form.addRow("Stats spaces", stats_host)
-        self._parcellate_intensities_check = QCheckBox("Parcellate channel intensities")
-        self._parcellate_intensities_check.stateChanged.connect(self._mark_dirty)
-        self._config_form.addRow(self._parcellate_intensities_check)
         self._workers = self._int_spin(1, 64, self._mark_dirty)
         self._config_form.addRow("Workers", self._workers)
         self._pair_label_edit = self._line_edit(self._mark_dirty)
@@ -668,7 +665,6 @@ class ConfigEditorDock:
             self._update_converter_field_visibility()
         self._set_form_row_visible(form, self._analysis_metrics_wrapper, is_brain or is_spinal)
         self._set_form_row_visible(form, self._analysis_stats_spaces_wrapper, is_brain or is_spinal)
-        self._set_form_row_visible(form, self._parcellate_intensities_check, is_spinal)
 
         self._set_form_row_visible(form, self._workers, True)
 
@@ -800,7 +796,6 @@ class ConfigEditorDock:
                 (self._converter_voxel_widget, "converter_voxel_um"),
                 (self._converter_custom_entry, "converter_custom"),
                 (self._import_annotations_wrapper, "import_annotations"),
-                (self._parcellate_intensities_check, "parcellate_intensities"),
             ]
             for field, key in spinal_fields:
                 self._set_field_tooltip(field, tips.get(key, ""))
@@ -953,7 +948,6 @@ class ConfigEditorDock:
             )
             self._fill_intensity_metrics(state.intensity_metrics)
             self._fill_stats_spaces(state.stats_spaces)
-            self._parcellate_intensities_check.setChecked(state.parcellate_intensities)
             self._workers.setValue(state.workers)
         else:
             state = multires_form_from_raw(raw)
@@ -1522,7 +1516,6 @@ class ConfigEditorDock:
                 import_annotations=self._collect_import_annotations(),
                 intensity_metrics=self._collect_intensity_metrics(),
                 stats_spaces=self._collect_stats_spaces(),
-                parcellate_intensities=self._parcellate_intensities_check.isChecked(),
                 workers=self._workers.value(),
             )
             return spinal_form_to_raw(state, self._raw)

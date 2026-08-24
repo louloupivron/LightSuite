@@ -386,7 +386,6 @@ class SpinalFormState:
     import_annotations: list[AnnotationImportRow] = field(default_factory=list)
     intensity_metrics: list[str] = field(default_factory=lambda: list(DEFAULT_INTENSITY_METRICS))
     stats_spaces: list[str] = field(default_factory=lambda: ["atlas"])
-    parcellate_intensities: bool = True
     workers: int = 4
 
 
@@ -755,7 +754,6 @@ def spinal_form_from_raw(raw: dict[str, Any]) -> SpinalFormState:
         import_annotations=import_annotations_from_raw(raw),
         intensity_metrics=_analysis_intensity_metrics_from_raw(raw),
         stats_spaces=_analysis_stats_spaces_from_raw(raw),
-        parcellate_intensities=bool(analysis.get("parcellate_intensities", True)),
         workers=int(compute.get("workers") or 4),
     )
 
@@ -803,7 +801,7 @@ def spinal_form_to_raw(state: SpinalFormState, raw: dict[str, Any]) -> dict[str,
         out,
         intensity_metrics=state.intensity_metrics,
         stats_spaces=state.stats_spaces,
-        parcellate_intensities=state.parcellate_intensities,
+        parcellate_intensities=True,
     )
     return _apply_import_to_raw(
         state.import_converter,
