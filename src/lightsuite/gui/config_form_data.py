@@ -9,7 +9,10 @@ from typing import Any
 
 import yaml
 
-from lightsuite.analysis.intensity_metrics import DEFAULT_INTENSITY_METRICS, normalize_intensity_metrics
+from lightsuite.analysis.intensity_metrics import (
+    DEFAULT_INTENSITY_METRICS,
+    normalize_intensity_metrics,
+)
 from lightsuite.atlas.brainglobe_backend import (
     brainglobe_name_for_yaml,
     find_brainglobe_catalog_entry,
@@ -71,7 +74,9 @@ def import_segmentation_enabled_from_raw(raw: dict[str, Any]) -> bool:
     suite = str(conv.get("suite") or "native").strip().lower()
     if suite != "native":
         return True
-    return bool(str(conv.get("source") or "").strip() or str(conv.get("custom_entry") or "").strip())
+    return bool(
+        str(conv.get("source") or "").strip() or str(conv.get("custom_entry") or "").strip()
+    )
 
 
 def import_converter_from_raw(raw: dict[str, Any]) -> AnnotationConverterState:
@@ -514,9 +519,25 @@ def load_raw_config(path: Path, *, workflow_hint: str | None = None) -> tuple[st
     return workflow, raw
 
 
+class _ConfigYamlDumper(yaml.SafeDumper):
+    """Dumper that keeps short numeric lists inline (``lateral_flip``, ``voxel_um``)."""
+
+
+def _represent_config_list(dumper: yaml.SafeDumper, data: list[Any]) -> Any:
+    use_flow = (
+        bool(data)
+        and len(data) <= 3
+        and all(isinstance(item, (int, float)) and not isinstance(item, bool) for item in data)
+    )
+    return dumper.represent_sequence("tag:yaml.org,2002:seq", data, flow_style=use_flow)
+
+
+_ConfigYamlDumper.add_representer(list, _represent_config_list)
+
+
 def dump_config_dict(data: dict[str, Any]) -> str:
     """Serialize a config mapping to YAML text."""
-    text = yaml.safe_dump(data, sort_keys=False, default_flow_style=False)
+    text = yaml.dump(data, Dumper=_ConfigYamlDumper, sort_keys=False, default_flow_style=False)
     return text if text.endswith("\n") else text + "\n"
 
 

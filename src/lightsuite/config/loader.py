@@ -274,6 +274,23 @@ def _find_child_section(
     return None
 
 
+def _lateral_flip_span_end(lines: list[str], key_idx: int, end: int, value: str) -> int:
+    """Return the exclusive end of a scalar or block-list ``lateral_flip`` entry."""
+    span_end = key_idx + 1
+    stripped_value = value.strip()
+    if stripped_value and not stripped_value.startswith("#"):
+        return span_end
+    list_item_re = re.compile(r"^\s+-\s+")
+    while span_end < end and list_item_re.match(lines[span_end].rstrip("\n\r")):
+        span_end += 1
+    return span_end
+
+
+def _count_lateral_flip_keys(lines: list[str], start: int, end: int) -> int:
+    key_re = re.compile(r"^\s*lateral_flip\s*:")
+    return sum(1 for index in range(start, end) if key_re.match(lines[index].rstrip("\n\r")))
+
+
 def _set_lateral_flip_in_range(
     lines: list[str],
     start: int,
@@ -282,16 +299,36 @@ def _set_lateral_flip_in_range(
     *,
     default_indent: int,
 ) -> None:
+    """Write one inline ``lateral_flip``; replace block lists and drop duplicates.
+
+    Config Save dumps ``lateral_flip`` as a block list (``key:\\n- 1\\n- -1``). The
+    previous rewriter only matched ``lateral_flip: [1, -1]`` on one line, so Apply
+    to YAML inserted a second key. YAML keeps the last duplicate, so the GUI flip
+    was ignored.
+    """
     flip_value = _format_yaml_list([int(lateral_flip[0]), int(lateral_flip[1])])
-    lateral_re = re.compile(r"^(\s*)lateral_flip:\s*.+$")
-    for index in range(start, end):
-        match = lateral_re.match(lines[index].rstrip("\n\r"))
+    key_re = re.compile(r"^(\s*)lateral_flip:\s*(.*)$")
+    spans: list[tuple[int, int, str]] = []
+    index = start
+    while index < end:
+        match = key_re.match(lines[index].rstrip("\n\r"))
         if match is None:
+            index += 1
             continue
-        newline = "\n" if lines[index].endswith("\n") else ""
-        lines[index] = f"{match.group(1)}lateral_flip: {flip_value}" + newline
+        span_end = _lateral_flip_span_end(lines, index, end, match.group(2))
+        spans.append((index, span_end, match.group(1)))
+        index = span_end
+
+    if not spans:
+        lines.insert(start, f"{' ' * default_indent}lateral_flip: {flip_value}\n")
         return
-    lines.insert(start, f"{' ' * default_indent}lateral_flip: {flip_value}\n")
+
+    first_start, first_end, indent = spans[0]
+    newline = "\n" if lines[first_start].endswith("\n") else ""
+    for extra_start, extra_end, _extra_indent in reversed(spans[1:]):
+        del lines[extra_start:extra_end]
+    del lines[first_start + 1 : first_end]
+    lines[first_start] = f"{indent}lateral_flip: {flip_value}" + newline
 
 
 def save_mesospim_lateral_flip_to_multires_config(
@@ -362,8 +399,7 @@ def save_mesospim_lateral_flip_to_multires_config(
             if vol_idx is None:
                 lines.insert(
                     geo_end,
-                    f"{' ' * vol_indent}{volume}:\n"
-                    f"{' ' * flip_indent}lateral_flip: {flip_value}\n",
+                    f"{' ' * vol_indent}{volume}:\n{' ' * flip_indent}lateral_flip: {flip_value}\n",
                 )
                 continue
             vol_end = _section_content_end(lines, vol_idx)
@@ -374,6 +410,25 @@ def save_mesospim_lateral_flip_to_multires_config(
                 (fx, fy),
                 default_indent=flip_indent,
             )
+
+    multires_end = _section_content_end(lines, multires_idx)
+    geo_idx = _find_child_section(
+        lines,
+        multires_idx + 1,
+        multires_end,
+        "mesospim_geometry",
+        indent=child_indent,
+    )
+    if geo_idx is None:
+        msg = f"Failed to write mesospim_geometry in {path}"
+        raise RuntimeError(msg)
+    n_keys = _count_lateral_flip_keys(lines, geo_idx + 1, _section_content_end(lines, geo_idx))
+    if n_keys != 2:
+        msg = (
+            "Refusing to write duplicate or missing lateral_flip keys "
+            f"(found {n_keys} in mesospim_geometry; expected 2)."
+        )
+        raise RuntimeError(msg)
 
     path.write_text("".join(lines), encoding="utf-8")
     load_multires_config(path)
@@ -525,4 +580,3 @@ def save_reference_channel_to_multires_config(
     path.write_text("".join(lines), encoding="utf-8")
     load_multires_config(path)
     return path
-
