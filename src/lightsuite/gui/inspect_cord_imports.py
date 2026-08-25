@@ -196,12 +196,19 @@ def add_cord_view_layers(
         opacity=0.45,
     )
     if space == "sample" and volumes.hemisphere is not None:
-        viewer.add_labels(
+        # Add visible first so napari registers a vispy visual. Passing
+        # visible=False into add_labels can leave the layer in viewer.layers
+        # without a layer_to_visual entry; later atlas/sample switches then
+        # KeyError inside VispyCanvas._reorder_layers.
+        hem_layer = viewer.add_labels(
             volume_yxz_to_napari_zyx(volumes.hemisphere),
             name="hemisphere (warped)",
             opacity=0.2,
-            visible=False,
         )
+        try:
+            hem_layer.visible = False
+        except (KeyError, LookupError):
+            pass
     if volumes.point_layers:
         _add_point_layers(viewer, volumes.point_layers)
 

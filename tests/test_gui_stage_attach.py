@@ -127,6 +127,45 @@ def test_clear_viewer_layers_safely_hides_text_before_clear() -> None:
     layers.clear.assert_called_once()
 
 
+def test_clear_viewer_layers_safely_ignores_vispy_keyerror() -> None:
+    """Hiding a layer can KeyError when vispy's layer_to_visual map is stale."""
+
+    class _BrokenLayer:
+        text = None
+
+        @property
+        def visible(self) -> bool:
+            return True
+
+        @visible.setter
+        def visible(self, _value: bool) -> None:
+            raise KeyError("hemisphere (warped)")
+
+    viewer = MagicMock()
+    layer = _BrokenLayer()
+    layers = MagicMock()
+    layers.__iter__.return_value = iter([layer])
+    viewer.layers = layers
+    clear_viewer_layers_safely(viewer)
+    layers.clear.assert_called_once()
+
+
+def test_clear_viewer_layers_safely_removes_leftover_after_clear_keyerror() -> None:
+    remaining: list[MagicMock] = []
+    layer = MagicMock()
+    layer.text = None
+    remaining.append(layer)
+    viewer = MagicMock()
+    layers = MagicMock()
+    layers.__iter__.side_effect = lambda: iter(list(remaining))
+    layers.clear.side_effect = KeyError("hemisphere (warped)")
+    layers.remove.side_effect = remaining.remove
+    viewer.layers = layers
+    clear_viewer_layers_safely(viewer)
+    layers.clear.assert_called_once()
+    layers.remove.assert_called_once_with(layer)
+
+
 def test_dock_stage_controller_mount_calls_refresh() -> None:
     viewer = MagicMock()
     refresh = MagicMock()

@@ -146,28 +146,64 @@ def remove_dock_widget(viewer: Any, widget: Any, *, dock_handle: Any = None) -> 
             return
 
 
+_LAYER_CLEAR_ERRORS = (
+    AttributeError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+    KeyError,
+    LookupError,
+)
+
+
+def _layer_event_blocker(layer: Any) -> Any:
+    """Return a context manager that blocks vispy-facing layer events, if any."""
+    events = getattr(layer, "events", None)
+    if events is None:
+        return None
+    blocker_all = getattr(events, "blocker_all", None)
+    if callable(blocker_all):
+        return blocker_all()
+    blocker = getattr(events, "blocker", None)
+    if callable(blocker):
+        return blocker()
+    return None
+
+
+def _hide_layer_for_clear(layer: Any) -> None:
+    """Hide a layer without notifying vispy, which can KeyError on a stale visual map."""
+    text = getattr(layer, "text", None)
+    if text is not None:
+        try:
+            text.visible = False
+        except _LAYER_CLEAR_ERRORS:
+            pass
+    blocker = _layer_event_blocker(layer)
+    try:
+        if blocker is not None:
+            with blocker:
+                layer.visible = False
+        else:
+            layer.visible = False
+    except _LAYER_CLEAR_ERRORS:
+        pass
+
+
 def clear_viewer_layers_safely(viewer: Any) -> None:
     """Remove napari layers without tripping vispy Text draw races on teardown."""
     layers = list(getattr(viewer, "layers", ()))
     for layer in layers:
-        text = getattr(layer, "text", None)
-        if text is not None:
-            try:
-                text.visible = False
-            except (AttributeError, RuntimeError, TypeError, ValueError):
-                pass
-        try:
-            layer.visible = False
-        except (AttributeError, RuntimeError, TypeError, ValueError):
-            pass
+        _hide_layer_for_clear(layer)
     try:
         viewer.layers.clear()
-    except (AttributeError, RuntimeError, TypeError, ValueError):
-        for layer in layers:
-            try:
-                viewer.layers.remove(layer)
-            except (LookupError, AttributeError, RuntimeError, TypeError, ValueError):
-                pass
+    except _LAYER_CLEAR_ERRORS:
+        pass
+    leftover = list(getattr(viewer, "layers", ()))
+    for layer in leftover:
+        try:
+            viewer.layers.remove(layer)
+        except _LAYER_CLEAR_ERRORS:
+            pass
 
 
 def defer_clear_viewer_layers(viewer: Any) -> None:
