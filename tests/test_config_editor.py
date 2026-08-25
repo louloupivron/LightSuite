@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from lightsuite.atlas.brainglobe_backend import BrainGlobeAtlasEntry
 from lightsuite.config.loader import parse_config_yaml, write_config_yaml
 from lightsuite.exceptions import LightsuiteConfigError
 from lightsuite.gui.config_form_data import (
@@ -14,6 +15,7 @@ from lightsuite.gui.config_form_data import (
     brain_form_from_raw,
     brain_form_to_raw,
     default_local_atlas_resolution_um,
+    dump_config_dict,
     import_annotations_from_raw,
     import_annotations_to_raw,
     load_template_raw,
@@ -26,7 +28,6 @@ from lightsuite.gui.config_form_data import (
     spinal_form_to_raw,
     try_validate_config_dict,
 )
-from lightsuite.atlas.brainglobe_backend import BrainGlobeAtlasEntry
 
 
 def test_parse_config_yaml_rejects_empty() -> None:
@@ -446,8 +447,27 @@ def test_merge_yaml_only_multires_fields_keeps_inspect_geometry_flip() -> None:
     assert saved["multires"]["mesospim_geometry"]["roi"]["lateral_flip"] == [-1, -1]
 
 
+def test_dump_config_dict_keeps_lateral_flip_inline() -> None:
+    text = dump_config_dict(
+        {
+            "multires": {
+                "mesospim_geometry": {
+                    "overview": {"lateral_flip": [-1, -1]},
+                    "roi": {"lateral_flip": [-1, -1]},
+                },
+                "registration": {"elastix_stages": ["translation", "rigid"]},
+            }
+        }
+    )
+    assert "lateral_flip: [-1, -1]" in text
+    assert "elastix_stages:" in text
+    assert "- translation" in text
+
+
 def test_import_annotations_to_raw_clears_empty_rows() -> None:
-    raw = {"import": {"write_csv": True, "annotations": [{"format": "points_csv", "path": "/a.csv"}]}}
+    raw = {
+        "import": {"write_csv": True, "annotations": [{"format": "points_csv", "path": "/a.csv"}]}
+    }
     rows = import_annotations_from_raw(raw)
     updated = import_annotations_to_raw(
         [rows[0], rows[0].__class__(format="points_csv", path="", label="")],

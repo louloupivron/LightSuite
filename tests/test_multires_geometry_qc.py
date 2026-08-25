@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import math
+import re
 from pathlib import Path
 
 import numpy as np
+import pytest
 import tifffile
 import yaml
 
@@ -186,9 +188,59 @@ def test_save_mesospim_lateral_flip_updates_existing_block(tmp_path: Path) -> No
 
     saved = save_mesospim_lateral_flip_to_multires_config(config_path, (1, -1))
     text = saved.read_text(encoding="utf-8")
+    assert text.count("lateral_flip:") == 2
     assert "lateral_flip: [1, -1]" in text
+    assert re.search(r"lateral_flip:\s*$", text, re.MULTILINE) is None
     cfg = load_multires_config(saved)
     assert lateral_flip_from_config(cfg) == (1, -1)
+
+
+def test_save_mesospim_lateral_flip_replaces_duplicate_keys(tmp_path: Path) -> None:
+    """Config Save dumps block lists; Apply to YAML used to insert a second key."""
+    overview = tmp_path / "overview.tif"
+    roi = tmp_path / "roi.tif"
+    _write_stack(overview, (5, 16, 16))
+    _write_stack(roi, (5, 16, 16))
+    _write_meta(meta_path_for_tiff(overview))
+    _write_meta(meta_path_for_tiff(roi))
+    config_path = tmp_path / "multires.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "sample:",
+                "  name: sample",
+                f"  save_path: {tmp_path / 'out'}",
+                "multires:",
+                "  pair_label: test",
+                "  mesospim_geometry:",
+                "    overview:",
+                "      lateral_flip: [-1, -1]",
+                "      lateral_flip:",
+                "      - 1",
+                "      - -1",
+                "    roi:",
+                "      lateral_flip: [-1, -1]",
+                "      lateral_flip:",
+                "      - 1",
+                "      - -1",
+                "  channels:",
+                "    '488':",
+                f"      overview: {overview}",
+                f"      roi: {roi}",
+                "  registration:",
+                "    reference_channel: '488'",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    saved = save_mesospim_lateral_flip_to_multires_config(config_path, (-1, -1))
+    text = saved.read_text(encoding="utf-8")
+    assert text.count("lateral_flip:") == 2
+    assert text.count("lateral_flip: [-1, -1]") == 2
+    cfg = load_multires_config(saved)
+    assert lateral_flip_from_config(cfg) == (-1, -1)
 
 
 def test_save_mesospim_lateral_flip_inserts_missing_block(tmp_path: Path) -> None:
@@ -219,8 +271,50 @@ def test_save_mesospim_lateral_flip_inserts_missing_block(tmp_path: Path) -> Non
     )
 
     saved = save_mesospim_lateral_flip_to_multires_config(config_path, (-1, 1))
+    text = saved.read_text(encoding="utf-8")
+    assert text.count("lateral_flip:") == 2
+    assert re.search(r"lateral_flip:\s*$", text, re.MULTILINE) is None
     cfg = load_multires_config(saved)
     assert lateral_flip_from_config(cfg) == (-1, 1)
+
+
+def test_config_save_then_apply_yaml_does_not_duplicate_lateral_flip(tmp_path: Path) -> None:
+    """GUI Config Save then inspect-geometry Apply to YAML must keep one key per volume."""
+    from lightsuite.gui.config_form_data import dump_config_dict
+
+    overview = tmp_path / "overview.tif"
+    roi = tmp_path / "roi.tif"
+    _write_stack(overview, (5, 16, 16))
+    _write_stack(roi, (5, 16, 16))
+    _write_meta(meta_path_for_tiff(overview))
+    _write_meta(meta_path_for_tiff(roi))
+    config_path = tmp_path / "multires.yaml"
+    config_path.write_text(
+        dump_config_dict(
+            {
+                "sample": {"name": "sample", "save_path": str(tmp_path / "out")},
+                "multires": {
+                    "pair_label": "test",
+                    "vendor": {"suite": "mesospim"},
+                    "channels": {"488": {"overview": str(overview), "roi": str(roi)}},
+                    "mesospim_geometry": {
+                        "overview": {"lateral_flip": [-1, 1]},
+                        "roi": {"lateral_flip": [-1, 1]},
+                    },
+                    "registration": {"reference_channel": "488"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    saved = save_mesospim_lateral_flip_to_multires_config(config_path, (-1, -1))
+    text = saved.read_text(encoding="utf-8")
+    assert text.count("lateral_flip:") == 2
+    assert text.count("lateral_flip: [-1, -1]") == 2
+    assert re.search(r"lateral_flip:\s*$", text, re.MULTILINE) is None
+    cfg = load_multires_config(saved)
+    assert lateral_flip_from_config(cfg) == (-1, -1)
 
 
 def test_headless_write_config(tmp_path: Path) -> None:
