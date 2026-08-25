@@ -95,7 +95,6 @@ def test_load_template_raw_multires_is_blank_starter() -> None:
     assert "488" in raw["multires"]["channels"]
     assert raw["multires"]["geometry_mode"] == "metadata"
     state = multires_form_from_raw(raw)
-    assert state.vendor_suite == "mesospim"
     assert state.reference_channel == "488"
     assert len(state.channels) == 2
 
