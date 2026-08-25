@@ -27,6 +27,7 @@ from lightsuite.gui.config_form_data import (
     dump_config_dict,
     load_raw_config,
     load_template_raw,
+    merge_yaml_only_multires_fields,
     multires_form_from_raw,
     multires_form_to_raw,
     parse_orientation_text,
@@ -1289,6 +1290,7 @@ class ConfigEditorDock:
         if self._workflow is None:
             self._on_log("No config loaded in the editor.")
             return
+        self._merge_yaml_only_fields_from_disk(path)
         raw = self._collect_raw()
         text = dump_config_dict(raw)
         try:
@@ -1313,3 +1315,19 @@ class ConfigEditorDock:
         workflow, config = validation
         self._status_label.setText(f"Saved and validated ({workflow}, {config.sample.name}).")
         self._on_saved(self._config_path)
+
+    def _merge_yaml_only_fields_from_disk(self, path: Path) -> None:
+        """Pull inspect-geometry YAML (lateral_flip) into the editor before Save."""
+        if self._workflow != "multires":
+            return
+        source = path if path.is_file() else self._config_path
+        if source is None:
+            return
+        source = Path(source)
+        if not source.is_file():
+            return
+        try:
+            _workflow, disk = load_raw_config(source)
+        except LightsuiteConfigError:
+            return
+        self._raw = merge_yaml_only_multires_fields(self._raw, disk)

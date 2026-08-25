@@ -625,6 +625,11 @@ class LightsuiteShell:
             self.log(f"Stage {stage_id!r} is not interactive.")
             return
         self._teardown_active_stage()
+        # Reload YAML so inspect-geometry Apply-to-YAML (lateral_flip) is visible
+        # to match-points and other stages that rebuild the pair manifest.
+        self.refresh_statuses()
+        if self.project is None:
+            return
         self._opening_stage = True
         self._stage_cancel_event = threading.Event()
         self._set_running(True)
@@ -637,6 +642,7 @@ class LightsuiteShell:
             force_preprocess=False,
             on_log=self._emit_log,
             cancel_event=self._stage_cancel_event,
+            on_config_file_changed=self.refresh_statuses,
         )
         config = self.project.config
         busy_controller: Any = None

@@ -80,7 +80,12 @@ def _multires_match_points(viewer: Any, config: Any, ctx: StageContext) -> Stage
 def _multires_inspect_geometry_attach(viewer: Any, config: Any, ctx: StageContext) -> StageController:
     from lightsuite.gui.inspect_geometry_multires import attach_multires_inspect_geometry
 
-    return attach_multires_inspect_geometry(viewer, config, config_path=ctx.config_path)
+    return attach_multires_inspect_geometry(
+        viewer,
+        config,
+        config_path=ctx.config_path,
+        on_config_file_changed=ctx.on_config_file_changed,
+    )
 
 
 def _multires_inspect_registration_attach(viewer: Any, config: Any, ctx: StageContext) -> StageController:
