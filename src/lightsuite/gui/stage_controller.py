@@ -224,7 +224,9 @@ class DockStageController:
             self._refresh_fn()
 
     def teardown(self, viewer: Any) -> None:
-        """Remove dock widgets and run optional cleanup before switching stages."""
+        """Run optional cleanup first so canvas callbacks cannot touch deleted Qt widgets."""
+        if self._teardown_fn is not None:
+            self._teardown_fn()
         if self._dock_handles:
             pairs = list(zip(self.dock_widgets, self._dock_handles, strict=False))
             for (widget, _name), handle in reversed(pairs):
@@ -233,8 +235,6 @@ class DockStageController:
             for widget, _name in reversed(self.dock_widgets):
                 remove_dock_widget(viewer, widget)
         self._dock_handles.clear()
-        if self._teardown_fn is not None:
-            self._teardown_fn()
 
 
 def run_attached_stage(
