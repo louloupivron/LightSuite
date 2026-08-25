@@ -138,18 +138,27 @@ def configure_z_index_spinbox(
     *,
     blocked: Callable[[], bool] | None = None,
 ) -> None:
-    """Defer Z navigation until Enter or focus leaves the spinbox line edit."""
+    """Apply Z navigation when the committed plane changes.
+
+    ``keyboardTracking=False`` avoids a refresh on every typed digit. Arrow
+    buttons, Enter, and focus-out emit ``valueChanged`` and refresh the slices.
+    """
     native = spinbox_native(spinbox)
     if native is None:
         return
     if hasattr(native, "setKeyboardTracking"):
         native.setKeyboardTracking(False)
 
-    def _commit() -> None:
+    def _commit(*_args: object) -> None:
         if blocked is not None and blocked():
             return
         on_commit()
 
+    if hasattr(native, "valueChanged"):
+        try:
+            native.valueChanged[int].connect(_commit)
+        except (TypeError, KeyError, AttributeError):
+            native.valueChanged.connect(_commit)
     if hasattr(native, "editingFinished"):
         native.editingFinished.connect(_commit)
     line_edit = native.lineEdit() if hasattr(native, "lineEdit") else None
