@@ -149,9 +149,10 @@ LightSuite configs are YAML files validated by Pydantic models in `src/lightsuit
 | `analysis.relative_intensity_to` | YAML | YAML | — | `none` | Spinal: `none` or `background` → adds `relative_median_intensity` |
 | `analysis.point_labels` | YAML | YAML | — | all | Filter import labels for counting (stem of `*_atlas_coords.npz`) |
 | `analysis.stats_spaces` | GUI | GUI | — | `[atlas]` | Write stats in `atlas` and/or `sample` space |
-| `analysis.split_hemispheres` | YAML | YAML | — | `false` | Spinal: left/right using `Hemisphere_Annotation.tif` |
 | `analysis.hemisphere_flip` | YAML | YAML | — | `false` | Swap L/R for Fiederling hemisphere mask |
-| `analysis.hemisphere_keep_whole` | YAML | YAML | — | `false` | Also emit whole-cord rows when splitting hemispheres |
+| `analysis.hemisphere_keep_whole` | YAML | YAML | — | `true` | Also emit whole-cord rows alongside left/right |
+| `analysis.top_n_regions` | YAML | YAML | — | `10` | Write `region_stats_top{N}.csv` (0 disables) |
+| `analysis.top_n_rank_by` | YAML | YAML | — | per channel: `cell_count` if present else first intensity metric | Preferred ranking metric for the top-N CSV |
 
 **GUI intensity metric checkboxes:** Median, Mean, Std, Variance, Volume mm³.
 

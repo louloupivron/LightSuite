@@ -8,12 +8,13 @@ import numpy as np
 import pandas as pd
 import tifffile
 
+from lightsuite.analysis.cord_hemisphere import REGISTERED_HEMISPHERE_FILENAME
 from lightsuite.analysis.cord_runner import (
     cord_analysis_requested,
     resolve_cord_stats_spaces,
     run_cord_region_stats,
 )
-from lightsuite.config.models import CordAtlasConfig, CordRegistrationConfig, CordSampleConfig, SpinalCordPipelineConfig
+from lightsuite.config.models import AnalysisConfig, CordAtlasConfig, CordRegistrationConfig, CordSampleConfig, SpinalCordPipelineConfig
 from lightsuite.export.cord_registered import REGISTERED_ANNOTATION_FILENAME
 
 
@@ -82,12 +83,55 @@ def test_run_cord_region_stats_intensity_only(tmp_path: Path) -> None:
     df = pd.read_csv(result.combined_path)
     assert "median_intensity" in df["metric"].values
     assert (df["segment"] == "C1").any()
+    assert set(df["hemisphere"].astype(str).unique()) == {"whole"}
     assert result.top_n_path is not None
     assert result.top_n_path.name == "region_stats_top10.csv"
     assert result.top_n_path.parent.name == "stats"
     top = pd.read_csv(result.top_n_path)
     assert "rank" in top.columns
     assert "segment" in top.columns
+
+
+def test_run_cord_region_stats_splits_hemispheres_when_mask_present(tmp_path: Path) -> None:
+    atlas_dir = tmp_path / "atlas"
+    atlas_dir.mkdir()
+    (atlas_dir / "Template.tif").write_bytes(b"")
+    (atlas_dir / "Annotation.tif").write_bytes(b"")
+    pd.DataFrame({"Segment": ["C1"], "Start": [1], "End": [2]}).to_csv(
+        atlas_dir / "Segments.csv", index=False
+    )
+    pd.DataFrame(
+        {
+            "id": [1, 7, 71, 90, 130, 201],
+            "name": ["Root", "Region7", "Gray Matter", "Dorsal horn", "White matter", "Lamina I Combined"],
+            "acronym": ["SC", "a7", "GM", "DH", "WM", "Lamina_I"],
+            "parent_ID": [0, 90, 1, 71, 1, 90],
+            "parent_acronym": ["", "DH", "SC", "GM", "SC", "DH"],
+            "children_IDs": ["", "", "7", "", "", "7"],
+        }
+    ).to_csv(atlas_dir / "Atlas_Regions.csv", index=False)
+
+    config = _minimal_config(tmp_path)
+    hemisphere = np.zeros((4, 4, 2), dtype=np.uint8)
+    hemisphere[:2, :, :] = 255
+    tifffile.imwrite(
+        config.sample.save_path / "volume_registered" / REGISTERED_HEMISPHERE_FILENAME,
+        hemisphere,
+        imagej=True,
+    )
+    result = run_cord_region_stats(
+        config,
+        count_points=False,
+        parcellate_intensities=True,
+    )
+    df = pd.read_csv(result.combined_path)
+    assert {"left", "right", "whole"}.issubset(set(df["hemisphere"].astype(str).unique()))
+
+
+def test_analysis_config_ignores_legacy_split_hemispheres_field() -> None:
+    analysis = AnalysisConfig.model_validate({"split_hemispheres": False})
+    assert not hasattr(analysis, "split_hemispheres")
+    assert analysis.hemisphere_keep_whole is True
 
 
 def test_resolve_cord_stats_spaces_intersects_export(tmp_path: Path) -> None:

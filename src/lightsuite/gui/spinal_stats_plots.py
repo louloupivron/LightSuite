@@ -10,20 +10,34 @@ import pandas as pd
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 
 from lightsuite.analysis.cord_heatmap import (
-    MetricName,
+    DIFFERENCE_CMAP,
+    build_cord_heatmap_comparison_figure,
     build_cord_heatmap_figure,
+    cord_hemisphere_matrices,
     cord_stats_to_matrix,
     default_heatmap_output_path,
-    default_paper_segments,
+    default_segment_range_bounds,
+    difference_color_limits,
+    difference_heatmap_matrix,
     discover_cord_plot_options,
     ensure_cord_rollups_in_dataframe,
+    load_segment_order,
     metric_label,
-    plot_cord_heatmap,
-    resolve_cord_rollup_columns,
+    parse_segment_range,
     resolve_region_stats_path,
+    structure_acronym_to_label,
+    write_cord_heatmap_compare_csv,
+    write_cord_heatmap_matrix_csv,
 )
 from lightsuite.config.models import SpinalCordPipelineConfig
 from lightsuite.gui.stage_controller import DockStageController, run_attached_stage
+
+_X_LABELS_BY_ROLLUP = {
+    "structure": "Lamina / white matter",
+    "division": "Division",
+    "horn": "Horn",
+    "region": "Atlas region",
+}
 
 
 def _parse_channel_value(text: str) -> int | str:
@@ -49,13 +63,10 @@ class CordStatsPlotsPanel:
         stats_path: Path,
     ) -> None:
         from qtpy.QtWidgets import (
-            QCheckBox,
             QComboBox,
-            QFileDialog,
             QFormLayout,
             QHBoxLayout,
             QLabel,
-            QMessageBox,
             QPushButton,
             QScrollArea,
             QVBoxLayout,
@@ -64,14 +75,18 @@ class CordStatsPlotsPanel:
 
         self._config = config
         self._stats_path = stats_path
-        self._segments = default_paper_segments(config.atlas.atlas_dir)
+        self._atlas_dir = config.atlas.atlas_dir
+        self._segment_order = load_segment_order(self._atlas_dir)
         self._stats_df, self._regions_df = ensure_cord_rollups_in_dataframe(
             stats_df,
-            atlas_dir=config.atlas.atlas_dir,
+            atlas_dir=self._atlas_dir,
         )
         self._options = discover_cord_plot_options(self._stats_df)
+        self._has_split = {"left", "right"}.issubset(set(self._options["hemispheres"]))
         self._figure = None
         self._canvas: FigureCanvasQTAgg | None = None
+        self._export_kind = "matrix"
+        self._export_matrices: dict[str, pd.DataFrame] = {}
 
         self.widget = QWidget()
         root = QVBoxLayout(self.widget)
@@ -89,6 +104,14 @@ class CordStatsPlotsPanel:
 
         self._channel_combo = QComboBox()
         form.addRow("Channel / label:", self._channel_combo)
+
+        self._view_combo = QComboBox()
+        self._view_combo.addItem("Single hemisphere", "single")
+        if self._has_split:
+            self._view_combo.addItem("Compare L | R | whole", "compare")
+            self._view_combo.addItem("Difference L − R", "difference")
+        self._view_combo.currentIndexChanged.connect(self._on_view_changed)
+        form.addRow("View:", self._view_combo)
 
         self._hemisphere_combo = QComboBox()
         for hemisphere in self._options["hemispheres"]:
@@ -108,6 +131,26 @@ class CordStatsPlotsPanel:
             self._rollup_combo.setCurrentIndex(rollup_index)
         form.addRow("Rollup:", self._rollup_combo)
 
+        self._segment_start = QComboBox()
+        self._segment_end = QComboBox()
+        for label in self._segment_order:
+            self._segment_start.addItem(label)
+            self._segment_end.addItem(label)
+        default_start, default_end = default_segment_range_bounds(self._atlas_dir)
+        start_index = self._segment_start.findText(default_start)
+        end_index = self._segment_end.findText(default_end)
+        if start_index >= 0:
+            self._segment_start.setCurrentIndex(start_index)
+        if end_index >= 0:
+            self._segment_end.setCurrentIndex(end_index)
+        segment_row = QWidget()
+        segment_layout = QHBoxLayout(segment_row)
+        segment_layout.setContentsMargins(0, 0, 0, 0)
+        segment_layout.addWidget(self._segment_start)
+        segment_layout.addWidget(QLabel("to"))
+        segment_layout.addWidget(self._segment_end)
+        form.addRow("Segments:", segment_row)
+
         self._normalize_combo = QComboBox()
         for label, value in (
             ("None", "none"),
@@ -117,23 +160,18 @@ class CordStatsPlotsPanel:
             self._normalize_combo.addItem(label, value)
         form.addRow("Normalize:", self._normalize_combo)
 
-        self._cmap_combo = QComboBox()
-        for cmap in ("hot", "viridis", "magma", "plasma", "inferno", "cividis"):
-            self._cmap_combo.addItem(cmap)
-        form.addRow("Colormap:", self._cmap_combo)
-
-        self._log_scale_check = QCheckBox("Log color scale")
-        form.addRow("", self._log_scale_check)
-
         root.addLayout(form)
 
         button_row = QHBoxLayout()
         self._update_button = QPushButton("Update plot")
         self._update_button.clicked.connect(self._update_plot)
-        self._save_button = QPushButton("Save PNG…")
-        self._save_button.clicked.connect(self._save_png)
+        self._save_png_button = QPushButton("Save PNG…")
+        self._save_png_button.clicked.connect(self._save_png)
+        self._save_csv_button = QPushButton("Save CSV…")
+        self._save_csv_button.clicked.connect(self._save_csv)
         button_row.addWidget(self._update_button)
-        button_row.addWidget(self._save_button)
+        button_row.addWidget(self._save_png_button)
+        button_row.addWidget(self._save_csv_button)
         root.addLayout(button_row)
 
         self._status_label = QLabel("")
@@ -148,6 +186,7 @@ class CordStatsPlotsPanel:
         root.addWidget(scroll, stretch=1)
 
         self._on_metric_changed()
+        self._on_view_changed()
         self._update_plot()
 
     def _current_metric(self) -> str:
@@ -155,6 +194,14 @@ class CordStatsPlotsPanel:
 
     def _current_channel(self) -> int | str:
         return _parse_channel_value(str(self._channel_combo.currentData()))
+
+    def _current_view(self) -> str:
+        return str(self._view_combo.currentData() or "single")
+
+    def _current_segments(self) -> list[str]:
+        start = str(self._segment_start.currentText())
+        end = str(self._segment_end.currentText())
+        return parse_segment_range(f"{start}:{end}", atlas_dir=self._atlas_dir)
 
     def _on_metric_changed(self) -> None:
         metric = self._current_metric()
@@ -166,44 +213,32 @@ class CordStatsPlotsPanel:
             self._channel_combo.addItem(label, channel)
         self._channel_combo.blockSignals(False)
 
-        cmap = _default_cmap(metric)
-        cmap_index = self._cmap_combo.findText(cmap)
-        if cmap_index >= 0:
-            self._cmap_combo.setCurrentIndex(cmap_index)
+    def _on_view_changed(self) -> None:
+        single = self._current_view() == "single"
+        self._hemisphere_combo.setEnabled(single)
 
-    def _build_matrix(self) -> tuple[pd.DataFrame, list[str], str]:
-        rollup_level = str(self._rollup_combo.currentText())
-        matrix = cord_stats_to_matrix(
+    def _rollup_x_label(self, rollup_level: str) -> str:
+        return _X_LABELS_BY_ROLLUP.get(rollup_level.lower(), "Region")
+
+    def _column_labels(self, matrix: pd.DataFrame) -> list[str]:
+        return [structure_acronym_to_label(col) for col in matrix.columns]
+
+    def _build_single_matrix(self, *, hemisphere: str, segments: list[str]) -> pd.DataFrame:
+        return cord_stats_to_matrix(
             self._stats_df,
             metric=self._current_metric(),  # type: ignore[arg-type]
             channel=self._current_channel(),
-            rollup_level=rollup_level,
-            hemisphere=str(self._hemisphere_combo.currentText()),
-            segments=self._segments,
+            rollup_level=str(self._rollup_combo.currentText()),
+            hemisphere=hemisphere,
+            segments=segments,
             regions_df=self._regions_df,
         )
-        _, column_labels = resolve_cord_rollup_columns(
-            rollup_level,
-            self._stats_df[self._stats_df["rollup_level"] == rollup_level]
-            if "rollup_level" in self._stats_df.columns
-            else self._stats_df,
-            regions_df=self._regions_df,
-        )
-        x_labels_by_rollup = {
-            "structure": "Lamina / white matter",
-            "division": "Division",
-            "horn": "Horn",
-            "region": "Atlas region",
-        }
-        x_label = x_labels_by_rollup.get(rollup_level.lower(), "Region")
-        return matrix, column_labels, x_label
 
-    def _plot_title(self) -> str:
+    def _plot_title(self, *, hemisphere: str | None = None) -> str:
         metric = self._current_metric()
         channel = self._current_channel()
         title = f"{self._config.sample.name} — {metric_label(metric)} (ch {channel})"
-        hemisphere = str(self._hemisphere_combo.currentText())
-        if hemisphere != "whole":
+        if hemisphere and hemisphere != "whole":
             title = f"{title}, {hemisphere}"
         return title
 
@@ -211,16 +246,75 @@ class CordStatsPlotsPanel:
         from qtpy.QtWidgets import QMessageBox
 
         try:
-            matrix, column_labels, x_label = self._build_matrix()
-            fig = build_cord_heatmap_figure(
-                matrix,
-                column_labels=column_labels,
-                title=self._plot_title(),
-                cmap=str(self._cmap_combo.currentText()),
-                log_scale=self._log_scale_check.isChecked(),
-                normalize=str(self._normalize_combo.currentData()),
-                x_label=x_label,
-            )
+            segments = self._current_segments()
+            rollup_level = str(self._rollup_combo.currentText())
+            x_label = self._rollup_x_label(rollup_level)
+            metric = self._current_metric()
+            cmap = _default_cmap(metric)
+            normalize = str(self._normalize_combo.currentData())
+            view = self._current_view()
+            if view == "compare":
+                matrices = cord_hemisphere_matrices(
+                    self._stats_df,
+                    metric=metric,  # type: ignore[arg-type]
+                    channel=self._current_channel(),
+                    rollup_level=rollup_level,
+                    segments=segments,
+                    regions_df=self._regions_df,
+                )
+                first = next(iter(matrices.values()))
+                fig = build_cord_heatmap_comparison_figure(
+                    matrices,
+                    column_labels=self._column_labels(first),
+                    title=self._plot_title(),
+                    cmap=cmap,
+                    normalize=normalize,
+                    x_label=x_label,
+                )
+                self._export_kind = "compare"
+                self._export_matrices = matrices
+                status = (
+                    f"{first.shape[0]} segments × {first.shape[1]} regions "
+                    f"(left | right | whole)"
+                )
+            elif view == "difference":
+                matrices = cord_hemisphere_matrices(
+                    self._stats_df,
+                    metric=metric,  # type: ignore[arg-type]
+                    channel=self._current_channel(),
+                    rollup_level=rollup_level,
+                    segments=segments,
+                    regions_df=self._regions_df,
+                    hemispheres=("left", "right"),
+                )
+                diff = difference_heatmap_matrix(matrices["left"], matrices["right"])
+                vmin, vmax = difference_color_limits(diff)
+                fig = build_cord_heatmap_figure(
+                    diff,
+                    column_labels=self._column_labels(diff),
+                    title=f"{self._plot_title()} — left − right",
+                    cmap=DIFFERENCE_CMAP,
+                    vmin=vmin,
+                    vmax=vmax,
+                    x_label=x_label,
+                )
+                self._export_kind = "matrix"
+                self._export_matrices = {"difference": diff}
+                status = f"{diff.shape[0]} segments × {diff.shape[1]} regions (left − right)"
+            else:
+                hemisphere = str(self._hemisphere_combo.currentText())
+                matrix = self._build_single_matrix(hemisphere=hemisphere, segments=segments)
+                fig = build_cord_heatmap_figure(
+                    matrix,
+                    column_labels=self._column_labels(matrix),
+                    title=self._plot_title(hemisphere=hemisphere),
+                    cmap=cmap,
+                    normalize=normalize,
+                    x_label=x_label,
+                )
+                self._export_kind = "matrix"
+                self._export_matrices = {"data": matrix}
+                status = f"{matrix.shape[0]} segments × {matrix.shape[1]} regions"
         except (ValueError, KeyError) as exc:
             self._status_label.setText(str(exc))
             QMessageBox.warning(self.widget, "Could not plot", str(exc))
@@ -236,40 +330,63 @@ class CordStatsPlotsPanel:
         self._figure = fig
         self._canvas = FigureCanvasQTAgg(fig)
         self._canvas_layout.addWidget(self._canvas)
-        self._status_label.setText(
-            f"{matrix.shape[0]} segments × {matrix.shape[1]} regions"
+        self._status_label.setText(status)
+
+    def _default_export_path(self, suffix: str) -> Path:
+        return default_heatmap_output_path(
+            self._config,
+            metric=self._current_metric(),
+            channel=self._current_channel(),
+            view=self._current_view(),
+            suffix=suffix,
         )
 
     def _save_png(self) -> None:
         from qtpy.QtWidgets import QFileDialog, QMessageBox
 
-        metric = self._current_metric()
-        channel = self._current_channel()
-        default_path = default_heatmap_output_path(
-            self._config,
-            metric=metric,
-            channel=channel,
-        )
+        if self._figure is None:
+            self._update_plot()
+        if self._figure is None:
+            return
         path, _ = QFileDialog.getSaveFileName(
             self.widget,
             "Save heatmap",
-            str(default_path),
+            str(self._default_export_path(".png")),
             "PNG images (*.png)",
         )
         if not path:
             return
         try:
-            matrix, column_labels, x_label = self._build_matrix()
-            saved = plot_cord_heatmap(
-                matrix,
-                Path(path),
-                column_labels=column_labels,
-                title=self._plot_title(),
-                cmap=str(self._cmap_combo.currentText()),
-                log_scale=self._log_scale_check.isChecked(),
-                normalize=str(self._normalize_combo.currentData()),
-                x_label=x_label,
-            )
+            output = Path(path)
+            output.parent.mkdir(parents=True, exist_ok=True)
+            self._figure.savefig(output, bbox_inches="tight", pad_inches=0.08, dpi=300)
+        except OSError as exc:
+            QMessageBox.warning(self.widget, "Could not save", str(exc))
+            return
+        self._status_label.setText(f"Saved {output}")
+
+    def _save_csv(self) -> None:
+        from qtpy.QtWidgets import QFileDialog, QMessageBox
+
+        if not self._export_matrices:
+            self._update_plot()
+        if not self._export_matrices:
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self.widget,
+            "Save heatmap matrix",
+            str(self._default_export_path(".csv")),
+            "CSV files (*.csv)",
+        )
+        if not path:
+            return
+        try:
+            output = Path(path)
+            if self._export_kind == "compare":
+                saved = write_cord_heatmap_compare_csv(self._export_matrices, output)
+            else:
+                matrix = next(iter(self._export_matrices.values()))
+                saved = write_cord_heatmap_matrix_csv(matrix, output)
         except (ValueError, OSError) as exc:
             QMessageBox.warning(self.widget, "Could not save", str(exc))
             return

@@ -1207,7 +1207,7 @@ def spinal_plot_heatmap(
     hemisphere: str = typer.Option(
         "whole",
         "--hemisphere",
-        help="Hemisphere filter when split_hemispheres is enabled: whole, left, or right.",
+        help="Hemisphere filter: whole, left, or right.",
     ),
     segments: str = typer.Option(
         "C1:Co2",

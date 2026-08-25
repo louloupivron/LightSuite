@@ -119,10 +119,14 @@ Rolled rows are appended to `region_stats.csv` with `rollup_level` =
 `stats/region_stats_structure.csv`, `stats/region_stats_division.csv`, `stats/region_stats_horn.csv`.
 
 Each row includes `segment` (e.g. `C5`, `L3`), `parcellation_index`, region name/acronym,
-and `hemisphere` = `whole` (cord has no left/right split) unless
-`analysis.split_hemispheres: true` is set (uses `Hemisphere_Annotation.tif` from the
-atlas package; rows are labeled `left` / `right`, with optional `hemisphere_flip` and
-`hemisphere_keep_whole`).
+and `hemisphere` = `left` / `right` using `Hemisphere_Annotation.tif` from the atlas
+package, plus `whole` summary rows (`analysis.hemisphere_keep_whole`, default true).
+Set `analysis.hemisphere_flip: true` if left/right assignment looks swapped.
+
+The Napari **stats / plots** panel reads `stats/region_stats.csv` (falling back to
+`volume_registered/`). Choose a segment range (default C1–Co2), save the displayed
+matrix as CSV, and — when left/right rows are present — switch **View** to
+compare L | R | whole or a left − right difference map.
 
 ### Inspect imports (Napari QC)
 

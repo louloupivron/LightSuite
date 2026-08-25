@@ -31,5 +31,3 @@ compute:
 analysis:
   parcellate_intensities: true
   intensity_channels: [1]
-  rollups: [division, structure, horn]
-  split_hemispheres: true
