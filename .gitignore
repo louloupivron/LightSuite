@@ -17,3 +17,8 @@ batch_run_colm_suite.m
 
 # Local analysis figures (write under sample.save_path/plots instead)
 plots/
+
+# Local data & docs builds
+atlas/
+site/
+softwares/

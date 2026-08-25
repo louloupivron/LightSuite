@@ -9,6 +9,7 @@ from typing import Annotated
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from lightsuite.analysis.intensity_metrics import DEFAULT_INTENSITY_METRICS, normalize_intensity_metrics
+from lightsuite.analysis.region_stats import METRICS
 
 
 class SourceFormat(str, Enum):
@@ -368,10 +369,6 @@ class AnalysisConfig(BaseModel):
         default_factory=lambda: ["atlas"],
         description="Coordinate spaces for region_stats tables: atlas and/or sample.",
     )
-    rollups: list[str] = Field(
-        default_factory=list,
-        description='Spinal cord rollups to append: "division" (GM/WM), "structure" (laminas/funiculi), and/or "horn" (DH/VH/C dorsal–ventral split).',
-    )
     split_hemispheres: bool = Field(
         default=False,
         description="Split spinal cord stats into left/right using Hemisphere_Annotation.tif.",
@@ -384,6 +381,20 @@ class AnalysisConfig(BaseModel):
         default=False,
         description="When split_hemispheres is true, also emit whole-cord summary rows.",
     )
+    top_n_regions: int = Field(
+        default=10,
+        ge=0,
+        description="Write region_stats_top{N}.csv next to region_stats.csv (0 disables).",
+    )
+    top_n_rank_by: str | None = Field(
+        default=None,
+        description=(
+            "Metric used to rank regions for the top-N CSV. Default: cell_count when "
+            "present, otherwise the first intensity metric."
+        ),
+    )
+
+    model_config = ConfigDict(extra="ignore")
 
     @field_validator("intensity_metrics", mode="before")
     @classmethod
@@ -397,12 +408,91 @@ class AnalysisConfig(BaseModel):
             raise ValueError(msg)
         return normalize_intensity_metrics(value)
 
+    @field_validator("top_n_rank_by", mode="before")
+    @classmethod
+    def validate_top_n_rank_by(cls, value: object) -> str | None:
+        if value is None:
+            return None
+        key = str(value).strip()
+        if not key:
+            return None
+        if key not in METRICS:
+            msg = f"analysis.top_n_rank_by must be one of: {', '.join(METRICS)}"
+            raise ValueError(msg)
+        return key
+
 
 class AnnotationFormat(str, Enum):
     """LightSuite Sample Space v1 — native-resolution exports only."""
 
     POINTS_CSV = "points_csv"
     MASK_TIFF = "mask_tiff"
+
+
+class SegmentationSuite(str, Enum):
+    """Vendor (or custom) source for the convert-annotations prepare stage."""
+
+    NATIVE = "native"
+    SMARTSPIM = "smartspim"
+    FIJI = "fiji"
+    IMARIS = "imaris"
+    ARIVIS = "arivis"
+    CUSTOM = "custom"
+
+
+class AnnotationConverterConfig(BaseModel):
+    """Convert vendor segmentation exports into LightSuite Sample Space v1.
+
+    Built-in suites write ``points_csv`` (and optionally fill ``import.annotations``).
+    ``custom`` requires ``custom_entry``: a ``.py`` file exposing
+    ``convert_to_lightsuite(source, output, *, reference) -> dict``.
+    """
+
+    suite: SegmentationSuite = SegmentationSuite.NATIVE
+    source: Path | None = Field(
+        default=None,
+        description="Vendor export path (JSON / CSV / XLSX / …). Required unless suite=native.",
+    )
+    output: Path | None = Field(
+        default=None,
+        description=(
+            "Optional override for converted points.csv. "
+            "GUI omits this; default is <save_path>/converted/<label>_points.csv."
+        ),
+    )
+    label: str = Field(
+        default="",
+        description=(
+            "Layer name for single-file suites, or Imaris filename prefix when the CSV "
+            "has multiple Component Name values."
+        ),
+    )
+    voxel_um: Annotated[list[float], Field(min_length=3, max_length=3)] | None = Field(
+        default=None,
+        description="Imaris/FIJI calibration [x,y,z] in the same units as the export.",
+    )
+    custom_entry: Path | None = Field(
+        default=None,
+        description="Python module path for suite=custom (must define convert_to_lightsuite).",
+    )
+
+    @field_validator("source", "output", "custom_entry")
+    @classmethod
+    def expand_converter_paths(cls, value: Path | None) -> Path | None:
+        if value is None:
+            return None
+        return value.expanduser()
+
+    @model_validator(mode="after")
+    def require_custom_entry(self) -> AnnotationConverterConfig:
+        if self.suite == SegmentationSuite.CUSTOM and self.custom_entry is None:
+            msg = "import.converter.custom_entry is required when suite is 'custom'"
+            raise ValueError(msg)
+        if self.suite not in (SegmentationSuite.NATIVE, SegmentationSuite.CUSTOM):
+            if self.source is None:
+                msg = f"import.converter.source is required when suite is '{self.suite.value}'"
+                raise ValueError(msg)
+        return self
 
 
 class AnnotationImportConfig(BaseModel):
@@ -424,6 +514,13 @@ class AnnotationImportConfig(BaseModel):
 class ImportConfig(BaseModel):
     annotations: list[AnnotationImportConfig] = Field(default_factory=list)
     write_csv: bool = True
+    converter: AnnotationConverterConfig | None = Field(
+        default=None,
+        description=(
+            "Optional vendor→LSS conversion. The Import segmentation stage runs convert "
+            "then warps after register; CLI: `convert-annotations` / `import-annotations`."
+        ),
+    )
 
 
 class BrainMultiresLinkConfig(BaseModel):

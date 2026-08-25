@@ -259,12 +259,17 @@ def rollup_cord_tidy(
     return out.reindex(columns=CORD_TIDY_COLUMNS)
 
 
+DEFAULT_CORD_ROLLUPS: tuple[str, ...] = ("division", "structure", "horn")
+
+
 def apply_cord_rollups(
     df: pd.DataFrame,
     regions_df: pd.DataFrame,
-    rollups: list[str],
+    rollups: list[str] | tuple[str, ...] | None = None,
 ) -> pd.DataFrame:
-    """Append division/structure rollup rows to finest-level cord stats."""
+    """Append division/structure/horn rollup rows to finest-level cord stats."""
+    if rollups is None:
+        rollups = DEFAULT_CORD_ROLLUPS
     if not rollups:
         out = df.copy()
         if "rollup_level" not in out.columns:
@@ -274,6 +279,8 @@ def apply_cord_rollups(
     finest = df.copy()
     if "rollup_level" not in finest.columns:
         finest["rollup_level"] = _REGION_ROLLUP_LEVEL
+    else:
+        finest = finest[finest["rollup_level"] == _REGION_ROLLUP_LEVEL]
     frames = [finest.reindex(columns=CORD_TIDY_COLUMNS)]
 
     for level in rollups:
@@ -288,6 +295,7 @@ def apply_cord_rollups(
 
 
 __all__ = [
+    "DEFAULT_CORD_ROLLUPS",
     "apply_cord_rollups",
     "get_descendants",
     "resolve_horn_acronym",

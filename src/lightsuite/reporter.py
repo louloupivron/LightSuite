@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import contextvars
 import io
+import threading
 import time
 from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
@@ -12,10 +13,16 @@ from typing import Any, Protocol, runtime_checkable
 
 from rich.console import Console
 
+from lightsuite.exceptions import StageCancelledError
+
 _DEFAULT_CONSOLE = Console()
 
 _current_reporter: contextvars.ContextVar[Reporter | None] = contextvars.ContextVar(
     "lightsuite_reporter",
+    default=None,
+)
+_stage_cancel_event: contextvars.ContextVar[threading.Event | None] = contextvars.ContextVar(
+    "lightsuite_stage_cancel",
     default=None,
 )
 
@@ -23,6 +30,35 @@ _current_reporter: contextvars.ContextVar[Reporter | None] = contextvars.Context
 def get_active_reporter() -> Reporter | None:
     """Return the reporter active in the current context, if any."""
     return _current_reporter.get()
+
+
+@contextlib.contextmanager
+def stage_cancellation(cancel_event: threading.Event | None) -> Iterator[None]:
+    """Bind a cancel event for the current stage worker thread."""
+    token = _stage_cancel_event.set(cancel_event)
+    try:
+        yield
+    finally:
+        _stage_cancel_event.reset(token)
+
+
+def check_stage_cancelled() -> None:
+    """Raise if the GUI user requested stage cancellation."""
+    event = _stage_cancel_event.get()
+    if event is not None and event.is_set():
+        raise StageCancelledError("Stage cancelled by user.")
+
+
+def format_duration(seconds: float) -> str:
+    """Format a duration for progress logs (e.g. ``12s``, ``3m 05s``, ``1h 02m``)."""
+    total = max(0, int(round(seconds)))
+    if total < 60:
+        return f"{total}s"
+    minutes, sec = divmod(total, 60)
+    if minutes < 60:
+        return f"{minutes}m {sec:02d}s"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h {minutes:02d}m"
 
 
 def emit_pipeline_message(text: str) -> None:
@@ -55,7 +91,7 @@ def report_step_progress(
     prefix = f"[{label}] " if label else ""
     emit_pipeline_message(
         f"{prefix}{unit} {current}/{total} ({pct:.0f}%) — "
-        f"{elapsed:.0f}s elapsed, ~{eta:.0f}s left{worker_note}"
+        f"{format_duration(elapsed)} elapsed, ~{format_duration(eta)} left{worker_note}"
     )
 
 

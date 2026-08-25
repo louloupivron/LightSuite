@@ -285,6 +285,56 @@ def parse_segment_range(text: str, *, atlas_dir: Path) -> list[str]:
     return labels
 
 
+def resolve_cord_rollup_columns(
+    rollup_level: str,
+    work_df: pd.DataFrame,
+    *,
+    regions_df: pd.DataFrame | None = None,
+) -> tuple[list[str], list[str]]:
+    """Return (column_acronyms, display_labels) for a given rollup_level."""
+    norm = str(rollup_level).strip().lower()
+    if norm == "structure":
+        return list(PAPER_STRUCTURE_ACRONYMS), [structure_acronym_to_label(col) for col in PAPER_STRUCTURE_ACRONYMS]
+    if norm == "division":
+        cols = [c for c in ["GM", "WM"] if c in work_df["acronym"].values] or ["GM", "WM"]
+        return cols, cols
+    if norm == "horn":
+        cols = [c for c in ["DH", "VH", "C"] if c in work_df["acronym"].values] or ["DH", "VH", "C"]
+        return cols, cols
+    # For 'region' or other levels:
+    if regions_df is not None and "acronym" in regions_df.columns:
+        present = set(work_df["acronym"].unique())
+        ordered = [str(a) for a in regions_df["acronym"] if str(a) in present]
+        remaining = [str(a) for a in work_df["acronym"].unique() if str(a) not in ordered]
+        cols = ordered + remaining
+    else:
+        cols = sorted(str(a) for a in work_df["acronym"].unique())
+    return cols, cols
+
+
+def ensure_cord_rollups_in_dataframe(
+    df: pd.DataFrame,
+    *,
+    atlas_dir: Path | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame | None]:
+    """Ensure division, structure, and horn rollups exist in the DataFrame."""
+    rollups_present = set(df["rollup_level"].astype(str).unique()) if "rollup_level" in df.columns else set()
+    needed = {"structure", "division", "horn"}
+    regions_df: pd.DataFrame | None = None
+
+    if atlas_dir is not None:
+        candidate = atlas_dir.expanduser() / "Atlas_Regions.csv"
+        if candidate.is_file():
+            regions_df = pd.read_csv(candidate)
+
+    if not needed.issubset(rollups_present) and regions_df is not None:
+        from lightsuite.analysis.cord_rollup import apply_cord_rollups
+
+        df = apply_cord_rollups(df, regions_df, ["division", "structure", "horn"])
+
+    return df, regions_df
+
+
 def resolve_region_stats_path(
     config: SpinalCordPipelineConfig,
     *,
@@ -296,14 +346,19 @@ def resolve_region_stats_path(
             msg = f"Region stats file not found: {path}"
             raise FileNotFoundError(msg)
         return path
-    path = volume_registered_dir(config) / "region_stats.csv"
-    if not path.is_file():
-        msg = (
-            f"Missing {path}. Run export (and import-annotations for counts) first, "
-            "or pass --input."
-        )
-        raise FileNotFoundError(msg)
-    return path
+    save_path = config.sample.save_path.expanduser()
+    for candidate in (
+        save_path / "stats" / "region_stats.csv",
+        save_path / "volume_registered" / "region_stats.csv",
+    ):
+        if candidate.is_file():
+            return candidate
+    msg = (
+        f"Missing region_stats.csv under {save_path / 'stats'} or "
+        f"{save_path / 'volume_registered'}. Run export (and import-annotations for counts) first, "
+        "or pass --input."
+    )
+    raise FileNotFoundError(msg)
 
 
 def _resolve_channel(
@@ -346,12 +401,12 @@ def cord_stats_to_matrix(
     hemisphere: str = "whole",
     segments: list[str] | None = None,
     region_acronyms: list[str] | None = None,
+    regions_df: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """Pivot tidy cord stats into a segment × region matrix."""
     if segments is None:
         msg = "segments must be provided"
         raise ValueError(msg)
-    regions = list(region_acronyms or PAPER_STRUCTURE_ACRONYMS)
 
     resolved_channel = _resolve_channel(df, metric=metric, channel=channel)
     work = _stats_rows_for_hemisphere(
@@ -367,6 +422,11 @@ def cord_stats_to_matrix(
             f"hemisphere={hemisphere!r}, channel={resolved_channel!r}"
         )
         raise ValueError(msg)
+
+    if region_acronyms is not None:
+        regions = list(region_acronyms)
+    else:
+        regions, _ = resolve_cord_rollup_columns(rollup_level, work, regions_df=regions_df)
 
     matrix = work.pivot_table(
         index="segment",
@@ -422,6 +482,7 @@ def build_cord_heatmap_figure(
     log_scale: bool = False,
     normalize: str = "none",
     figsize: tuple[float, float] | None = None,
+    x_label: str | None = None,
 ) -> Figure:
     """Build a publication-style heatmap figure (segments on Y, laminae/WM on X)."""
     labels = column_labels or [structure_acronym_to_label(col) for col in matrix.columns]
@@ -429,7 +490,8 @@ def build_cord_heatmap_figure(
 
     n_rows, n_cols = values.shape
     if figsize is None:
-        figsize = (max(6.0, 0.45 * n_cols + 2.0), max(8.0, 0.22 * n_rows + 2.0))
+        col_width = 0.45 if n_cols <= 20 else 0.25
+        figsize = (max(6.0, col_width * n_cols + 2.0), max(8.0, 0.22 * n_rows + 2.0))
 
     fig = Figure(figsize=figsize)
     ax = fig.add_subplot(111)
@@ -462,11 +524,21 @@ def build_cord_heatmap_figure(
         interpolation="nearest",
     )
 
+    rotation = 0
+    ha = "center"
+    fontsize = 9
+    if n_cols > 20:
+        rotation = 45
+        ha = "right"
+        fontsize = 7
+    elif n_cols > 10:
+        fontsize = 8
+
     ax.set_xticks(np.arange(n_cols))
-    ax.set_xticklabels(labels, rotation=0, ha="center", fontsize=9)
+    ax.set_xticklabels(labels, rotation=rotation, ha=ha, fontsize=fontsize)
     ax.set_yticks(np.arange(n_rows))
     ax.set_yticklabels(list(matrix.index), fontsize=8)
-    ax.set_xlabel("Lamina / white matter")
+    ax.set_xlabel(x_label or "Region")
     ax.set_ylabel("Segment")
 
     if title:
@@ -496,6 +568,7 @@ def plot_cord_heatmap(
     normalize: str = "none",
     dpi: int = 300,
     figsize: tuple[float, float] | None = None,
+    x_label: str | None = None,
 ) -> Path:
     """Save a publication-style heatmap (segments on Y, laminae/WM on X)."""
     output_path = output_path.expanduser()
@@ -511,6 +584,7 @@ def plot_cord_heatmap(
         log_scale=log_scale,
         normalize=normalize,
         figsize=figsize,
+        x_label=x_label,
     )
     FigureCanvasAgg(fig)
     fig.savefig(output_path, bbox_inches="tight", pad_inches=0.08, dpi=dpi)
@@ -548,7 +622,10 @@ def run_cord_heatmap(
 ) -> Path:
     """Load region stats and write a paper-style heatmap PNG."""
     stats_path = resolve_region_stats_path(config, input_path=input_path)
-    df = pd.read_csv(stats_path)
+    df, regions_df = ensure_cord_rollups_in_dataframe(
+        pd.read_csv(stats_path),
+        atlas_dir=config.atlas.atlas_dir,
+    )
 
     segment_order = segments or default_paper_segments(config.atlas.atlas_dir)
     matrix = cord_stats_to_matrix(
@@ -559,7 +636,21 @@ def run_cord_heatmap(
         hemisphere=hemisphere,
         segments=segment_order,
         region_acronyms=region_acronyms,
+        regions_df=regions_df,
     )
+
+    _, column_labels = resolve_cord_rollup_columns(
+        rollup_level,
+        df[df["rollup_level"] == rollup_level] if "rollup_level" in df.columns else df,
+        regions_df=regions_df,
+    )
+    x_labels_by_rollup = {
+        "structure": "Lamina / white matter",
+        "division": "Division",
+        "horn": "Horn",
+        "region": "Atlas region",
+    }
+    x_label = x_labels_by_rollup.get(rollup_level.lower(), "Region")
 
     resolved_channel = _resolve_channel(df, metric=metric, channel=channel)
     if output_path is None:
@@ -576,10 +667,12 @@ def run_cord_heatmap(
     return plot_cord_heatmap(
         matrix,
         output_path,
+        column_labels=column_labels,
         title=title,
         cmap=cmap,
         vmin=vmin,
         vmax=vmax,
         log_scale=log_scale,
         normalize=normalize,
+        x_label=x_label,
     )
