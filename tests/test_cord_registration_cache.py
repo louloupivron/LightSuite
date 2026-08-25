@@ -61,12 +61,15 @@ def test_register_cache_reused_between_calls(tmp_path: Path) -> None:
     assert (cache_dir / REGISTER_CACHE_MANIFEST).is_file()
     assert register_cache_valid(cache_dir, cfg)
 
-    with patch(
-        "lightsuite.io.cord_registration_cache.read_spinal_cord_sample",
-        side_effect=AssertionError("should not reload raw TIFFs"),
-    ), patch(
-        "lightsuite.io.cord_registration_cache.probe_cord_source",
-        side_effect=AssertionError("should not re-probe raw TIFFs on cache hit"),
+    with (
+        patch(
+            "lightsuite.io.cord_registration_cache.read_spinal_cord_sample",
+            side_effect=AssertionError("should not reload raw TIFFs"),
+        ),
+        patch(
+            "lightsuite.io.cord_registration_cache.probe_cord_source",
+            side_effect=AssertionError("should not re-probe raw TIFFs on cache hit"),
+        ),
     ):
         second = load_or_cache_cord_registration(cfg)
     assert second.from_cache is True
@@ -173,6 +176,33 @@ def test_orphan_multipage_z_tiff(tmp_path: Path) -> None:
     assert np.array_equal(second.volume, first.volume)
 
 
+def test_stale_register_cache_explains_why_it_is_skipped(tmp_path: Path) -> None:
+    """Wrong-shaped cache TIFFs must be skipped with a reason, not a silent 'not found'."""
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "spinal_cord"
+    _ensure_fixtures(fixture_root)
+    config_path = _write_config(tmp_path, fixture_root)
+    cfg = load_spinal_config(config_path)
+    first = load_or_cache_cord_registration(cfg)
+    cache_dir = Path(cfg.sample.save_path) / "cache"
+    tiff_path = cache_dir / "chan_1_sample_register_20um.tif"
+    volume = tifffile.imread(tiff_path)
+    tifffile.imwrite(tiff_path, volume[:, :, : max(1, volume.shape[2] // 2)])
+
+    messages: list[str] = []
+
+    def _capture(text: str) -> None:
+        messages.append(text)
+
+    with patch("lightsuite.io.cord_registration_cache.emit_pipeline_message", _capture):
+        second = load_or_cache_cord_registration(cfg)
+
+    assert second.from_cache is False
+    assert second.volume.shape == first.volume.shape
+    joined = " ".join(messages)
+    assert "does not match this config" in joined
+    assert "chan_1_sample_register_20um.tif" in joined
+
+
 def test_preprocess_reuses_cache_after_orientation_load(tmp_path: Path) -> None:
     fixture_root = Path(__file__).resolve().parent / "fixtures" / "spinal_cord"
     _ensure_fixtures(fixture_root)
@@ -184,12 +214,15 @@ def test_preprocess_reuses_cache_after_orientation_load(tmp_path: Path) -> None:
 
     from lightsuite.preprocess.cord import preprocess_spinal_cord_sample
 
-    with patch(
-        "lightsuite.io.cord_registration_cache.read_spinal_cord_sample",
-        side_effect=AssertionError("preprocess should reuse cached TIFFs"),
-    ), patch(
-        "lightsuite.io.cord_registration_cache.probe_cord_source",
-        side_effect=AssertionError("preprocess should not re-probe raw TIFFs"),
+    with (
+        patch(
+            "lightsuite.io.cord_registration_cache.read_spinal_cord_sample",
+            side_effect=AssertionError("preprocess should reuse cached TIFFs"),
+        ),
+        patch(
+            "lightsuite.io.cord_registration_cache.probe_cord_source",
+            side_effect=AssertionError("preprocess should not re-probe raw TIFFs"),
+        ),
     ):
         result = preprocess_spinal_cord_sample(cfg)
 

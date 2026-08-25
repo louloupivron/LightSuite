@@ -198,7 +198,11 @@ def _probe_from_manifest(manifest: dict[str, Any]) -> CordSourceProbe | None:
 
 def _probe_from_checkpoint(checkpoint: CordRegOptsCheckpoint) -> CordSourceProbe:
     return CordSourceProbe(
-        native_orisize=(int(checkpoint.orisize[0]), int(checkpoint.orisize[1]), int(checkpoint.orisize[2])),
+        native_orisize=(
+            int(checkpoint.orisize[0]),
+            int(checkpoint.orisize[1]),
+            int(checkpoint.orisize[2]),
+        ),
         n_channels=int(checkpoint.nchans),
         layout=CordTiffLayout(checkpoint.tiff_type),
     )
@@ -267,28 +271,50 @@ def _inspect_registration_tiff(
                     (expected_y, expected_x, expected_z),
                     (expected_z, expected_y, expected_x),
                 ) or (series_shape == (expected_y, expected_x) and n_pages == expected_z):
-                    return True, f"{path.name} ({series_shape}) matches expected {expected_y}×{expected_x}×{expected_z}"
+                    return (
+                        True,
+                        f"{path.name} ({series_shape}) matches expected {expected_y}×{expected_x}×{expected_z}",
+                    )
 
             if n_pages == expected_z and page_shape in (
                 (expected_y, expected_x),
                 (expected_x, expected_y),
             ):
-                return True, f"{path.name} ({n_pages} pages at {page_shape[0]}×{page_shape[1]}) matches expected {expected_y}×{expected_x}×{expected_z}"
+                return (
+                    True,
+                    f"{path.name} ({n_pages} pages at {page_shape[0]}×{page_shape[1]}) matches expected {expected_y}×{expected_x}×{expected_z}",
+                )
 
             if n_pages == expected_y and page_shape in (
                 (expected_x, expected_z),
                 (expected_z, expected_x),
             ):
-                return True, f"{path.name} ({n_pages} pages at {page_shape[0]}×{page_shape[1]}) matches expected {expected_y}×{expected_x}×{expected_z}"
+                return (
+                    True,
+                    f"{path.name} ({n_pages} pages at {page_shape[0]}×{page_shape[1]}) matches expected {expected_y}×{expected_x}×{expected_z}",
+                )
 
             dims = sorted((n_pages, page_shape[0], page_shape[1]))
             exp_dims = sorted((expected_y, expected_x, expected_z))
             if dims == exp_dims:
-                return True, f"{path.name} ({dims}) matches expected {expected_y}×{expected_x}×{expected_z}"
-            if dims[0] == exp_dims[0] and dims[1] == exp_dims[1] and abs(dims[2] - exp_dims[2]) <= 5:
-                return True, f"{path.name} ({dims}) matches expected {expected_y}×{expected_x}×{expected_z} (within 5 planes)"
+                return (
+                    True,
+                    f"{path.name} ({dims}) matches expected {expected_y}×{expected_x}×{expected_z}",
+                )
+            if (
+                dims[0] == exp_dims[0]
+                and dims[1] == exp_dims[1]
+                and abs(dims[2] - exp_dims[2]) <= 5
+            ):
+                return (
+                    True,
+                    f"{path.name} ({dims}) matches expected {expected_y}×{expected_x}×{expected_z} (within 5 planes)",
+                )
 
-            return False, f"{path.name} shape ({page_shape[0]}×{page_shape[1]}×{n_pages} planes) does not match expected {expected_y}×{expected_x}×{expected_z}"
+            return (
+                False,
+                f"{path.name} shape ({page_shape[0]}×{page_shape[1]}×{n_pages} planes) does not match expected {expected_y}×{expected_x}×{expected_z}",
+            )
     except (OSError, ValueError, tifffile.TiffFileError) as exc:
         return False, f"{path.name} could not be read ({exc})"
 
@@ -330,19 +356,23 @@ def _find_candidate_regvolpaths(
     ]
     if source_path is not None:
         src = Path(source_path).expanduser()
-        candidate_dirs.extend([
-            src / "cache",
-            src,
-        ])
+        candidate_dirs.extend(
+            [
+                src / "cache",
+                src,
+            ]
+        )
     scratch = getattr(config.sample, "scratch", None)
     if scratch is not None:
         s_path = Path(scratch).expanduser()
-        candidate_dirs.extend([
-            s_path / config.sample.name / "cache",
-            s_path / "cache",
-            s_path / config.sample.name,
-            s_path,
-        ])
+        candidate_dirs.extend(
+            [
+                s_path / config.sample.name / "cache",
+                s_path / "cache",
+                s_path / config.sample.name,
+                s_path,
+            ]
+        )
 
     seen: set[Path] = set()
     diagnostics: list[str] = []
@@ -533,9 +563,7 @@ def _load_cached_volume(
     skipped_slices: tuple[SkippedSlice, ...] = (),
 ) -> CordRegistrationVolume:
     channels = sorted((int(k), Path(v)) for k, v in regvolpaths.items())
-    emit_pipeline_message(
-        f"Loading {len(channels)} cached registration TIFF(s) into memory…"
-    )
+    emit_pipeline_message(f"Loading {len(channels)} cached registration TIFF(s) into memory…")
     t0 = time.perf_counter()
     first = _read_registration_tiff(channels[0][1], expected_shape)
     check_stage_cancelled()
@@ -545,9 +573,7 @@ def _load_cached_volume(
         check_stage_cancelled()
         volume[:, :, :, idx - 1] = _read_registration_tiff(path, expected_shape)
         if len(channels) > 1:
-            emit_pipeline_message(
-                f"  loaded channel {ich}/{len(channels)} ({path.name})"
-            )
+            emit_pipeline_message(f"  loaded channel {ich}/{len(channels)} ({path.name})")
     emit_pipeline_message(
         f"Cached registration volume ready in {format_duration(time.perf_counter() - t0)}"
     )
@@ -711,7 +737,9 @@ def _write_register_cache(
         regvolpaths=regvolpaths,
         fingerprint=fingerprint,
     )
-    emit_pipeline_message(f"Cached {len(regvolpaths)} channel registration TIFF(s) under {cache_dir}")
+    emit_pipeline_message(
+        f"Cached {len(regvolpaths)} channel registration TIFF(s) under {cache_dir}"
+    )
     return regvolpaths
 
 
@@ -740,6 +768,49 @@ def manifest_register_fingerprint(
     return compute_cord_register_fingerprint(config, probe)
 
 
+def _register_cache_skip_reasons(
+    config: SpinalCordPipelineConfig,
+    cache_dir: Path,
+) -> list[str]:
+    """Human-readable reasons the on-disk registration cache cannot be reused."""
+    reasons: list[str] = []
+    expected_path = registration_volume_path(
+        cache_dir,
+        1,
+        config.registration.resolution_um,
+    )
+    manifest = _load_manifest(cache_dir)
+    fingerprint = manifest.get("fingerprint") if isinstance(manifest, dict) else None
+    nchans_config = len(_source_roots(config))
+    listed = _plane_per_file_slice_count(config)
+    if isinstance(fingerprint, dict):
+        cached_nchans = fingerprint.get("nchans")
+        if cached_nchans is not None and int(cached_nchans) != nchans_config:
+            reasons.append(
+                f"cache was built with {int(cached_nchans)} channel(s); "
+                f"this config has {nchans_config}"
+            )
+        native = fingerprint.get("native_orisize")
+        if listed is not None and isinstance(native, list) and len(native) == 3:
+            cached_z = int(native[2])
+            if cached_z != listed:
+                reasons.append(
+                    f"cache native Z={cached_z}, but {listed} plane TIFFs are now in the source folder"
+                )
+    if not expected_path.is_file():
+        reasons.append(f"{expected_path.name} not found in {cache_dir}")
+        return reasons
+    try:
+        probe = probe_cord_source(config)
+    except (FileNotFoundError, ValueError, OSError):
+        return reasons
+    expected_shape = _expected_registration_shape(probe, config)
+    ok, msg = _inspect_registration_tiff(expected_path, expected_shape)
+    if not ok:
+        reasons.append(msg)
+    return reasons
+
+
 def load_or_cache_cord_registration(
     config: SpinalCordPipelineConfig,
     *,
@@ -762,6 +833,13 @@ def load_or_cache_cord_registration(
         cached = _try_load_register_cache(config, cache_dir)
         if cached is not None:
             return cached
+        skip_reasons = _register_cache_skip_reasons(config, cache_dir)
+        if skip_reasons:
+            emit_pipeline_message(
+                "Cached registration TIFF is present but does not match this config: "
+                + "; ".join(skip_reasons)
+                + "."
+            )
         emit_pipeline_message(
             "No valid registration-grid cache found — loading raw sample TIFFs "
             "(see plane progress below)…"
