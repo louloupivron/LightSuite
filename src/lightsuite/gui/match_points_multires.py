@@ -37,10 +37,7 @@ def _require_sitk() -> None:
     try:
         import SimpleITK as sitk  # noqa: F401
     except ImportError as exc:
-        msg = (
-            "SimpleITK is required for multires match-points.\n"
-            f"Install with: {_SITK_HINT}"
-        )
+        msg = f"SimpleITK is required for multires match-points.\nInstall with: {_SITK_HINT}"
         raise RuntimeError(msg) from exc
 
 
@@ -121,8 +118,7 @@ def attach_multires_match_points(
         matched, _n_o, _n_r = data.session.point_counts()
         if matched < data.min_pairs:
             _update_summaries(
-                f"Need at least {data.min_pairs} matched pairs for fit preview "
-                f"(have {matched})."
+                f"Need at least {data.min_pairs} matched pairs for fit preview (have {matched})."
             )
             return
         try:
@@ -233,20 +229,20 @@ def attach_multires_match_points(
         roi_z: int | None = None,
         refocus_canvas: bool = False,
     ) -> None:
+        next_oz = state["overview_z"] if overview_z is None else data.overview.clip_z(overview_z)
+        next_rz = state["roi_z"] if roi_z is None else data.roi.clip_z(roi_z)
+        if state["link_z"] and overview_z is not None and roi_z is None:
+            next_rz = data.roi.z_index_from_physical_z(data.overview.physical_z_um(next_oz))
+        elif state["link_z"] and roi_z is not None and overview_z is None:
+            next_oz = data.overview.z_index_from_physical_z(data.roi.physical_z_um(next_rz))
+        if next_oz == state["overview_z"] and next_rz == state["roi_z"]:
+            if refocus_canvas:
+                QTimer.singleShot(0, _refocus_canvas)
+            return
         state["_nav_syncing"] = True
         try:
-            if overview_z is not None:
-                state["overview_z"] = data.overview.clip_z(overview_z)
-            if roi_z is not None:
-                state["roi_z"] = data.roi.clip_z(roi_z)
-            if state["link_z"] and overview_z is not None and roi_z is None:
-                state["roi_z"] = data.roi.z_index_from_physical_z(
-                    data.overview.physical_z_um(state["overview_z"])
-                )
-            elif state["link_z"] and roi_z is not None and overview_z is None:
-                state["overview_z"] = data.overview.z_index_from_physical_z(
-                    data.roi.physical_z_um(state["roi_z"])
-                )
+            state["overview_z"] = next_oz
+            state["roi_z"] = next_rz
             _refresh(fit_preview=False)
             _sync_navigation_widget()
         finally:
@@ -283,7 +279,8 @@ def attach_multires_match_points(
             "label": "ROI Z index",
         },
         link_z={"label": "Link Z (physical)"},
-        call_button="Show slices",
+        call_button=False,
+        auto_call=False,
     )
     def navigation(
         overview_z: int = _init_oz,
@@ -318,6 +315,28 @@ def attach_multires_match_points(
         ),
         blocked=lambda: state["_nav_syncing"],
     )
+
+    @navigation.overview_z.changed.connect
+    def _overview_z_widget_changed() -> None:
+        if state["_nav_syncing"]:
+            return
+        _set_z(
+            overview_z=read_spinbox_int(
+                navigation.overview_z,
+                fallback=int(state["overview_z"]),
+            )
+        )
+
+    @navigation.roi_z.changed.connect
+    def _roi_z_widget_changed() -> None:
+        if state["_nav_syncing"]:
+            return
+        _set_z(
+            roi_z=read_spinbox_int(
+                navigation.roi_z,
+                fallback=int(state["roi_z"]),
+            )
+        )
 
     @navigation.link_z.changed.connect
     def _link_z_changed() -> None:
@@ -366,9 +385,7 @@ def attach_multires_match_points(
         oz = int(state["overview_z"])
         rz = int(state["roi_z"])
         data.session.overview_points_zyx = [
-            pt
-            for pt in data.session.overview_points_zyx
-            if int(round(pt[0])) != oz
+            pt for pt in data.session.overview_points_zyx if int(round(pt[0])) != oz
         ]
         data.session.roi_points_zyx = [
             pt for pt in data.session.roi_points_zyx if int(round(pt[0])) != rz
