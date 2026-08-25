@@ -24,7 +24,6 @@ from lightsuite.multires.models import (
 from lightsuite.multires.volume import (
     discover_volume_shape,
     volume_spec_from_geometry,
-    volume_spec_from_image,
 )
 
 
@@ -64,19 +63,49 @@ def apply_stitched_mosaic_geometry(
     return image
 
 
+def _resolve_volume_meta_path(
+    volume_path: Path,
+    meta_path: Path | None,
+    *,
+    volume_kind: str,
+) -> Path:
+    if meta_path is not None:
+        return meta_path.expanduser().resolve()
+    if volume_path.is_file():
+        return meta_path_for_tiff(volume_path).expanduser().resolve()
+    msg = (
+        f"{volume_kind}_meta_path is required when {volume_kind}_path is a stitched folder "
+        f"({volume_path})"
+    )
+    raise ValueError(msg)
+
+
 def _resolve_overview_meta_path(
     overview_path: Path,
     overview_meta_path: Path | None,
 ) -> Path:
-    if overview_meta_path is not None:
-        return overview_meta_path.expanduser().resolve()
-    if overview_path.is_file():
-        return meta_path_for_tiff(overview_path).expanduser().resolve()
-    msg = (
-        "overview_meta_path is required when overview_path is a stitched folder "
-        f"({overview_path})"
-    )
-    raise ValueError(msg)
+    return _resolve_volume_meta_path(overview_path, overview_meta_path, volume_kind="overview")
+
+
+def _resolve_roi_meta_path(roi_path: Path, roi_meta_path: Path | None) -> Path:
+    return _resolve_volume_meta_path(roi_path, roi_meta_path, volume_kind="roi")
+
+
+def _mesospim_volume_spec(
+    volume_path: Path,
+    meta: dict[str, float | int | str],
+    geometry: MesospimGeometryConfig,
+) -> ManifestVolumeSpec:
+    shape_zyx = mesospim_volume_shape(volume_path)
+    if volume_path.is_dir():
+        spacing, origin, direction = stitched_mosaic_geometry_fields(
+            shape_zyx,
+            meta,
+            geometry,
+        )
+        return volume_spec_from_geometry(volume_path, shape_zyx, spacing, origin, direction)
+    spacing, origin, direction = mesospim_geometry_fields(shape_zyx, meta, geometry)
+    return volume_spec_from_geometry(volume_path, shape_zyx, spacing, origin, direction)
 
 
 def _overview_volume_spec(
@@ -84,16 +113,7 @@ def _overview_volume_spec(
     overview_meta: dict[str, float | int | str],
     geometry: MesospimGeometryConfig,
 ) -> ManifestVolumeSpec:
-    shape_zyx = mesospim_volume_shape(overview_path)
-    if overview_path.is_dir():
-        spacing, origin, direction = stitched_mosaic_geometry_fields(
-            shape_zyx,
-            overview_meta,
-            geometry,
-        )
-        return volume_spec_from_geometry(overview_path, shape_zyx, spacing, origin, direction)
-    spacing, origin, direction = mesospim_geometry_fields(shape_zyx, overview_meta, geometry)
-    return volume_spec_from_geometry(overview_path, shape_zyx, spacing, origin, direction)
+    return _mesospim_volume_spec(overview_path, overview_meta, geometry)
 
 
 def _roi_volume_spec(
@@ -101,12 +121,7 @@ def _roi_volume_spec(
     roi_meta: dict[str, float | int | str],
     geometry: MesospimGeometryConfig,
 ) -> ManifestVolumeSpec:
-    if not roi_path.is_file():
-        msg = f"ROI path must be a mesoSPIM hyperstack TIFF: {roi_path}"
-        raise ValueError(msg)
-    shape_zyx = tiff_shape(roi_path)
-    spacing, origin, direction = mesospim_geometry_fields(shape_zyx, roi_meta, geometry)
-    return volume_spec_from_geometry(roi_path, shape_zyx, spacing, origin, direction)
+    return _mesospim_volume_spec(roi_path, roi_meta, geometry)
 
 
 def _resolved_mesospim_geometries(
@@ -137,10 +152,10 @@ def build_mesospim_pair_manifest(
 ) -> MultiresPairManifest:
     """Convert mesoSPIM TIFF + meta sidecars into a LightSuite multires pair manifest.
 
-    ``overview_path`` may be a single hyperstack TIFF or a stitched plane-per-file
-    folder (for example TeraStitcher ``RES(...)`` output). Stitched folders require
-    ``overview_meta_path`` pointing at an anchor tile meta file (typically the
-    northern tile).
+    ``overview_path`` and ``roi_path`` may each be a single hyperstack TIFF or a
+    stitched plane-per-file folder (for example TeraStitcher ``RES(...)`` output).
+    Stitched folders require the matching ``*_meta_path`` pointing at an anchor
+    tile meta file (typically the northern tile).
     """
     _ = tiff_remap
     overview_geometry, roi_geometry = _resolved_mesospim_geometries(
@@ -152,7 +167,7 @@ def build_mesospim_pair_manifest(
     roi_path = roi_path.expanduser().resolve()
 
     overview_meta_path = _resolve_overview_meta_path(overview_path, overview_meta_path)
-    roi_meta_path = (roi_meta_path or meta_path_for_tiff(roi_path)).expanduser().resolve()
+    roi_meta_path = _resolve_roi_meta_path(roi_path, roi_meta_path)
     overview_meta = parse_mesospim_meta(overview_meta_path)
     roi_meta = parse_mesospim_meta(roi_meta_path)
 
@@ -174,6 +189,7 @@ def build_mesospim_pair_manifest(
             "conversion": "lightsuite.multires.vendor.mesospim",
             "conversion_timestamp": datetime.now(timezone.utc).isoformat(),
             "overview_layout": "stitched_folder" if overview_path.is_dir() else "hyperstack_tiff",
+            "roi_layout": "stitched_folder" if roi_path.is_dir() else "hyperstack_tiff",
         },
         landmarks_path=str(landmarks_path) if landmarks_path is not None else None,
     )
@@ -196,14 +212,15 @@ def build_mesospim_multichannel_pair_manifest(
     overview_geometry: MesospimGeometryConfig | None = None,
     roi_geometry: MesospimGeometryConfig | None = None,
     overview_meta_path: Path | None = None,
+    overview_meta_by_channel: dict[str, Path] | None = None,
     roi_meta_by_channel: dict[str, Path] | None = None,
     landmarks_path: Path | None = None,
     output_manifest_path: Path | None = None,
 ) -> MultiresPairManifest:
     """Build a multichannel manifest sharing geometry across lasers.
 
-    Each channel entry must provide ``overview`` and ``roi`` paths. Overview paths
-    may be stitched folders; ROI paths must be mesoSPIM hyperstack TIFFs.
+    Each channel entry must provide ``overview`` and ``roi`` paths. Either path
+    may be a hyperstack TIFF or a stitched plane-per-file folder.
     """
     if reference_channel not in channels:
         msg = f"reference_channel {reference_channel!r} missing from channels"
@@ -214,16 +231,21 @@ def build_mesospim_multichannel_pair_manifest(
         overview_geometry=overview_geometry,
         roi_geometry=roi_geometry,
     )
+    overview_meta_by_channel = overview_meta_by_channel or {}
     roi_meta_by_channel = roi_meta_by_channel or {}
     channel_specs: dict[str, MultiresChannelSpecs] = {}
 
     for channel_name, paths in channels.items():
         overview_path = paths["overview"].expanduser().resolve()
         roi_path = paths["roi"].expanduser().resolve()
-        overview_meta = _resolve_overview_meta_path(overview_path, overview_meta_path)
-        roi_meta_path = (
-            roi_meta_by_channel.get(channel_name) or meta_path_for_tiff(roi_path)
-        ).expanduser().resolve()
+        overview_meta = _resolve_overview_meta_path(
+            overview_path,
+            overview_meta_by_channel.get(channel_name) or overview_meta_path,
+        )
+        roi_meta_path = _resolve_roi_meta_path(
+            roi_path,
+            roi_meta_by_channel.get(channel_name),
+        )
 
         channel_specs[channel_name] = MultiresChannelSpecs(
             overview=_overview_volume_spec(
@@ -286,35 +308,38 @@ def load_mesospim_volumes_from_manifest(
     else:
         msg = "Cannot resolve overview metadata for stitched folder manifest"
         raise ValueError(msg)
-    roi_meta = parse_mesospim_meta(meta_path_for_tiff(roi_path))
 
-    if overview_path.is_dir():
-        from lightsuite.multires.volume import load_volume_array
-
-        overview_arr = load_volume_array(overview_path)
-        overview = sitk.GetImageFromArray(overview_arr.astype("float32", copy=False))
-        spacing, origin, direction = stitched_mosaic_geometry_fields(
-            mesospim_volume_shape(overview_path),
-            overview_meta,
-            geometry,
-        )
-        overview.SetSpacing(spacing)
-        overview.SetOrigin(origin)
-        overview.SetDirection(direction)
+    roi_meta_path = Path(manifest.provenance.get("roi_meta", ""))
+    if roi_meta_path.is_file():
+        roi_meta = parse_mesospim_meta(roi_meta_path)
+    elif roi_path.is_file():
+        roi_meta = parse_mesospim_meta(meta_path_for_tiff(roi_path))
     else:
-        overview = read_tiff_as_float(
-            overview_path,
+        msg = "Cannot resolve ROI metadata for stitched folder manifest"
+        raise ValueError(msg)
+
+    def _load_volume(volume_path: Path, meta: dict[str, float | int | str]) -> sitk.Image:
+        if volume_path.is_dir():
+            from lightsuite.multires.volume import load_volume_array
+
+            arr = load_volume_array(volume_path)
+            image = sitk.GetImageFromArray(arr.astype("float32", copy=False))
+            spacing, origin, direction = stitched_mosaic_geometry_fields(
+                mesospim_volume_shape(volume_path),
+                meta,
+                geometry,
+            )
+            image.SetSpacing(spacing)
+            image.SetOrigin(origin)
+            image.SetDirection(direction)
+            return image
+        image = read_tiff_as_float(
+            volume_path,
             overview_path=overview_path,
             roi_path=roi_path,
             remap=tiff_remap,
         )
-        apply_image_geometry(overview, overview_meta, geometry)
+        apply_image_geometry(image, meta, geometry)
+        return image
 
-    roi = read_tiff_as_float(
-        roi_path,
-        overview_path=overview_path,
-        roi_path=roi_path,
-        remap=tiff_remap,
-    )
-    apply_image_geometry(roi, roi_meta, geometry)
-    return overview, roi
+    return _load_volume(overview_path, overview_meta), _load_volume(roi_path, roi_meta)

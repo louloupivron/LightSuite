@@ -86,6 +86,20 @@ def test_load_template_raw_unknown_workflow() -> None:
         load_template_raw("not_a_workflow")
 
 
+def test_load_template_raw_multires_is_blank_starter() -> None:
+    workflow, raw = load_template_raw("multires")
+    assert workflow == "multires"
+    assert raw["sample"]["name"] == "example_multires"
+    assert raw["multires"]["vendor"]["suite"] == "mesospim"
+    assert "pair_manifest" not in (raw["multires"] or {})
+    assert "488" in raw["multires"]["channels"]
+    assert raw["multires"]["geometry_mode"] == "metadata"
+    state = multires_form_from_raw(raw)
+    assert state.vendor_suite == "mesospim"
+    assert state.reference_channel == "488"
+    assert len(state.channels) == 2
+
+
 def test_tooltips_for_workflow_brain_and_spinal_differ_on_atlas() -> None:
     from lightsuite.gui.config_form_tooltips import tooltips_for_workflow
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import pytest
 import tifffile
 import yaml
 
@@ -100,7 +101,10 @@ def test_load_multires_config(tmp_path: Path) -> None:
         yaml.safe_dump(
             {
                 "sample": {"name": "sample_a", "save_path": str(tmp_path / "out")},
-                "multires": {"pair_manifest": str(manifest_path)},
+                "multires": {
+                    "vendor": {"suite": "manifest"},
+                    "pair_manifest": str(manifest_path),
+                },
             }
         ),
         encoding="utf-8",
@@ -133,7 +137,10 @@ def test_prepare_multires_registration_pair(tmp_path: Path) -> None:
         yaml.safe_dump(
             {
                 "sample": {"name": "sample_a", "save_path": str(tmp_path / "out")},
-                "multires": {"pair_manifest": str(manifest_path)},
+                "multires": {
+                    "vendor": {"suite": "manifest"},
+                    "pair_manifest": str(manifest_path),
+                },
             }
         ),
         encoding="utf-8",
@@ -201,6 +208,44 @@ def test_build_mesospim_stitched_overview_manifest(tmp_path: Path) -> None:
     )
     assert spacing == (5.0, 5.0, 2.0)
     assert len(direction) == 9
+
+
+def test_build_mesospim_stitched_roi_manifest(tmp_path: Path) -> None:
+    overview = tmp_path / "overview.tif"
+    stitched_roi = tmp_path / "ROI_stitched"
+    anchor_meta = tmp_path / "roi_tile0_meta.txt"
+    _write_stack(overview, (5, 16, 16))
+    _write_stitched_folder(stitched_roi, (5, 32, 12))
+    _write_meta(meta_path_for_tiff(overview))
+    _write_meta(anchor_meta, y_pixels=16, x_pixels=16, z_planes=5)
+
+    manifest = build_mesospim_pair_manifest(
+        sample_name="sample_a",
+        pair_label="stitched_roi_pair",
+        overview_path=overview,
+        roi_path=stitched_roi,
+        roi_meta_path=anchor_meta,
+    )
+
+    assert manifest.roi.shape_zyx == [5, 32, 12]
+    assert manifest.provenance["roi_layout"] == "stitched_folder"
+    assert mesospim_volume_shape(stitched_roi) == (5, 32, 12)
+
+
+def test_build_mesospim_stitched_roi_requires_meta(tmp_path: Path) -> None:
+    overview = tmp_path / "overview.tif"
+    stitched_roi = tmp_path / "ROI_stitched"
+    _write_stack(overview, (5, 16, 16))
+    _write_stitched_folder(stitched_roi, (5, 32, 12))
+    _write_meta(meta_path_for_tiff(overview))
+
+    with pytest.raises(ValueError, match="roi_meta_path is required"):
+        build_mesospim_pair_manifest(
+            sample_name="sample_a",
+            pair_label="missing_roi_meta",
+            overview_path=overview,
+            roi_path=stitched_roi,
+        )
 
 
 def test_build_mesospim_multichannel_manifest(tmp_path: Path) -> None:

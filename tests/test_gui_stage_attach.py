@@ -63,6 +63,7 @@ def test_multires_stage_specs_include_inspect_geometry_for_mesospim(tmp_path) ->
                 }
             },
             "registration": {"reference_channel": "488"},
+            "geometry_mode": "hybrid",
         },
     }
     (tmp_path / "results").mkdir()
@@ -70,7 +71,9 @@ def test_multires_stage_specs_include_inspect_geometry_for_mesospim(tmp_path) ->
     cfg = MultiresPipelineConfig.model_validate(raw)
     ids = [spec.id for spec in multires_stage_specs(cfg)]
     assert "inspect-geometry" in ids
-    assert ids.index("inspect-geometry") < ids.index("check-geometry")
+    assert "match-points" in ids
+    assert ids.index("inspect-geometry") < ids.index("match-points")
+    assert ids.index("match-points") < ids.index("check-geometry")
     assert "inspect-registration" in ids
     assert ids.index("register") < ids.index("inspect-registration")
 

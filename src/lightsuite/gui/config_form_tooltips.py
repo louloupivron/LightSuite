@@ -230,16 +230,26 @@ _MULTIRES: dict[str, str] = {
         "mixing old TIFFs and transforms."
     ),
     "multires_channels": (
-        "Per-channel overview (low mag) and ROI (high mag) paths. For mesoSPIM, optional "
-        "overview metadata for stitched folders. For SmartSPIM, overview and ROI metadata "
-        "(.json or .txt) when not auto-discovered beside the stack."
+        "Per-channel overview (low mag) and ROI (high mag) paths. Each may be a TIFF or a "
+        "stitched folder. Browse offers Select file… or Select folder…. Optional metadata "
+        "sidecars when not auto-discovered beside the volume."
+    ),
+    "multires_channel_overview": (
+        "Low-mag overview volume: a single TIFF or a stitched plane-per-file folder. "
+        "Browse → Select file… or Select folder…."
+    ),
+    "multires_channel_roi": (
+        "High-mag ROI volume: a single TIFF or a stitched folder. "
+        "Browse → Select file… or Select folder…."
     ),
     "multires_channel_overview_meta": (
-        "mesoSPIM stitched-folder anchor metadata, or SmartSPIM overview metadata.txt/json. "
-        "Optional when metadata sits beside the stack (SmartSPIM default)."
+        "Required for mesoSPIM stitched overview folders (anchor tile *_meta.txt). "
+        "SmartSPIM: metadata.txt/json when not auto-discovered beside the stack. "
+        "Optional for a TIFF whose sidecar sits next to the file."
     ),
     "multires_channel_roi_meta": (
-        "SmartSPIM ROI metadata.txt/json. Optional when metadata sits beside the ROI stack."
+        "Required for a stitched ROI folder. Optional for a TIFF whose sidecar sits "
+        "next to the file, or SmartSPIM metadata.txt/json beside the stack."
     ),
     "geometry_mode": (
         "metadata: use manifest motor geometry only. hybrid: refine overview↔ROI alignment "

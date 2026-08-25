@@ -1,0 +1,72 @@
+# Canonical multiresolution template (overview ↔ ROI). Copy before editing.
+#
+#   cp examples/multiresolution.yaml my_multires.yaml
+#   uv run lightsuite multires validate-config -c my_multires.yaml
+#
+# Napari: Config dock → From template → multires, then Save as…
+# Filled lab samples: examples/config/multiresolution/
+# See examples/README.md and docs/usage_multiresolution.md.
+
+sample:
+  name: example_multires
+  save_path: /path/to/results/example_multires
+  scratch: /path/to/fast_scratch
+
+multires:
+  vendor:
+    suite: mesospim
+    # suite: smartspim
+    # suite: manifest
+    # suite: custom
+    # custom_entry: /path/to/convert_to_pair_manifest.py
+
+  pair_label: example_pair
+  # Only for suite: manifest (built-in vendors write converted/<pair_label>_pair.json):
+  # pair_manifest: /path/to/pair.json
+
+  channels:
+    "488":
+      overview: /path/to/overview_488.tif   # or a stitched folder
+      roi: /path/to/roi_488.tif             # or a stitched folder
+      # Required for stitched folders; optional when a TIFF sidecar sits beside the file:
+      # overview_meta_path: /path/to/overview_488_meta.txt
+      # roi_meta_path: /path/to/roi_488_meta.txt
+    "561":
+      overview: /path/to/overview_561.tif
+      roi: /path/to/roi_561.tif
+
+  geometry_mode: metadata
+  # geometry_mode: hybrid   # enable match-points landmarks
+
+  landmarks:
+    fit_mode: similarity
+    # min_pairs: 3
+    # session_path: null
+
+  # Optional mesoSPIM axis convention (YAML only; inspect-geometry can set this):
+  # mesospim_geometry:
+  #   overview:
+  #     lateral_flip: [1, -1]
+  #   roi:
+  #     lateral_flip: [1, -1]
+
+  registration:
+    reference_channel: "488"
+    overlap_margin_um: 0.0
+    write_full_overview_canvas: true
+    # geometry_check_level: full   # or slice-qc, metadata-only
+    # experiment_name: example_pair
+    # registration_bin: 1
+    # elastix_stages: [translation, rigid]
+    # apply_transform_to: ["561"]
+
+compute:
+  workers: 4
+
+# Optional: warp ROI-native annotations into overview space after register
+# import:
+#   write_csv: true
+#   annotations:
+#     - format: points_csv
+#       path: /path/to/roi_points.csv
+#       label: cells

@@ -46,6 +46,15 @@ Supported input layouts today:
 
 The pipeline streams planes from disk. Full overview and ROI stacks are **not** loaded into RAM at once.
 
+Copy the blank starter, then edit paths (or use Config → **From template** → multires in `lightsuite gui`):
+
+```bash
+cp examples/multiresolution.yaml my_multires.yaml
+uv run lightsuite multires validate-config -c my_multires.yaml
+```
+
+Filled lab samples live under `examples/config/multiresolution/`.
+
 Orchestrate automated steps with `lightsuite multires run -c my.yaml` (see `lightsuite multires stages` for checkpoint status). Interactive stages (inspect-geometry, match-points, inspect-registration) also appear in the unified GUI: `lightsuite gui -c my.yaml`.
 
 ---
@@ -232,7 +241,7 @@ multires:
 | Key | Default | Description |
 |-----|---------|-------------|
 | `multires.pair_manifest` | auto under `save_path/converted/` | Pair JSON path. Required unless `multires.channels` is set; when channels are set, the JSON is rebuilt from those paths |
-| `multires.channels` | — | Optional map of channel → `{overview, roi}` paths (mesoSPIM). Preferred way to declare multichannel inputs in YAML |
+| `multires.channels` | — | Channel → `{overview, roi}` paths (TIFF or stitched folder) plus optional `overview_meta_path` / `roi_meta_path` |
 | `multires.overview_meta_path` | — | Anchor tile `*_meta.txt` for stitched overview folders |
 | `multires.pair_label` | from experiment/sample | Short identifier used in output folders and default landmark filenames |
 | `multires.geometry_mode` | `metadata` | `metadata` — overlap from stage geometry only; `hybrid` — metadata crop + landmark fit |

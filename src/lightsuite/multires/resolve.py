@@ -47,6 +47,11 @@ def _build_mesospim_manifest_from_channels(
         ref_paths = meso.channels[reference_channel]
         overview_meta_path = ref_paths.overview_meta_path
 
+    overview_meta_by_channel = {
+        name: channel.overview_meta_path
+        for name, channel in meso.channels.items()
+        if channel.overview_meta_path is not None
+    }
     roi_meta_by_channel = {
         name: channel.roi_meta_path
         for name, channel in meso.channels.items()
@@ -68,6 +73,7 @@ def _build_mesospim_manifest_from_channels(
         overview_geometry=overview_geometry,
         roi_geometry=roi_geometry,
         overview_meta_path=overview_meta_path,
+        overview_meta_by_channel=overview_meta_by_channel or None,
         roi_meta_by_channel=roi_meta_by_channel or None,
         output_manifest_path=manifest_path,
     )

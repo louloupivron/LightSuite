@@ -40,6 +40,10 @@ from lightsuite.gui.config_form_data import (
 from lightsuite.cli.spaces import default_export_space_checks
 
 
+_VOLUME_FILE_FILTER = "TIFF images (*.tif *.tiff);;All files (*)"
+_META_FILE_FILTER = "Metadata (*.txt *.json);;All files (*)"
+
+
 def _browse_directory(parent: Any, title: str, start: str) -> str:
     from qtpy.QtWidgets import QFileDialog
 
@@ -47,11 +51,38 @@ def _browse_directory(parent: Any, title: str, start: str) -> str:
     return path or ""
 
 
-def _browse_file(parent: Any, title: str, start: str) -> str:
+def _browse_file(parent: Any, title: str, start: str, name_filter: str = "") -> str:
     from qtpy.QtWidgets import QFileDialog
 
-    path, _ = QFileDialog.getOpenFileName(parent, title, start)
+    path, _ = QFileDialog.getOpenFileName(parent, title, start, name_filter)
     return path or ""
+
+
+def _browse_file_or_directory(
+    parent: Any,
+    title: str,
+    start: str,
+    *,
+    button: Any | None = None,
+    name_filter: str = "",
+) -> str:
+    """Native file or folder picker via a short menu on the Browse button."""
+    from qtpy.QtGui import QCursor
+    from qtpy.QtWidgets import QMenu
+
+    menu = QMenu(parent)
+    file_action = menu.addAction("Select file…")
+    folder_action = menu.addAction("Select folder…")
+    if button is not None:
+        pos = button.mapToGlobal(button.rect().bottomLeft())
+    else:
+        pos = QCursor.pos()
+    chosen = menu.exec(pos)
+    if chosen is file_action:
+        return _browse_file(parent, title, start, name_filter)
+    if chosen is folder_action:
+        return _browse_directory(parent, title, start)
+    return ""
 
 
 _INTENSITY_METRIC_OPTIONS: list[tuple[str, str]] = [
@@ -90,7 +121,7 @@ class _AnnotationRow:
 
 
 class _PathField:
-    """Line edit with a browse button for directories or files."""
+    """Line edit with a browse button for directories, files, or either."""
 
     def __init__(
         self,
@@ -99,6 +130,7 @@ class _PathField:
         browse_label: str,
         browse_mode: str = "directory",
         on_change: Callable[[], None] | None = None,
+        name_filter: str = "",
     ) -> None:
         from qtpy.QtWidgets import QHBoxLayout, QLineEdit, QPushButton, QWidget
 
@@ -110,15 +142,24 @@ class _PathField:
             self.line.textChanged.connect(on_change)
         self._browse_mode = browse_mode
         self._browse_label = browse_label
-        browse = QPushButton("Browse…", parent)
-        browse.clicked.connect(self._on_browse)
+        self._name_filter = name_filter
+        self._browse = QPushButton("Browse…", parent)
+        self._browse.clicked.connect(self._on_browse)
         layout.addWidget(self.line, stretch=1)
-        layout.addWidget(browse)
+        layout.addWidget(self._browse)
 
     def _on_browse(self) -> None:
         start = self.line.text().strip() or str(Path.home())
         if self._browse_mode == "file":
-            path = _browse_file(self.widget, self._browse_label, start)
+            path = _browse_file(self.widget, self._browse_label, start, self._name_filter)
+        elif self._browse_mode == "file_or_directory":
+            path = _browse_file_or_directory(
+                self.widget,
+                self._browse_label,
+                start,
+                button=self._browse,
+                name_filter=self._name_filter,
+            )
         else:
             path = _browse_directory(self.widget, self._browse_label, start)
         if path:
@@ -139,6 +180,7 @@ class _PathField:
     def set_tooltip(self, text: str) -> None:
         self.widget.setToolTip(text)
         self.line.setToolTip(text)
+        self._browse.setToolTip(text)
 
 
 class ConfigEditorDock:
@@ -1130,33 +1172,20 @@ class ConfigEditorDock:
         self._update_multires_channel_browse_modes()
 
     def _update_multires_channel_browse_modes(self) -> None:
-        suite = str(self._multires_vendor_combo.currentData() or "mesospim")
         for row in self._multires_channel_rows:
-            if suite == "smartspim":
-                row.overview_field.set_browse_mode("directory")
-                row.overview_field.set_browse_label("Overview folder")
-                row.roi_field.set_browse_mode("directory")
-                row.roi_field.set_browse_label("ROI folder")
-            elif suite == "mesospim":
-                row.overview_field.set_browse_mode("directory")
-                row.overview_field.set_browse_label("Overview folder or TIFF")
-                row.roi_field.set_browse_mode("file")
-                row.roi_field.set_browse_label("ROI volume")
-            else:
-                row.overview_field.set_browse_mode("file")
-                row.overview_field.set_browse_label("Overview volume")
-                row.roi_field.set_browse_mode("file")
-                row.roi_field.set_browse_label("ROI volume")
+            row.overview_field.set_browse_mode("file_or_directory")
+            row.overview_field.set_browse_label("Overview TIFF or folder")
+            row.roi_field.set_browse_mode("file_or_directory")
+            row.roi_field.set_browse_label("ROI TIFF or folder")
 
     def _update_multires_channel_meta_visibility(self) -> None:
         suite = str(self._multires_vendor_combo.currentData() or "mesospim")
-        show_overview_meta = suite in {"mesospim", "smartspim"}
-        show_roi_meta = suite == "smartspim"
+        show_meta = suite in {"mesospim", "smartspim", "custom"}
         for row in self._multires_channel_rows:
-            row.overview_meta_field.widget.setVisible(show_overview_meta)
-            row.overview_meta_label.setVisible(show_overview_meta)
-            row.roi_meta_field.widget.setVisible(show_roi_meta)
-            row.roi_meta_label.setVisible(show_roi_meta)
+            row.overview_meta_field.widget.setVisible(show_meta)
+            row.overview_meta_label.setVisible(show_meta)
+            row.roi_meta_field.widget.setVisible(show_meta)
+            row.roi_meta_label.setVisible(show_meta)
 
     def _update_converter_field_visibility(self) -> None:
         """Show suite-dependent converter fields; native layers only for suite=native."""
@@ -1387,16 +1416,18 @@ class ConfigEditorDock:
 
         overview_field = _PathField(
             parent=row_widget,
-            browse_label="Overview volume",
-            browse_mode="file",
+            browse_label="Overview TIFF or folder",
+            browse_mode="file_or_directory",
             on_change=self._mark_dirty,
+            name_filter=_VOLUME_FILE_FILTER,
         )
         overview_field.set_text(overview)
         roi_field = _PathField(
             parent=row_widget,
-            browse_label="ROI volume",
-            browse_mode="file",
+            browse_label="ROI TIFF or folder",
+            browse_mode="file_or_directory",
             on_change=self._mark_dirty,
+            name_filter=_VOLUME_FILE_FILTER,
         )
         roi_field.set_text(roi)
         overview_meta_label = QLabel("Overview meta")
@@ -1405,6 +1436,7 @@ class ConfigEditorDock:
             browse_label="Overview metadata (.json/.txt)",
             browse_mode="file",
             on_change=self._mark_dirty,
+            name_filter=_META_FILE_FILTER,
         )
         overview_meta_field.set_text(overview_meta)
         roi_meta_label = QLabel("ROI meta")
@@ -1413,9 +1445,12 @@ class ConfigEditorDock:
             browse_label="ROI metadata (.json/.txt)",
             browse_mode="file",
             on_change=self._mark_dirty,
+            name_filter=_META_FILE_FILTER,
         )
         roi_meta_field.set_text(roi_meta)
         tips = tooltips_for_workflow("multires")
+        overview_field.set_tooltip(tips.get("multires_channel_overview", ""))
+        roi_field.set_tooltip(tips.get("multires_channel_roi", ""))
         overview_meta_field.set_tooltip(tips.get("multires_channel_overview_meta", ""))
         roi_meta_field.set_tooltip(tips.get("multires_channel_roi_meta", ""))
 

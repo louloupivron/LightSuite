@@ -25,7 +25,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 _CONFIG_TEMPLATES: dict[str, Path] = {
     "brain": _REPO_ROOT / "examples/brain_lightsheet.yaml",
     "spinal": _REPO_ROOT / "examples/spinal_cord.yaml",
-    "multires": _REPO_ROOT / "examples/config/multiresolution/gilda_tg14_multires.yaml",
+    "multires": _REPO_ROOT / "examples/multiresolution.yaml",
 }
 
 

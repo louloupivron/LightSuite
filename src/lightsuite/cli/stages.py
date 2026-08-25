@@ -261,22 +261,22 @@ def _multires_supports_match_points(config: _Config) -> bool:
 
 def multires_stage_specs(config: _Config) -> list[StageSpec]:
     stages: list[StageSpec] = []
-    if _multires_supports_match_points(config):
-        stages.append(
-            StageSpec(
-                "match-points",
-                "Match points",
-                "multires landmark session",
-                optional=True,
-                manual=True,
-            ),
-        )
     if _multires_supports_inspect_geometry(config):
         stages.append(
             StageSpec(
                 "inspect-geometry",
                 "Inspect geometry",
                 "multires.mesospim_geometry lateral_flip",
+                optional=True,
+                manual=True,
+            ),
+        )
+    if _multires_supports_match_points(config):
+        stages.append(
+            StageSpec(
+                "match-points",
+                "Match points",
+                "multires landmark session",
                 optional=True,
                 manual=True,
             ),
@@ -556,8 +556,8 @@ def evaluate_stage_statuses(
     for spec in specs:
         if spec.optional and spec.id in {
             "align-slices",
-            "match-points",
             "inspect-geometry",
+            "match-points",
             "inspect-registration",
             "view-registration",
             "import-segmentation",

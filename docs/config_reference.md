@@ -12,7 +12,7 @@ LightSuite configs are YAML files validated by Pydantic models in `src/lightsuit
 
 **Workflows:** *brain* = whole-brain lightsheet, *spinal* = spinal cord, *multires* = overview↔ROI registration.
 
-**Templates:** `examples/brain_lightsheet.yaml`, `examples/spinal_cord.yaml`, `examples/config/multiresolution/gilda_tg14_multires.yaml`.
+**Templates:** `examples/brain_lightsheet.yaml`, `examples/spinal_cord.yaml`, `examples/multiresolution.yaml`.
 
 ---
 
@@ -190,10 +190,10 @@ Top-level block in multires YAML only (not used by brain/spinal pipeline configs
 |-----|:---:|---------|-------------|
 | `multires.pair_label` | GUI | — | Short label for manifest and outputs |
 | `multires.pair_manifest` | GUI | — | JSON pair manifest path |
-| `multires.channels.<name>.overview` | GUI | — | Per-channel overview (low mag) volume |
-| `multires.channels.<name>.roi` | GUI | — | Per-channel ROI (high mag) volume |
-| `multires.channels.<name>.overview_meta_path` | YAML | — | Optional sidecar metadata |
-| `multires.channels.<name>.roi_meta_path` | YAML | — | Optional sidecar metadata |
+| `multires.channels.<name>.overview` | GUI | — | Per-channel overview (low mag): TIFF or stitched folder |
+| `multires.channels.<name>.roi` | GUI | — | Per-channel ROI (high mag): TIFF or stitched folder |
+| `multires.channels.<name>.overview_meta_path` | GUI | — | Sidecar metadata (required for stitched overview folders) |
+| `multires.channels.<name>.roi_meta_path` | GUI | — | Sidecar metadata (required for stitched ROI folders) |
 | `multires.geometry_mode` | GUI | `metadata` | `metadata` or `hybrid` (landmark-refined geometry) |
 | `multires.landmarks.fit_mode` | GUI | `similarity` | `similarity`, `affine`, or `rigid` |
 | `multires.landmarks.session_path` | YAML | auto | Landmark session JSON path |

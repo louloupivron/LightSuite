@@ -6,10 +6,12 @@
 |----------|-------------------|---------------|
 | Brain lightsheet | [`brain_lightsheet.yaml`](brain_lightsheet.yaml) | [Brain usage guide](../docs/usage_lightsheet_brain.md) |
 | Spinal cord | [`spinal_cord.yaml`](spinal_cord.yaml) | [Spinal usage guide](../docs/usage_spinal_cord.md) |
-| Multiresolution (overview ↔ ROI) | See `config/multiresolution/` | [Multires usage guide](../docs/usage_multiresolution.md) |
+| Multiresolution (overview ↔ ROI) | [`multiresolution.yaml`](multiresolution.yaml) | [Multires usage guide](../docs/usage_multiresolution.md) |
 
 ```bash
 cp examples/brain_lightsheet.yaml my_mouse.yaml
+# or: cp examples/spinal_cord.yaml my_spinal.yaml
+# or: cp examples/multiresolution.yaml my_multires.yaml
 # edit paths, then:
 uv run lightsuite doctor -c my_mouse.yaml
 uv run lightsuite brain run -c my_mouse.yaml --through match-points
