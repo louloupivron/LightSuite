@@ -61,6 +61,11 @@ def resolve_pair_manifest(
             for name, channel in meso.channels.items()
             if channel.roi_meta_path is not None
         }
+        overview_meta_by_channel = {
+            name: channel.overview_meta_path
+            for name, channel in meso.channels.items()
+            if channel.overview_meta_path is not None
+        }
 
         mesospim_geometry = meso.mesospim_geometry
         overview_geometry = _merge_mesospim_geometry(
@@ -77,6 +82,7 @@ def resolve_pair_manifest(
             overview_geometry=overview_geometry,
             roi_geometry=roi_geometry,
             overview_meta_path=overview_meta_path,
+            overview_meta_by_channel=overview_meta_by_channel or None,
             roi_meta_by_channel=roi_meta_by_channel or None,
             output_manifest_path=manifest_path,
         )

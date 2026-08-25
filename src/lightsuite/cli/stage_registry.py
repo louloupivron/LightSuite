@@ -252,8 +252,8 @@ _SPINAL_RUNNERS: dict[str, StageRunner] = {
 }
 
 _MULTIRES_RUNNERS: dict[str, StageRunner] = {
-    "match-points": _multires_match_points,
     "inspect-geometry": _multires_inspect_geometry,
+    "match-points": _multires_match_points,
     "check-geometry": _multires_check_geometry,
     "register": _multires_register,
     "inspect-registration": _multires_inspect_registration,

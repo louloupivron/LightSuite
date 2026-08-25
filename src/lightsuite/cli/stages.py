@@ -214,6 +214,15 @@ def spinal_stage_specs(config: SpinalCordPipelineConfig) -> list[StageSpec]:
 
 def multires_stage_specs(config: _Config) -> list[StageSpec]:
     stages: list[StageSpec] = []
+    stages.append(
+        StageSpec(
+            "inspect-geometry",
+            "Inspect geometry",
+            "multires.mesospim_geometry lateral_flip",
+            optional=True,
+            manual=True,
+        ),
+    )
     multires = getattr(config, "multires", None)
     landmarks = getattr(multires, "landmarks", None) if multires else None
     if landmarks is not None and getattr(landmarks, "session_path", None) is not False:
@@ -226,15 +235,6 @@ def multires_stage_specs(config: _Config) -> list[StageSpec]:
                 manual=True,
             ),
         )
-    stages.append(
-        StageSpec(
-            "inspect-geometry",
-            "Inspect geometry",
-            "multires.mesospim_geometry lateral_flip",
-            optional=True,
-            manual=True,
-        ),
-    )
     stages.extend(
         [
             StageSpec("check-geometry", "Check geometry", "geometry/ overlap QA"),
@@ -466,8 +466,8 @@ def evaluate_stage_statuses(
     for spec in specs:
         if spec.optional and spec.id in {
             "align-slices",
-            "match-points",
             "inspect-geometry",
+            "match-points",
             "inspect-registration",
             "view-registration",
         }:

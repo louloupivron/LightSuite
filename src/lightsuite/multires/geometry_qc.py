@@ -10,7 +10,7 @@ import numpy as np
 import SimpleITK as sitk
 
 from lightsuite.mesospim.config_models import MesospimGeometryConfig
-from lightsuite.mesospim.meta import meta_path_for_tiff, parse_mesospim_meta
+from lightsuite.mesospim.meta import parse_mesospim_meta
 from lightsuite.multires.config_models import MultiresPipelineConfig
 from lightsuite.multires.geometry import resample_to_reference_grid
 from lightsuite.multires.models import ManifestVolumeSpec
@@ -28,6 +28,7 @@ from lightsuite.multires.spec_geometry import (
 from lightsuite.multires.vendor.mesospim import (
     _overview_volume_spec,
     _resolve_overview_meta_path,
+    _resolve_roi_meta_path,
     _roi_volume_spec,
 )
 
@@ -142,7 +143,7 @@ def build_reference_specs_with_geometry(
     geometry = _geometry_for_lateral_flip(cfg, lateral_flip)
 
     overview_meta_path = _resolve_overview_meta_path(overview_path, overview_meta_path)
-    roi_meta_path = (roi_meta_path or meta_path_for_tiff(roi_path)).expanduser().resolve()
+    roi_meta_path = _resolve_roi_meta_path(roi_path, roi_meta_path)
     overview_spec = _overview_volume_spec(
         overview_path,
         parse_mesospim_meta(overview_meta_path),

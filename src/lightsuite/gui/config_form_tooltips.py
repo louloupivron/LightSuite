@@ -180,8 +180,26 @@ _MULTIRES: dict[str, str] = {
         "applied to co-registered channels. Can also be set in the GUI shell."
     ),
     "multires_channels": (
-        "Per-channel overview (low mag) and ROI (high mag) image paths. Channel names "
-        "become YAML keys under multires.channels."
+        "Per-channel overview (low mag) and ROI (high mag) paths. Each may be a TIFF or a "
+        "stitched folder. Browse offers Select file… or Select folder…. Optional metadata "
+        "sidecars when not auto-discovered beside the volume."
+    ),
+    "multires_channel_overview": (
+        "Low-mag overview volume: a single TIFF or a stitched plane-per-file folder. "
+        "Browse → Select file… or Select folder…."
+    ),
+    "multires_channel_roi": (
+        "High-mag ROI volume: a single TIFF or a stitched folder. "
+        "Browse → Select file… or Select folder…."
+    ),
+    "multires_channel_overview_meta": (
+        "Required for mesoSPIM stitched overview folders (anchor tile *_meta.txt). "
+        "SmartSPIM: metadata.txt/json when not auto-discovered beside the stack. "
+        "Optional for a TIFF whose sidecar sits next to the file."
+    ),
+    "multires_channel_roi_meta": (
+        "Required for a stitched ROI folder. Optional for a TIFF whose sidecar sits "
+        "next to the file, or SmartSPIM metadata.txt/json beside the stack."
     ),
     "geometry_mode": (
         "metadata: use manifest motor geometry only. hybrid: refine overview↔ROI alignment "

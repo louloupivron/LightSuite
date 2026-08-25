@@ -37,6 +37,9 @@ from lightsuite.gui.config_form_data import (
 )
 
 
+_VOLUME_FILE_FILTER = "TIFF images (*.tif *.tiff);;All files (*)"
+
+
 def _browse_directory(parent: Any, title: str, start: str) -> str:
     from qtpy.QtWidgets import QFileDialog
 
@@ -44,11 +47,38 @@ def _browse_directory(parent: Any, title: str, start: str) -> str:
     return path or ""
 
 
-def _browse_file(parent: Any, title: str, start: str) -> str:
+def _browse_file(parent: Any, title: str, start: str, name_filter: str = "") -> str:
     from qtpy.QtWidgets import QFileDialog
 
-    path, _ = QFileDialog.getOpenFileName(parent, title, start)
+    path, _ = QFileDialog.getOpenFileName(parent, title, start, name_filter)
     return path or ""
+
+
+def _browse_file_or_directory(
+    parent: Any,
+    title: str,
+    start: str,
+    *,
+    button: Any | None = None,
+    name_filter: str = "",
+) -> str:
+    """Native file or folder picker via a short menu on the Browse button."""
+    from qtpy.QtGui import QCursor
+    from qtpy.QtWidgets import QMenu
+
+    menu = QMenu(parent)
+    file_action = menu.addAction("Select file…")
+    folder_action = menu.addAction("Select folder…")
+    if button is not None:
+        pos = button.mapToGlobal(button.rect().bottomLeft())
+    else:
+        pos = QCursor.pos()
+    chosen = menu.exec(pos)
+    if chosen is file_action:
+        return _browse_file(parent, title, start, name_filter)
+    if chosen is folder_action:
+        return _browse_directory(parent, title, start)
+    return ""
 
 
 _INTENSITY_METRIC_OPTIONS: list[tuple[str, str]] = [
@@ -75,7 +105,7 @@ class _AnnotationRow:
 
 
 class _PathField:
-    """Line edit with a browse button for directories or files."""
+    """Line edit with a browse button for directories, files, or either."""
 
     def __init__(
         self,
@@ -84,6 +114,7 @@ class _PathField:
         browse_label: str,
         browse_mode: str = "directory",
         on_change: Callable[[], None] | None = None,
+        name_filter: str = "",
     ) -> None:
         from qtpy.QtWidgets import QHBoxLayout, QLineEdit, QPushButton, QWidget
 
@@ -95,15 +126,24 @@ class _PathField:
             self.line.textChanged.connect(on_change)
         self._browse_mode = browse_mode
         self._browse_label = browse_label
-        browse = QPushButton("Browse…", parent)
-        browse.clicked.connect(self._on_browse)
+        self._name_filter = name_filter
+        self._browse = QPushButton("Browse…", parent)
+        self._browse.clicked.connect(self._on_browse)
         layout.addWidget(self.line, stretch=1)
-        layout.addWidget(browse)
+        layout.addWidget(self._browse)
 
     def _on_browse(self) -> None:
         start = self.line.text().strip() or str(Path.home())
         if self._browse_mode == "file":
-            path = _browse_file(self.widget, self._browse_label, start)
+            path = _browse_file(self.widget, self._browse_label, start, self._name_filter)
+        elif self._browse_mode == "file_or_directory":
+            path = _browse_file_or_directory(
+                self.widget,
+                self._browse_label,
+                start,
+                button=self._browse,
+                name_filter=self._name_filter,
+            )
         else:
             path = _browse_directory(self.widget, self._browse_label, start)
         if path:
@@ -118,6 +158,7 @@ class _PathField:
     def set_tooltip(self, text: str) -> None:
         self.widget.setToolTip(text)
         self.line.setToolTip(text)
+        self._browse.setToolTip(text)
 
 
 class ConfigEditorDock:
@@ -1029,16 +1070,18 @@ class ConfigEditorDock:
         name_edit.textChanged.connect(self._mark_dirty)
         overview_field = _PathField(
             parent=row_widget,
-            browse_label="Overview volume",
-            browse_mode="file",
+            browse_label="Overview TIFF or folder",
+            browse_mode="file_or_directory",
             on_change=self._mark_dirty,
+            name_filter=_VOLUME_FILE_FILTER,
         )
         overview_field.set_text(overview)
         roi_field = _PathField(
             parent=row_widget,
-            browse_label="ROI volume",
-            browse_mode="file",
+            browse_label="ROI TIFF or folder",
+            browse_mode="file_or_directory",
             on_change=self._mark_dirty,
+            name_filter=_VOLUME_FILE_FILTER,
         )
         roi_field.set_text(roi)
         remove = QPushButton("Remove")

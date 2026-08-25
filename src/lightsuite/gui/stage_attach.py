@@ -104,8 +104,8 @@ STAGE_ATTACH: dict[tuple[str, str], AttachFactory] = {
     ("spinal", "align-longitudinal"): _spinal_align_longitudinal,
     ("spinal", "match-points"): _spinal_match_points,
     ("spinal", "plot-stats"): _spinal_stats_plots,
-    ("multires", "match-points"): _multires_match_points,
     ("multires", "inspect-geometry"): _multires_inspect_geometry_attach,
+    ("multires", "match-points"): _multires_match_points,
     ("multires", "inspect-registration"): _multires_inspect_registration_attach,
 }
 
