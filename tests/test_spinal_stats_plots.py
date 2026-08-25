@@ -104,6 +104,7 @@ def test_stats_plots_panel_segment_range_and_csv(tmp_path: Path) -> None:
     assert panel._segment_end.currentText() == "Co2"
     assert panel._current_segments() == ["C1", "Co2"]
     assert panel._export_kind == "matrix"
+    assert panel._metric_combo.toolTip()
     csv_path = tmp_path / "matrix.csv"
     from lightsuite.analysis.cord_heatmap import write_cord_heatmap_matrix_csv
 
@@ -126,11 +127,12 @@ def test_stats_plots_panel_compare_view(tmp_path: Path) -> None:
     config = _config_with_stats(tmp_path, split_hemispheres=True)
     stats_path = config.sample.save_path / "volume_registered" / "region_stats.csv"
     panel = CordStatsPlotsPanel(config, stats_df=pd.read_csv(stats_path), stats_path=stats_path)
-    compare_index = panel._view_combo.findData("compare")
+    compare_index = panel._hemisphere_combo.findData("compare")
     assert compare_index >= 0
-    panel._view_combo.setCurrentIndex(compare_index)
+    panel._hemisphere_combo.setCurrentIndex(compare_index)
     panel._update_plot()
     assert panel._export_kind == "compare"
     assert set(panel._export_matrices) == {"left", "right", "whole"}
+    assert panel._hemisphere_combo.toolTip()
     panel.teardown()
     app.processEvents()

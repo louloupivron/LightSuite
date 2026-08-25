@@ -125,8 +125,8 @@ Set `analysis.hemisphere_flip: true` if left/right assignment looks swapped.
 
 The Napari **stats / plots** panel reads `stats/region_stats.csv` (falling back to
 `volume_registered/`). Choose a segment range (default C1–Co2), save the displayed
-matrix as CSV, and — when left/right rows are present — switch **View** to
-compare L | R | whole or a left − right difference map.
+matrix as CSV, and — when left/right rows are present — use **Hemisphere** to plot
+one side, compare L | R | whole, or a left − right difference map.
 
 ### Inspect imports (Napari QC)
 

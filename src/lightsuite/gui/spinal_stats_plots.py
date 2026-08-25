@@ -39,6 +39,43 @@ _X_LABELS_BY_ROLLUP = {
     "region": "Atlas region",
 }
 
+_STATS_PANEL_TOOLTIPS: dict[str, str] = {
+    "plot_type": (
+        "Value shown in the heatmap. Intensity metrics use registered channel volumes; "
+        "cell count and density come from imported point clouds."
+    ),
+    "channel": (
+        "Intensity channel index or import label to plot. The list updates when you "
+        "change plot type."
+    ),
+    "hemisphere": (
+        "Which side to plot. Whole cord, left, or right are single heatmaps. "
+        "Compare shows L | R | whole side by side with a shared color scale. "
+        "Difference maps left minus right (red = higher on the left). "
+        "Compare and difference appear only when region_stats.csv has left/right rows."
+    ),
+    "rollup": (
+        "How fine the X axis is: structure = laminae I–X plus dorsal/lateral/ventral "
+        "funiculi; division = gray vs white matter; horn = dorsal/ventral/central; "
+        "region = finest atlas parcels."
+    ),
+    "segments": (
+        "Rostrocaudal range to show, inclusive, in atlas order (same as C1:Co2 on the CLI). "
+        "Segments with no values stay grey."
+    ),
+    "normalize": (
+        "Rescale colors before plotting. None keeps raw values. Per segment divides each "
+        "row by its max; per region divides each column by its max. Ignored for the "
+        "left − right difference map."
+    ),
+    "update": "Redraw the heatmap with the current controls.",
+    "save_png": "Save the heatmap currently on screen as a PNG (default: <save_path>/plots/).",
+    "save_csv": (
+        "Save the displayed matrix as CSV. Compare mode writes columns left, right, and whole; "
+        "other modes write a segment × region table."
+    ),
+}
+
 
 def _parse_channel_value(text: str) -> int | str:
     if text.isdigit():
@@ -50,6 +87,15 @@ def _default_cmap(metric: str) -> str:
     if "intensity" in metric or metric == "std":
         return "hot"
     return "viridis"
+
+
+def _add_form_row(form, title: str, widget, tooltip: str) -> None:
+    from qtpy.QtWidgets import QLabel
+
+    label = QLabel(title)
+    label.setToolTip(tooltip)
+    widget.setToolTip(tooltip)
+    form.addRow(label, widget)
 
 
 class CordStatsPlotsPanel:
@@ -100,26 +146,23 @@ class CordStatsPlotsPanel:
         for metric in self._options["metrics"]:
             self._metric_combo.addItem(metric_label(str(metric)), str(metric))
         self._metric_combo.currentIndexChanged.connect(self._on_metric_changed)
-        form.addRow("Plot type:", self._metric_combo)
+        _add_form_row(form, "Plot type:", self._metric_combo, _STATS_PANEL_TOOLTIPS["plot_type"])
 
         self._channel_combo = QComboBox()
-        form.addRow("Channel / label:", self._channel_combo)
-
-        self._view_combo = QComboBox()
-        self._view_combo.addItem("Single hemisphere", "single")
-        if self._has_split:
-            self._view_combo.addItem("Compare L | R | whole", "compare")
-            self._view_combo.addItem("Difference L − R", "difference")
-        self._view_combo.currentIndexChanged.connect(self._on_view_changed)
-        form.addRow("View:", self._view_combo)
+        _add_form_row(form, "Channel / label:", self._channel_combo, _STATS_PANEL_TOOLTIPS["channel"])
 
         self._hemisphere_combo = QComboBox()
+        hemisphere_labels = {"whole": "Whole cord", "left": "Left", "right": "Right"}
         for hemisphere in self._options["hemispheres"]:
-            self._hemisphere_combo.addItem(str(hemisphere))
-        whole_index = self._hemisphere_combo.findText("whole")
+            if hemisphere in hemisphere_labels:
+                self._hemisphere_combo.addItem(hemisphere_labels[hemisphere], hemisphere)
+        if self._has_split:
+            self._hemisphere_combo.addItem("Compare L | R | whole", "compare")
+            self._hemisphere_combo.addItem("Difference L − R", "difference")
+        whole_index = self._hemisphere_combo.findData("whole")
         if whole_index >= 0:
             self._hemisphere_combo.setCurrentIndex(whole_index)
-        form.addRow("Hemisphere:", self._hemisphere_combo)
+        _add_form_row(form, "Hemisphere:", self._hemisphere_combo, _STATS_PANEL_TOOLTIPS["hemisphere"])
 
         self._rollup_combo = QComboBox()
         rollup_levels = self._options["rollup_levels"]
@@ -129,7 +172,7 @@ class CordStatsPlotsPanel:
         rollup_index = self._rollup_combo.findText(preferred)
         if rollup_index >= 0:
             self._rollup_combo.setCurrentIndex(rollup_index)
-        form.addRow("Rollup:", self._rollup_combo)
+        _add_form_row(form, "Rollup:", self._rollup_combo, _STATS_PANEL_TOOLTIPS["rollup"])
 
         self._segment_start = QComboBox()
         self._segment_end = QComboBox()
@@ -143,13 +186,17 @@ class CordStatsPlotsPanel:
             self._segment_start.setCurrentIndex(start_index)
         if end_index >= 0:
             self._segment_end.setCurrentIndex(end_index)
+        self._segment_start.setToolTip(_STATS_PANEL_TOOLTIPS["segments"])
+        self._segment_end.setToolTip(_STATS_PANEL_TOOLTIPS["segments"])
         segment_row = QWidget()
         segment_layout = QHBoxLayout(segment_row)
         segment_layout.setContentsMargins(0, 0, 0, 0)
+        to_label = QLabel("to")
+        to_label.setToolTip(_STATS_PANEL_TOOLTIPS["segments"])
         segment_layout.addWidget(self._segment_start)
-        segment_layout.addWidget(QLabel("to"))
+        segment_layout.addWidget(to_label)
         segment_layout.addWidget(self._segment_end)
-        form.addRow("Segments:", segment_row)
+        _add_form_row(form, "Segments:", segment_row, _STATS_PANEL_TOOLTIPS["segments"])
 
         self._normalize_combo = QComboBox()
         for label, value in (
@@ -158,7 +205,7 @@ class CordStatsPlotsPanel:
             ("Per region (column)", "column"),
         ):
             self._normalize_combo.addItem(label, value)
-        form.addRow("Normalize:", self._normalize_combo)
+        _add_form_row(form, "Normalize:", self._normalize_combo, _STATS_PANEL_TOOLTIPS["normalize"])
 
         root.addLayout(form)
 
@@ -169,6 +216,9 @@ class CordStatsPlotsPanel:
         self._save_png_button.clicked.connect(self._save_png)
         self._save_csv_button = QPushButton("Save CSV…")
         self._save_csv_button.clicked.connect(self._save_csv)
+        self._update_button.setToolTip(_STATS_PANEL_TOOLTIPS["update"])
+        self._save_png_button.setToolTip(_STATS_PANEL_TOOLTIPS["save_png"])
+        self._save_csv_button.setToolTip(_STATS_PANEL_TOOLTIPS["save_csv"])
         button_row.addWidget(self._update_button)
         button_row.addWidget(self._save_png_button)
         button_row.addWidget(self._save_csv_button)
@@ -186,7 +236,6 @@ class CordStatsPlotsPanel:
         root.addWidget(scroll, stretch=1)
 
         self._on_metric_changed()
-        self._on_view_changed()
         self._update_plot()
 
     def _current_metric(self) -> str:
@@ -195,8 +244,14 @@ class CordStatsPlotsPanel:
     def _current_channel(self) -> int | str:
         return _parse_channel_value(str(self._channel_combo.currentData()))
 
+    def _current_hemisphere_mode(self) -> str:
+        return str(self._hemisphere_combo.currentData() or "whole")
+
     def _current_view(self) -> str:
-        return str(self._view_combo.currentData() or "single")
+        mode = self._current_hemisphere_mode()
+        if mode in {"compare", "difference"}:
+            return mode
+        return "single"
 
     def _current_segments(self) -> list[str]:
         start = str(self._segment_start.currentText())
@@ -212,10 +267,6 @@ class CordStatsPlotsPanel:
             label = f"Channel {channel}" if channel.isdigit() else channel
             self._channel_combo.addItem(label, channel)
         self._channel_combo.blockSignals(False)
-
-    def _on_view_changed(self) -> None:
-        single = self._current_view() == "single"
-        self._hemisphere_combo.setEnabled(single)
 
     def _rollup_x_label(self, rollup_level: str) -> str:
         return _X_LABELS_BY_ROLLUP.get(rollup_level.lower(), "Region")
@@ -302,7 +353,7 @@ class CordStatsPlotsPanel:
                 self._export_matrices = {"difference": diff}
                 status = f"{diff.shape[0]} segments × {diff.shape[1]} regions (left − right)"
             else:
-                hemisphere = str(self._hemisphere_combo.currentText())
+                hemisphere = self._current_hemisphere_mode()
                 matrix = self._build_single_matrix(hemisphere=hemisphere, segments=segments)
                 fig = build_cord_heatmap_figure(
                     matrix,
@@ -337,7 +388,7 @@ class CordStatsPlotsPanel:
             self._config,
             metric=self._current_metric(),
             channel=self._current_channel(),
-            view=self._current_view(),
+            view=self._current_hemisphere_mode() if self._current_hemisphere_mode() != "whole" else "single",
             suffix=suffix,
         )
 
