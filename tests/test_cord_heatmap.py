@@ -11,14 +11,21 @@ from lightsuite.analysis.cord_counts import CORD_TIDY_COLUMNS
 from lightsuite.analysis.cord_heatmap import (
     NO_DATA_COLOR,
     PAPER_STRUCTURE_ACRONYMS,
+    build_cord_heatmap_comparison_figure,
     build_cord_heatmap_figure,
+    cord_hemisphere_matrices,
     cord_stats_to_matrix,
     default_paper_segments,
+    default_segment_range_bounds,
+    difference_color_limits,
+    difference_heatmap_matrix,
     discover_cord_plot_options,
     parse_segment_range,
     plot_cord_heatmap,
     resolve_hemisphere_options,
     structure_acronym_to_label,
+    write_cord_heatmap_compare_csv,
+    write_cord_heatmap_matrix_csv,
 )
 
 
@@ -304,4 +311,76 @@ def test_ensure_cord_rollups_in_dataframe(tmp_path: Path) -> None:
     updated_df, loaded_regions = ensure_cord_rollups_in_dataframe(df, atlas_dir=atlas_dir)
     assert loaded_regions is not None
     assert set(updated_df["rollup_level"].unique()) >= {"region", "division", "structure"}
+
+
+def test_default_segment_range_bounds_falls_back_without_co2(tmp_path: Path) -> None:
+    atlas_dir = tmp_path / "atlas"
+    atlas_dir.mkdir()
+    pd.DataFrame({"Segment": ["C1", "C2", "T1"]}).to_csv(atlas_dir / "Segments.csv", index=False)
+    assert default_segment_range_bounds(atlas_dir) == ("C1", "T1")
+
+
+def test_write_cord_heatmap_matrix_csv(tmp_path: Path) -> None:
+    df = _structure_stats_frame()
+    matrix = cord_stats_to_matrix(
+        df,
+        metric="median_intensity",
+        channel=1,
+        segments=["C1", "C2"],
+    )
+    path = write_cord_heatmap_matrix_csv(matrix, tmp_path / "heatmap.csv")
+    loaded = pd.read_csv(path, index_col="segment")
+    assert loaded.loc["C1", "Lamina_I"] == 10.0
+    assert loaded.loc["C2", "Lamina_II"] == 20.0
+
+
+def test_hemisphere_compare_csv_and_difference() -> None:
+    df = _split_hemisphere_stats_frame()
+    matrices = cord_hemisphere_matrices(
+        df,
+        metric="median_intensity",
+        channel=1,
+        rollup_level="structure",
+        segments=["C1"],
+    )
+    assert matrices["left"].loc["C1", "Lamina_I"] == 10.0
+    assert matrices["right"].loc["C1", "Lamina_I"] == 30.0
+    assert matrices["whole"].loc["C1", "Lamina_I"] == pytest.approx(25.0)
+    diff = difference_heatmap_matrix(matrices["left"], matrices["right"])
+    assert diff.loc["C1", "Lamina_I"] == pytest.approx(-20.0)
+    vmin, vmax = difference_color_limits(diff)
+    assert vmin == pytest.approx(-20.0)
+    assert vmax == pytest.approx(20.0)
+
+
+def test_write_cord_heatmap_compare_csv(tmp_path: Path) -> None:
+    df = _split_hemisphere_stats_frame()
+    matrices = cord_hemisphere_matrices(
+        df,
+        metric="median_intensity",
+        channel=1,
+        rollup_level="structure",
+        segments=["C1"],
+    )
+    path = write_cord_heatmap_compare_csv(matrices, tmp_path / "compare.csv")
+    loaded = pd.read_csv(path)
+    row = loaded[(loaded["segment"] == "C1") & (loaded["acronym"] == "Lamina_I")].iloc[0]
+    assert row["left"] == 10.0
+    assert row["right"] == 30.0
+    assert row["whole"] == pytest.approx(25.0)
+
+
+def test_build_cord_heatmap_comparison_figure_has_three_panels() -> None:
+    df = _split_hemisphere_stats_frame()
+    matrices = cord_hemisphere_matrices(
+        df,
+        metric="median_intensity",
+        channel=1,
+        rollup_level="structure",
+        segments=["C1"],
+    )
+    fig = build_cord_heatmap_comparison_figure(matrices, title="compare")
+    heatmaps = [ax for ax in fig.axes if getattr(ax, "images", None)]
+    assert len(heatmaps) == 3
+    assert [ax.get_title() for ax in heatmaps] == ["Left", "Right", "Whole"]
 

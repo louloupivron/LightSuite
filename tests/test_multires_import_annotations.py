@@ -42,7 +42,10 @@ def _write_config(tmp_path: Path, manifest_path: Path) -> Path:
         yaml.safe_dump(
             {
                 "sample": {"name": "s", "save_path": str(tmp_path / "out")},
-                "multires": {"pair_manifest": str(manifest_path)},
+                "multires": {
+                    "vendor": {"suite": "manifest"},
+                    "pair_manifest": str(manifest_path),
+                },
                 "import": {
                     "annotations": [
                         {

@@ -25,7 +25,7 @@ def resolve_hemisphere_annotation_path(atlas_dir: Path) -> Path:
     if not path.is_file():
         msg = (
             f"Missing {path}. Download the Fiederling atlas package "
-            f"({HEMISPHERE_ANNOTATION_FILENAME}) to enable split_hemispheres."
+            f"({HEMISPHERE_ANNOTATION_FILENAME}) for left/right hemisphere stats."
         )
         raise FileNotFoundError(msg)
     return path

@@ -126,6 +126,30 @@ def _resolve_intensity_channels(
     return selected
 
 
+def _try_load_atlas_hemisphere_side(
+    config: SpinalCordPipelineConfig,
+    register_path: Path,
+    annotation: np.ndarray,
+) -> np.ndarray | None:
+    """Load the registered hemisphere mask, or skip with a warning if it is unavailable."""
+    try:
+        hemisphere_mask = load_registered_hemisphere_volume(config, register_path)
+    except FileNotFoundError as exc:
+        console.print(f"[yellow]Hemisphere split skipped:[/yellow] {exc}")
+        return None
+    if hemisphere_mask.shape != annotation.shape:
+        console.print(
+            f"[yellow]Hemisphere split skipped:[/yellow] mask shape {hemisphere_mask.shape} "
+            f"!= annotation {annotation.shape}. Re-run 'lightsuite spinal export'."
+        )
+        return None
+    return cord_hemisphere_side_volume(
+        hemisphere_mask,
+        annotation,
+        flip=bool(config.analysis.hemisphere_flip),
+    )
+
+
 def run_cord_region_stats(
     config: SpinalCordPipelineConfig,
     *,
@@ -165,29 +189,26 @@ def run_cord_region_stats(
     intensity_channels: list[int] = []
     rollup_paths: dict[str, Path] = {}
 
+    keep_whole = bool(config.analysis.hemisphere_keep_whole)
+
     if "atlas" in spaces_set:
         annotation: np.ndarray | None = None
         hemisphere_side: np.ndarray | None = None
-        split_hemispheres = bool(config.analysis.split_hemispheres)
-        keep_whole = bool(config.analysis.hemisphere_keep_whole)
+        split_hemispheres = False
+        hemisphere_tried = False
 
         def _ensure_annotation() -> np.ndarray:
-            nonlocal annotation, hemisphere_side
+            nonlocal annotation, hemisphere_side, split_hemispheres, hemisphere_tried
             if annotation is None:
                 annotation = _load_atlas_annotation(config, register_path)
-            if split_hemispheres and hemisphere_side is None:
-                hemisphere_mask = load_registered_hemisphere_volume(config, register_path)
-                if hemisphere_mask.shape != annotation.shape:
-                    msg = (
-                        f"Hemisphere mask shape {hemisphere_mask.shape} != annotation {annotation.shape}. "
-                        "Re-run 'lightsuite spinal export'."
-                    )
-                    raise ValueError(msg)
-                hemisphere_side = cord_hemisphere_side_volume(
-                    hemisphere_mask,
+            if not hemisphere_tried:
+                hemisphere_side = _try_load_atlas_hemisphere_side(
+                    config,
+                    register_path,
                     annotation,
-                    flip=bool(config.analysis.hemisphere_flip),
                 )
+                split_hemispheres = hemisphere_side is not None
+                hemisphere_tried = True
             return annotation
 
         if do_intensities:
@@ -261,15 +282,13 @@ def run_cord_region_stats(
         ann_path = sample_dir / ANNOTATION_IN_SAMPLE
         seg_path = sample_dir / SEGMENTS_IN_SAMPLE
         hem_path = sample_dir / HEMISPHERE_IN_SAMPLE
-        split_hemispheres = bool(config.analysis.split_hemispheres)
-        keep_whole = bool(config.analysis.hemisphere_keep_whole)
         if ann_path.is_file():
             annotation_sample = load_registration_volume(ann_path).astype(np.int32)
             segments_vol = None
             if seg_path.is_file():
                 segments_vol = load_registration_volume(seg_path).astype(np.int32)
             hemisphere_side_sample: np.ndarray | None = None
-            if split_hemispheres and hem_path.is_file():
+            if hem_path.is_file():
                 hemisphere_mask_sample = load_registration_volume(hem_path).astype(np.uint8)
                 if hemisphere_mask_sample.shape != annotation_sample.shape:
                     msg = (
@@ -285,7 +304,7 @@ def run_cord_region_stats(
                         atlas_hemisphere_flip=bool(config.analysis.hemisphere_flip),
                     ),
                 )
-            elif split_hemispheres:
+            else:
                 console.print(
                     f"[yellow]Sample-space hemisphere split skipped:[/yellow] missing {hem_path}. "
                     "Re-run 'lightsuite spinal export --space sample'."
@@ -308,7 +327,7 @@ def run_cord_region_stats(
                     voxel_um_yxz=voxel_um,
                     segments_volume=segments_vol,
                     hemisphere_side=hemisphere_side_sample,
-                    split_hemispheres=split_hemispheres and hemisphere_side_sample is not None,
+                    split_hemispheres=hemisphere_side_sample is not None,
                     keep_whole=keep_whole,
                 )
                 if len(tidy):

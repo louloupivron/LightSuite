@@ -369,17 +369,13 @@ class AnalysisConfig(BaseModel):
         default_factory=lambda: ["atlas"],
         description="Coordinate spaces for region_stats tables: atlas and/or sample.",
     )
-    split_hemispheres: bool = Field(
-        default=False,
-        description="Split spinal cord stats into left/right using Hemisphere_Annotation.tif.",
-    )
     hemisphere_flip: bool = Field(
         default=False,
         description="Swap left/right assignment for the Fiederling hemisphere mask (0/255).",
     )
     hemisphere_keep_whole: bool = Field(
-        default=False,
-        description="When split_hemispheres is true, also emit whole-cord summary rows.",
+        default=True,
+        description="Also emit whole-cord summary rows alongside left/right hemisphere stats.",
     )
     top_n_regions: int = Field(
         default=10,

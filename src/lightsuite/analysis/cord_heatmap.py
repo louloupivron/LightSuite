@@ -296,20 +296,22 @@ def resolve_cord_rollup_columns(
     if norm == "structure":
         return list(PAPER_STRUCTURE_ACRONYMS), [structure_acronym_to_label(col) for col in PAPER_STRUCTURE_ACRONYMS]
     if norm == "division":
-        cols = [c for c in ["GM", "WM"] if c in work_df["acronym"].values] or ["GM", "WM"]
+        cols = ["GM", "WM"]
         return cols, cols
     if norm == "horn":
-        cols = [c for c in ["DH", "VH", "C"] if c in work_df["acronym"].values] or ["DH", "VH", "C"]
+        cols = ["DH", "VH", "C"]
         return cols, cols
     # For 'region' or other levels:
     if regions_df is not None and "acronym" in regions_df.columns:
-        present = set(work_df["acronym"].unique())
+        present = set(work_df["acronym"].unique()) if "acronym" in work_df.columns else set()
         ordered = [str(a) for a in regions_df["acronym"] if str(a) in present]
-        remaining = [str(a) for a in work_df["acronym"].unique() if str(a) not in ordered]
+        remaining = [str(a) for a in work_df["acronym"].unique() if str(a) not in ordered] if "acronym" in work_df.columns else []
         cols = ordered + remaining
-    else:
+    elif "acronym" in work_df.columns:
         cols = sorted(str(a) for a in work_df["acronym"].unique())
-    return cols, cols
+    else:
+        cols = []
+    return cols, [structure_acronym_to_label(c) for c in cols]
 
 
 def ensure_cord_rollups_in_dataframe(
@@ -471,6 +473,129 @@ def _apply_normalization(
     raise ValueError(msg)
 
 
+COMPARE_HEMISPHERES: tuple[str, ...] = ("left", "right", "whole")
+DIFFERENCE_CMAP = "RdBu_r"
+
+
+def default_segment_range_bounds(atlas_dir: Path, *, through: str = "Co2") -> tuple[str, str]:
+    """Return (start, end) labels for the default rostrocaudal plot range."""
+    order = load_segment_order(atlas_dir)
+    if not order:
+        msg = f"Segments.csv in {atlas_dir} has no Segment values"
+        raise ValueError(msg)
+    end = through if through in order else order[-1]
+    return order[0], end
+
+
+def _heatmap_column_labels(matrix: pd.DataFrame, column_labels: list[str] | None) -> list[str]:
+    n_cols = int(matrix.shape[1])
+    if column_labels is not None and len(column_labels) == n_cols:
+        return list(column_labels)
+    return [structure_acronym_to_label(col) for col in matrix.columns]
+
+
+def _heatmap_colormap(cmap: str):
+    colormap = plt.get_cmap(cmap).copy()
+    colormap.set_bad(color=NO_DATA_COLOR)
+    return colormap
+
+
+def _finite_value_limits(*arrays: np.ndarray) -> tuple[float, float]:
+    chunks = [arr[np.isfinite(arr)] for arr in arrays if getattr(arr, "size", 0)]
+    finite = np.concatenate(chunks) if chunks else np.array([], dtype=np.float64)
+    if finite.size == 0:
+        return 0.0, 1.0
+    lo = float(np.min(finite))
+    hi = float(np.max(finite))
+    if lo == hi:
+        hi = lo + 1.0
+    return lo, hi
+
+
+def difference_color_limits(matrix: pd.DataFrame) -> tuple[float, float]:
+    """Symmetric color limits for a left−right difference heatmap."""
+    values = matrix.to_numpy(dtype=np.float64)
+    finite = values[np.isfinite(values)]
+    peak = float(np.max(np.abs(finite))) if finite.size else 1.0
+    if peak == 0.0:
+        peak = 1.0
+    return -peak, peak
+
+
+def _style_heatmap_axis(
+    ax,
+    *,
+    n_rows: int,
+    n_cols: int,
+    column_labels: list[str],
+    row_labels: list[str],
+    title: str = "",
+    x_label: str | None = None,
+    show_ylabel: bool = True,
+    show_yticklabels: bool = True,
+) -> None:
+    rotation = 0
+    ha = "center"
+    fontsize = 9
+    if n_cols > 20:
+        rotation = 45
+        ha = "right"
+        fontsize = 7
+    elif n_cols > 10:
+        fontsize = 8
+    ax.set_xticks(np.arange(n_cols))
+    ax.set_xticklabels(column_labels, rotation=rotation, ha=ha, fontsize=fontsize)
+    ax.set_yticks(np.arange(n_rows))
+    if show_yticklabels:
+        ax.set_yticklabels(list(row_labels), fontsize=8)
+    else:
+        ax.set_yticklabels([])
+    ax.set_xlabel(x_label or "Region")
+    if show_ylabel:
+        ax.set_ylabel("Segment")
+    if title:
+        ax.set_title(title, fontsize=11, pad=10)
+    ax.set_xticks(np.arange(-0.5, n_cols, 1), minor=True)
+    ax.set_yticks(np.arange(-0.5, n_rows, 1), minor=True)
+    ax.grid(which="minor", color="white", linestyle="-", linewidth=0.4, alpha=0.6)
+    ax.tick_params(which="minor", bottom=False, left=False)
+
+
+def _imshow_heatmap(
+    ax,
+    values: np.ndarray,
+    *,
+    cmap: str,
+    vmin: float | None,
+    vmax: float | None,
+    log_scale: bool = False,
+):
+    masked = np.ma.masked_invalid(values)
+    colormap = _heatmap_colormap(cmap)
+    positive = masked.compressed()
+    positive = positive[positive > 0] if positive.size else positive
+    norm = None
+    if log_scale:
+        if positive.size == 0:
+            msg = "log_scale requires positive values in the heatmap"
+            raise ValueError(msg)
+        lo = vmin if vmin is not None else float(positive.min())
+        hi = vmax if vmax is not None else float(positive.max())
+        if lo <= 0:
+            lo = float(positive.min())
+        norm = LogNorm(vmin=lo, vmax=hi)
+    return ax.imshow(
+        masked,
+        aspect="auto",
+        origin="upper",
+        cmap=colormap,
+        vmin=None if norm is not None else vmin,
+        vmax=None if norm is not None else vmax,
+        norm=norm,
+        interpolation="nearest",
+    )
+
+
 def build_cord_heatmap_figure(
     matrix: pd.DataFrame,
     *,
@@ -485,74 +610,150 @@ def build_cord_heatmap_figure(
     x_label: str | None = None,
 ) -> Figure:
     """Build a publication-style heatmap figure (segments on Y, laminae/WM on X)."""
-    labels = column_labels or [structure_acronym_to_label(col) for col in matrix.columns]
     values = _apply_normalization(matrix.to_numpy(dtype=np.float64), mode=normalize)
-
     n_rows, n_cols = values.shape
+    labels = _heatmap_column_labels(matrix, column_labels)
     if figsize is None:
         col_width = 0.45 if n_cols <= 20 else 0.25
         figsize = (max(6.0, col_width * n_cols + 2.0), max(8.0, 0.22 * n_rows + 2.0))
 
     fig = Figure(figsize=figsize)
     ax = fig.add_subplot(111)
-
-    masked = np.ma.masked_invalid(values)
-    colormap = plt.get_cmap(cmap).copy()
-    colormap.set_bad(color=NO_DATA_COLOR)
-    positive = masked.compressed()
-    positive = positive[positive > 0] if positive.size else positive
-
-    norm = None
-    if log_scale:
-        if positive.size == 0:
-            msg = "log_scale requires positive values in the heatmap"
-            raise ValueError(msg)
-        lo = vmin if vmin is not None else float(positive.min())
-        hi = vmax if vmax is not None else float(positive.max())
-        if lo <= 0:
-            lo = float(positive.min())
-        norm = LogNorm(vmin=lo, vmax=hi)
-
-    im = ax.imshow(
-        masked,
-        aspect="auto",
-        origin="upper",
-        cmap=colormap,
-        vmin=None if norm is not None else vmin,
-        vmax=None if norm is not None else vmax,
-        norm=norm,
-        interpolation="nearest",
+    im = _imshow_heatmap(ax, values, cmap=cmap, vmin=vmin, vmax=vmax, log_scale=log_scale)
+    _style_heatmap_axis(
+        ax,
+        n_rows=n_rows,
+        n_cols=n_cols,
+        column_labels=labels,
+        row_labels=list(matrix.index),
+        title=title,
+        x_label=x_label,
     )
-
-    rotation = 0
-    ha = "center"
-    fontsize = 9
-    if n_cols > 20:
-        rotation = 45
-        ha = "right"
-        fontsize = 7
-    elif n_cols > 10:
-        fontsize = 8
-
-    ax.set_xticks(np.arange(n_cols))
-    ax.set_xticklabels(labels, rotation=rotation, ha=ha, fontsize=fontsize)
-    ax.set_yticks(np.arange(n_rows))
-    ax.set_yticklabels(list(matrix.index), fontsize=8)
-    ax.set_xlabel(x_label or "Region")
-    ax.set_ylabel("Segment")
-
-    if title:
-        ax.set_title(title, fontsize=11, pad=10)
-
     cbar = fig.colorbar(im, ax=ax, fraction=0.03, pad=0.02)
     cbar.ax.tick_params(labelsize=8)
-
-    ax.set_xticks(np.arange(-0.5, n_cols, 1), minor=True)
-    ax.set_yticks(np.arange(-0.5, n_rows, 1), minor=True)
-    ax.grid(which="minor", color="white", linestyle="-", linewidth=0.4, alpha=0.6)
-    ax.tick_params(which="minor", bottom=False, left=False)
     fig.tight_layout()
     return fig
+
+
+def cord_hemisphere_matrices(
+    df: pd.DataFrame,
+    *,
+    metric: MetricName,
+    channel: int | str | None,
+    rollup_level: str,
+    segments: list[str],
+    regions_df: pd.DataFrame | None = None,
+    hemispheres: tuple[str, ...] = COMPARE_HEMISPHERES,
+) -> dict[str, pd.DataFrame]:
+    """Build aligned segment × region matrices for each requested hemisphere."""
+    matrices: dict[str, pd.DataFrame] = {}
+    for hemisphere in hemispheres:
+        matrices[hemisphere] = cord_stats_to_matrix(
+            df,
+            metric=metric,
+            channel=channel,
+            rollup_level=rollup_level,
+            hemisphere=hemisphere,
+            segments=segments,
+            regions_df=regions_df,
+        )
+    return matrices
+
+
+def difference_heatmap_matrix(left: pd.DataFrame, right: pd.DataFrame) -> pd.DataFrame:
+    """Return left − right on a shared segment × region index."""
+    aligned = right.reindex(index=left.index, columns=left.columns)
+    return left.subtract(aligned)
+
+
+def build_cord_heatmap_comparison_figure(
+    matrices: dict[str, pd.DataFrame],
+    *,
+    column_labels: list[str] | None = None,
+    title: str = "",
+    cmap: str = "hot",
+    normalize: str = "none",
+    x_label: str | None = None,
+    order: tuple[str, ...] = COMPARE_HEMISPHERES,
+) -> Figure:
+    """Build side-by-side heatmaps for left, right, and whole with a shared color scale."""
+    panels = [(key, matrices[key]) for key in order if key in matrices]
+    if not panels:
+        msg = "No hemisphere matrices to compare"
+        raise ValueError(msg)
+    prepared = [
+        (_apply_normalization(mat.to_numpy(dtype=np.float64), mode=normalize), mat, key)
+        for key, mat in panels
+    ]
+    vmin, vmax = _finite_value_limits(*(values for values, _mat, _key in prepared))
+    first_values, first_matrix, _ = prepared[0]
+    n_rows, n_cols = first_values.shape
+    labels = _heatmap_column_labels(first_matrix, column_labels)
+    n_panels = len(prepared)
+    fig = Figure(
+        figsize=(max(10.0, 0.32 * n_cols * n_panels + 2.8), max(8.0, 0.22 * n_rows + 2.4)),
+        layout="constrained",
+    )
+    axes = fig.subplots(1, n_panels, sharey=True)
+    if n_panels == 1:
+        axes = [axes]
+    panel_titles = {"left": "Left", "right": "Right", "whole": "Whole"}
+    image = None
+    for index, (values, mat, key) in enumerate(prepared):
+        ax = axes[index]
+        image = _imshow_heatmap(ax, values, cmap=cmap, vmin=vmin, vmax=vmax)
+        _style_heatmap_axis(
+            ax,
+            n_rows=n_rows,
+            n_cols=n_cols,
+            column_labels=labels,
+            row_labels=list(mat.index),
+            title=panel_titles.get(key, key),
+            x_label=x_label,
+            show_ylabel=index == 0,
+            show_yticklabels=index == 0,
+        )
+    if image is not None:
+        cbar = fig.colorbar(image, ax=axes, fraction=0.025, pad=0.02)
+        cbar.ax.tick_params(labelsize=8)
+    if title:
+        fig.suptitle(title, fontsize=12)
+    return fig
+
+
+def write_cord_heatmap_matrix_csv(matrix: pd.DataFrame, output_path: Path) -> Path:
+    """Write a segment × region heatmap matrix to CSV."""
+    output_path = output_path.expanduser()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    out = matrix.copy()
+    out.index.name = "segment"
+    out.to_csv(output_path)
+    return output_path
+
+
+def write_cord_heatmap_compare_csv(
+    matrices: dict[str, pd.DataFrame],
+    output_path: Path,
+    *,
+    order: tuple[str, ...] = COMPARE_HEMISPHERES,
+) -> Path:
+    """Write a tidy CSV with one column per hemisphere (segment, acronym, left, right, whole)."""
+    output_path = output_path.expanduser()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    frames: list[pd.Series] = []
+    for key in order:
+        if key not in matrices:
+            continue
+        stacked = matrices[key].stack()
+        stacked.name = key
+        frames.append(stacked)
+    if not frames:
+        msg = "No hemisphere matrices to export"
+        raise ValueError(msg)
+    combined = pd.concat(frames, axis=1)
+    combined.index.names = ["segment", "acronym"]
+    combined.to_csv(output_path)
+    return output_path
 
 
 def plot_cord_heatmap(
@@ -597,10 +798,13 @@ def default_heatmap_output_path(
     *,
     metric: str,
     channel: int | str,
+    view: str = "single",
+    suffix: str = ".png",
 ) -> Path:
     plots_dir = config.sample.save_path.expanduser() / "plots"
     safe_channel = re.sub(r"[^\w.-]+", "_", str(channel))
-    return plots_dir / f"cord_heatmap_{metric}_{safe_channel}.png"
+    view_part = "" if view in {"", "single"} else f"_{view}"
+    return plots_dir / f"cord_heatmap_{metric}_{safe_channel}{view_part}{suffix}"
 
 
 def run_cord_heatmap(
