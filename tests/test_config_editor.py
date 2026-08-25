@@ -17,6 +17,7 @@ from lightsuite.gui.config_form_data import (
     import_annotations_from_raw,
     import_annotations_to_raw,
     load_template_raw,
+    merge_yaml_only_multires_fields,
     multires_form_from_raw,
     multires_form_to_raw,
     parse_orientation_text,
@@ -503,6 +504,32 @@ def test_multires_form_drops_mesospim_geometry_for_smartspim_vendor() -> None:
     updated = multires_form_to_raw(state, raw)
     assert updated["multires"]["vendor"]["suite"] == "smartspim"
     assert "mesospim_geometry" not in updated["multires"]
+
+
+def test_merge_yaml_only_multires_fields_keeps_inspect_geometry_flip() -> None:
+    form_raw = {
+        "sample": {"name": "s", "save_path": "/out"},
+        "multires": {
+            "vendor": {"suite": "mesospim"},
+            "channels": {"488": {"overview": "/ov.tif", "roi": "/roi.tif"}},
+        },
+    }
+    disk_raw = {
+        "sample": {"name": "s", "save_path": "/out"},
+        "multires": {
+            "vendor": {"suite": "mesospim"},
+            "channels": {"488": {"overview": "/ov.tif", "roi": "/roi.tif"}},
+            "mesospim_geometry": {
+                "overview": {"lateral_flip": [-1, -1]},
+                "roi": {"lateral_flip": [-1, -1]},
+            },
+        },
+    }
+    merged = merge_yaml_only_multires_fields(form_raw, disk_raw)
+    assert merged["multires"]["mesospim_geometry"]["overview"]["lateral_flip"] == [-1, -1]
+    state = multires_form_from_raw(merged)
+    saved = multires_form_to_raw(state, merged)
+    assert saved["multires"]["mesospim_geometry"]["roi"]["lateral_flip"] == [-1, -1]
 
 
 def test_multires_form_roundtrip_vendor_manifest_and_custom() -> None:

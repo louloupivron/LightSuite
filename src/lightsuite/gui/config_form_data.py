@@ -457,6 +457,28 @@ def _apply_multires_vendor_to_raw(
     return multires
 
 
+def merge_yaml_only_multires_fields(
+    form_raw: dict[str, Any],
+    disk_raw: dict[str, Any],
+) -> dict[str, Any]:
+    """Keep form fields; copy YAML-only keys written by inspect-geometry.
+
+    ``multires.mesospim_geometry`` is not on the config form. Apply-to-YAML updates
+    the file, then a later Config Save would otherwise overwrite it from stale
+    in-memory YAML.
+    """
+    out = dict(form_raw)
+    disk_multires = disk_raw.get("multires")
+    if not isinstance(disk_multires, dict):
+        return out
+    if "mesospim_geometry" not in disk_multires:
+        return out
+    form_multires = dict(out.get("multires") or {})
+    form_multires["mesospim_geometry"] = disk_multires["mesospim_geometry"]
+    out["multires"] = form_multires
+    return out
+
+
 def load_template_raw(workflow: str) -> tuple[str, dict[str, Any]]:
     """Load a starter YAML template as ``(workflow, raw_dict)``."""
     key = workflow.strip().lower()

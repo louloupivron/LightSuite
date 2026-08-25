@@ -39,6 +39,7 @@ class StageContext:
     export_spaces: list[str] | None = None
     on_log: Callable[[str], None] | None = None
     cancel_event: threading.Event | None = None
+    on_config_file_changed: Callable[[], None] | None = None
 
 
 StageRunner = Callable[[Any, StageContext], Any]

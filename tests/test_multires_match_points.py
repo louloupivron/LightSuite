@@ -254,3 +254,56 @@ def test_legacy_landmarks_geometry_mode_maps_to_hybrid(tmp_path: Path) -> None:
     from lightsuite.multires.config_models import MultiresGeometryMode
 
     assert cfg.multires.geometry_mode == MultiresGeometryMode.HYBRID
+
+
+def test_match_points_applies_config_lateral_flip(tmp_path: Path) -> None:
+    """Match-points must rebuild pair geometry from YAML lateral_flip, not a stale JSON."""
+    import tifffile
+    from lightsuite.mesospim.meta import meta_path_for_tiff
+
+    overview = tmp_path / "overview.tif"
+    roi = tmp_path / "roi.tif"
+    tifffile.imwrite(overview, np.zeros((5, 16, 16), dtype=np.uint16), imagej=True)
+    tifffile.imwrite(roi, np.zeros((5, 16, 16), dtype=np.uint16), imagej=True)
+    meta_body = "\n".join(
+        [
+            "[Pixelsize in um] 5.0",
+            "[x_pos] 100.0",
+            "[y_pos] 500.0",
+            "[z_start] 0.0",
+            "[z_end] 8.0",
+            "[z_stepsize] 2.0",
+            "[z_planes] 5",
+            "[x_pixels] 16",
+            "[y_pixels] 16",
+        ]
+    )
+    meta_path_for_tiff(overview).write_text(meta_body, encoding="utf-8")
+    meta_path_for_tiff(roi).write_text(meta_body, encoding="utf-8")
+
+    def _cfg(flip: list[int]):
+        config_path = tmp_path / f"cfg_{flip[0]}_{flip[1]}.yaml"
+        config_path.write_text(
+            yaml.safe_dump(
+                {
+                    "sample": {"name": "s", "save_path": str(tmp_path / "out")},
+                    "multires": {
+                        "vendor": {"suite": "mesospim"},
+                        "pair_label": "p",
+                        "channels": {"488": {"overview": str(overview), "roi": str(roi)}},
+                        "mesospim_geometry": {
+                            "overview": {"lateral_flip": flip},
+                            "roi": {"lateral_flip": flip},
+                        },
+                        "registration": {"reference_channel": "488"},
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        return load_multires_config(config_path)
+
+    default = load_multires_match_points_data(_cfg([1, -1]))
+    mirrored = load_multires_match_points_data(_cfg([-1, -1]))
+    assert default.overview_spec.direction != mirrored.overview_spec.direction
+    assert default.roi_spec.direction != mirrored.roi_spec.direction

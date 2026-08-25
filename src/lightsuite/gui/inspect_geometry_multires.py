@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-import numpy as np
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+
+import numpy as np
 
 from rich.console import Console
 
@@ -88,6 +90,7 @@ def attach_multires_inspect_geometry(
     config_path: str | Path | None = None,
     flip: tuple[int, int] | None = None,
     initial_result: GeometryQcSlice | None = None,
+    on_config_file_changed: Callable[[], None] | None = None,
 ) -> DockStageController:
     """Attach multires geometry QC controls to an existing napari viewer."""
     from magicgui.widgets import Label
@@ -253,6 +256,8 @@ def attach_multires_inspect_geometry(
     @magicgui(
         flip_x={"label": "Flip X (both volumes)"},
         flip_y={"label": "Flip Y (both volumes)"},
+        call_button=False,
+        auto_call=False,
     )
     def geometry_controls(flip_x: bool = flip_x_init, flip_y: bool = flip_y_init) -> None:
         state["flip_x"] = bool(flip_x)
@@ -404,8 +409,20 @@ def attach_multires_inspect_geometry(
         except (OSError, ValueError) as exc:
             show_warning(f"Could not update config: {exc}")
             return
+        from lightsuite.multires.config_models import (
+            MesospimGeometryOverride,
+            MultiresMesospimGeometryConfig,
+        )
+
+        flip_list = [int(lateral_flip[0]), int(lateral_flip[1])]
+        cfg.multires.mesospim_geometry = MultiresMesospimGeometryConfig(
+            overview=MesospimGeometryOverride(lateral_flip=flip_list),
+            roi=MesospimGeometryOverride(lateral_flip=flip_list),
+        )
         patch_status.value = f"Updated {saved.name} → lateral_flip {list(lateral_flip)}"
         show_info(f"Patched {saved}")
+        if on_config_file_changed is not None:
+            on_config_file_changed()
 
     dock_widgets: list[tuple[Any, str]] = []
     if channel_panel is not None:
