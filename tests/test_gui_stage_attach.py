@@ -318,6 +318,29 @@ def test_dock_stage_controller_teardown_removes_docks() -> None:
     viewer.window.remove_dock_widget.assert_called_once_with(dock_handle)
 
 
+def test_dock_stage_controller_teardown_runs_cleanup_before_removing_docks() -> None:
+    viewer = MagicMock()
+    widget = MagicMock()
+    dock_handle = MagicMock()
+    viewer.window.add_dock_widget.return_value = dock_handle
+    order: list[str] = []
+
+    def _cleanup() -> None:
+        order.append("cleanup")
+
+    def _remove(*_args, **_kwargs) -> None:
+        order.append("remove")
+
+    viewer.window.remove_dock_widget.side_effect = _remove
+    controller = DockStageController(
+        dock_widgets=[(widget, "Test")],
+        _teardown_fn=_cleanup,
+    )
+    controller.mount(viewer)
+    controller.teardown(viewer)
+    assert order == ["cleanup", "remove"]
+
+
 def test_close_stage_or_viewer_closes_standalone_viewer() -> None:
     viewer = MagicMock()
     viewer.window._lightsuite_shell = None

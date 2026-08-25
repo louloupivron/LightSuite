@@ -231,7 +231,13 @@ def attach_spinal_straighten(
         data = load_straighten_data(config)
 
     viewer.dims.ndisplay = 2
-    state = {"slice": 0, "_syncing_layers": False, "show_pred": True, "edit_history": []}
+    state = {
+        "slice": 0,
+        "_syncing_layers": False,
+        "show_pred": True,
+        "edit_history": [],
+        "_teardown": False,
+    }
 
     def _stored_point(arr: np.ndarray, slice_idx: int) -> tuple[float, float] | None:
         if np.isnan(arr[slice_idx, 0]):
@@ -410,6 +416,8 @@ def attach_spinal_straighten(
         return n_cen, n_ant, n_pos
 
     def update_status() -> None:
+        if state.get("_teardown"):
+            return
         n_cen, n_ant, n_pos = _click_counts()
         hidden = "" if state["show_pred"] else " [fit hidden]"
         viewer.status = (
@@ -417,7 +425,10 @@ def attach_spinal_straighten(
             f"layer={_active_point_layer_name()} | clicks C={n_cen} A={n_ant} P={n_pos}{hidden} | "
             "select a point layer and click; Save/Toggle fit/Clear buttons or S/P keys"
         )
-        status_label.setText(viewer.status)
+        try:
+            status_label.setText(viewer.status)
+        except RuntimeError:
+            return
 
     def clear_all_points() -> None:
         clear_all_alignment_points(data.user_cen, data.user_ant, data.user_pos)
@@ -447,6 +458,8 @@ def attach_spinal_straighten(
         update_status()
 
     def show_slice(index: int) -> None:
+        if state.get("_teardown"):
+            return
         state["slice"] = int(np.clip(index, 0, data.n_slices - 1))
         image_layer.data = data.display_vol[:, :, state["slice"]]
         current_slice_points()
@@ -465,15 +478,22 @@ def attach_spinal_straighten(
     slice_slider.setToolTip("Drag to scroll through slices")
 
     def sync_nav_widgets() -> None:
+        if state.get("_teardown"):
+            return
         one_based = state["slice"] + 1
-        for widget in (slice_spin, slice_slider):
-            widget.blockSignals(True)
         try:
+            for widget in (slice_spin, slice_slider):
+                widget.blockSignals(True)
             slice_spin.setValue(one_based)
             slice_slider.setValue(one_based)
+        except RuntimeError:
+            return
         finally:
-            for widget in (slice_spin, slice_slider):
-                widget.blockSignals(False)
+            try:
+                for widget in (slice_spin, slice_slider):
+                    widget.blockSignals(False)
+            except RuntimeError:
+                pass
 
     def on_nav_widget_changed(value: int) -> None:
         show_slice(int(value) - 1)
@@ -561,6 +581,8 @@ def attach_spinal_straighten(
 
     @viewer.window._qt_viewer.canvas.events.mouse_wheel.connect
     def _scroll_slice(event) -> None:
+        if state.get("_teardown"):
+            return
         if getattr(event, "delta", None) is None:
             return
         dy = event.delta[1] if len(event.delta) > 1 else event.delta[0]
@@ -569,11 +591,19 @@ def attach_spinal_straighten(
         step = 1 if dy < 0 else -1
         show_slice(state["slice"] + step)
 
+    def _teardown() -> None:
+        state["_teardown"] = True
+        try:
+            viewer.window._qt_viewer.canvas.events.mouse_wheel.disconnect(_scroll_slice)
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            pass
+
     out = save_path / "spinal_alignment_opt.json"
 
     return DockStageController(
         dock_widgets=[(controls, "Controls")],
         _refresh_fn=lambda: show_slice(0),
+        _teardown_fn=_teardown,
         result=out,
     )
 
