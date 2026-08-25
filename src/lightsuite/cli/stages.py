@@ -433,7 +433,12 @@ def _spinal_stage_done(
         if not vr.is_dir() or not any(vr.iterdir()):
             return False, str(vr)
         if config.analysis.parcellate_intensities:
-            stats = list(vr.glob("region_stats*.csv")) + list(vr.glob("chan*_region_stats.csv"))
+            stats = (
+                list((save_path / "stats").glob("region_stats*.csv"))
+                + list((save_path / "stats").glob("chan*_region_stats.csv"))
+                + list(vr.glob("region_stats*.csv"))
+                + list(vr.glob("chan*_region_stats.csv"))
+            )
             if not stats:
                 return False, "volumes exported; intensity region stats missing"
         return True, str(vr)
@@ -471,10 +476,12 @@ def _spinal_stage_done(
         return False, "run after register (imports/)"
     if stage_id == "plot-stats":
         plots = save_path / "plots"
-        stats = save_path / "volume_registered" / "region_stats.csv"
+        stats = (save_path / "stats" / "region_stats.csv").is_file() or (
+            save_path / "volume_registered" / "region_stats.csv"
+        ).is_file()
         if plots.is_dir() and any(plots.glob("cord_heatmap_*.png")):
             return True, str(plots)
-        return stats.is_file(), "open Stats / plots after export"
+        return stats, "open Stats / plots after export"
     return False, "unknown stage"
 
 

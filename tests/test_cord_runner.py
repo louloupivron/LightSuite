@@ -53,11 +53,12 @@ def test_run_cord_region_stats_intensity_only(tmp_path: Path) -> None:
     )
     pd.DataFrame(
         {
-            "id": [7],
-            "acronym": ["a7"],
-            "name": ["Region7"],
-            "parent_ID": [1],
-            "parent_acronym": ["GM"],
+            "id": [1, 7, 71, 90, 130, 201],
+            "name": ["Root", "Region7", "Gray Matter", "Dorsal horn", "White matter", "Lamina I Combined"],
+            "acronym": ["SC", "a7", "GM", "DH", "WM", "Lamina_I"],
+            "parent_ID": [0, 90, 1, 71, 1, 90],
+            "parent_acronym": ["", "DH", "SC", "GM", "SC", "DH"],
+            "children_IDs": ["", "", "7", "", "", "7"],
         }
     ).to_csv(atlas_dir / "Atlas_Regions.csv", index=False)
 
@@ -70,14 +71,20 @@ def test_run_cord_region_stats_intensity_only(tmp_path: Path) -> None:
 
     assert result.combined_path is not None
     assert result.combined_path.is_file()
+    assert result.combined_path.parent.name == "stats"
     assert result.intensity_channels == [1]
     assert result.n_rows > 0
+    assert "division" in result.rollup_paths
+    assert (result.combined_path.parent / "region_stats_division.csv").is_file()
+    assert (result.combined_path.parent / "region_stats_structure.csv").is_file()
+    assert (result.combined_path.parent / "region_stats_horn.csv").is_file()
 
     df = pd.read_csv(result.combined_path)
     assert "median_intensity" in df["metric"].values
     assert (df["segment"] == "C1").any()
     assert result.top_n_path is not None
     assert result.top_n_path.name == "region_stats_top10.csv"
+    assert result.top_n_path.parent.name == "stats"
     top = pd.read_csv(result.top_n_path)
     assert "rank" in top.columns
     assert "segment" in top.columns

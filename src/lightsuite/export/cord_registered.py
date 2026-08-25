@@ -45,6 +45,18 @@ def volume_registered_dir(config: SpinalCordPipelineConfig) -> Path:
     return config.sample.save_path.expanduser() / "volume_registered"
 
 
+def cord_stats_dir(config: SpinalCordPipelineConfig | Path) -> Path:
+    """Return ``<save_path>/stats`` (created)."""
+    save_path = (
+        config.sample.save_path.expanduser()
+        if isinstance(config, SpinalCordPipelineConfig)
+        else Path(config).expanduser()
+    )
+    path = save_path / "stats"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def export_layout_from_native(volume_native: np.ndarray) -> np.ndarray:
     """Map native atlas layout (Z, Y, X) to slice TIFF layout (Y, X, Z)."""
     return np.transpose(volume_native, (1, 2, 0))

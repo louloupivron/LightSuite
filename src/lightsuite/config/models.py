@@ -369,10 +369,6 @@ class AnalysisConfig(BaseModel):
         default_factory=lambda: ["atlas"],
         description="Coordinate spaces for region_stats tables: atlas and/or sample.",
     )
-    rollups: list[str] = Field(
-        default_factory=list,
-        description='Spinal cord rollups to append: "division" (GM/WM), "structure" (laminas/funiculi), and/or "horn" (DH/VH/C dorsal–ventral split).',
-    )
     split_hemispheres: bool = Field(
         default=False,
         description="Split spinal cord stats into left/right using Hemisphere_Annotation.tif.",
@@ -397,6 +393,8 @@ class AnalysisConfig(BaseModel):
             "present, otherwise the first intensity metric."
         ),
     )
+
+    model_config = ConfigDict(extra="ignore")
 
     @field_validator("intensity_metrics", mode="before")
     @classmethod

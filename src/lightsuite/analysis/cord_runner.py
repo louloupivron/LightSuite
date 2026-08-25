@@ -18,7 +18,7 @@ from lightsuite.analysis.cord_counts import (
 )
 from lightsuite.analysis.cord_parcellation import parcellate_cord_intensities
 from lightsuite.analysis.intensity_metrics import filter_intensity_metric_rows
-from lightsuite.analysis.cord_rollup import apply_cord_rollups
+from lightsuite.analysis.cord_rollup import DEFAULT_CORD_ROLLUPS, apply_cord_rollups
 from lightsuite.analysis.cord_hemisphere import (
     cord_hemisphere_side_volume,
     sample_space_hemisphere_flip,
@@ -31,6 +31,7 @@ from lightsuite.config.models import SpinalCordPipelineConfig
 from lightsuite.export.cord_registered import (
     REGISTERED_ANNOTATION_FILENAME,
     compute_registered_annotation_volume,
+    cord_stats_dir,
     discover_registered_cord_paths,
     load_registered_hemisphere_volume,
     load_registered_stack,
@@ -42,6 +43,7 @@ from lightsuite.export.cord_sample_space import (
     SEGMENTS_IN_SAMPLE,
     sample_space_dir,
 )
+from lightsuite.gui.inspect_cord_imports import iter_cord_import_paths
 from lightsuite.registration.volume import load_registration_volume
 
 console = Console()
@@ -137,6 +139,8 @@ def run_cord_region_stats(
         msg = f"Missing {register_path}. Run 'lightsuite spinal export' first."
         raise FileNotFoundError(msg)
 
+    stats_path = cord_stats_dir(config)
+
     do_counts = config.analysis.count_points if count_points is None else count_points
     do_intensities = (
         config.analysis.parcellate_intensities
@@ -222,14 +226,15 @@ def run_cord_region_stats(
                         )
                         tidy = filter_intensity_metric_rows(tidy, config.analysis.intensity_metrics)
                         if len(tidy):
-                            per_chan_path = register_path / f"chan{ichan:02d}_region_stats.csv"
+                            per_chan_path = stats_path / f"chan{ichan:02d}_region_stats.csv"
                             write_cord_region_stats_csv(per_chan_path, tidy)
                             atlas_frames.append(tidy)
                             intensity_channels.append(ichan)
 
         if do_counts:
             ann = _ensure_annotation()
-            for npz_path in sorted(register_path.glob("*_atlas_coords.npz")):
+            npz_paths = iter_cord_import_paths(config.sample.save_path.expanduser(), "*_atlas_coords.npz")
+            for npz_path in npz_paths:
                 label = npz_path.stem.replace("_atlas_coords", "")
                 if wanted_labels is not None and label not in wanted_labels:
                     continue
@@ -246,7 +251,7 @@ def run_cord_region_stats(
                     keep_whole=keep_whole,
                 )
                 if len(tidy):
-                    per_label_path = register_path / f"{label}_region_counts.csv"
+                    per_label_path = stats_path / f"{label}_region_counts.csv"
                     write_cord_region_stats_csv(per_label_path, tidy)
                     atlas_frames.append(tidy)
                     count_labels.append(label)
@@ -287,7 +292,8 @@ def run_cord_region_stats(
                 )
             registres_um = float(config.registration.resolution_um)
             voxel_um = (registres_um, registres_um, registres_um)
-            for npz_path in sorted(register_path.glob("*_sample_coords.npz")):
+            sample_npz_paths = iter_cord_import_paths(config.sample.save_path.expanduser(), "*_sample_coords.npz")
+            for npz_path in sample_npz_paths:
                 label = npz_path.stem.replace("_sample_coords", "")
                 if wanted_labels is not None and label not in wanted_labels:
                     continue
@@ -318,33 +324,30 @@ def run_cord_region_stats(
     if atlas_frames:
         combined = pd.concat(atlas_frames, ignore_index=True).reindex(columns=CORD_TIDY_COLUMNS)
         regions_df = pd.read_csv(atlas_paths.regions_csv)
-        combined = apply_cord_rollups(combined, regions_df, config.analysis.rollups)
-        combined_path = register_path / "region_stats.csv"
+        combined = apply_cord_rollups(combined, regions_df, DEFAULT_CORD_ROLLUPS)
+        combined_path = stats_path / "region_stats.csv"
         write_cord_region_stats_csv(combined_path, combined)
         top_n_path = maybe_write_top_n_regions_csv(
-            register_path,
+            stats_path,
             combined,
             n=config.analysis.top_n_regions,
             rank_by=config.analysis.top_n_rank_by,
         )
-        for level in config.analysis.rollups:
-            normalized = str(level).strip().lower()
-            if normalized not in ("division", "structure", "horn"):
-                continue
-            subset = combined[combined["rollup_level"] == normalized]
+        for level in DEFAULT_CORD_ROLLUPS:
+            subset = combined[combined["rollup_level"] == level]
             if len(subset):
-                rollup_path = register_path / f"region_stats_{normalized}.csv"
+                rollup_path = stats_path / f"region_stats_{level}.csv"
                 write_cord_region_stats_csv(rollup_path, subset)
-                rollup_paths[normalized] = rollup_path
+                rollup_paths[level] = rollup_path
     else:
         combined = pd.DataFrame(columns=CORD_TIDY_COLUMNS)
 
     if sample_frames:
         sample_combined = pd.concat(sample_frames, ignore_index=True).reindex(columns=CORD_TIDY_COLUMNS)
-        sample_dir = sample_space_dir(config.sample.save_path.expanduser())
-        write_cord_region_stats_csv(sample_dir / "region_stats_sample.csv", sample_combined)
+        sample_stats_path = stats_path / "region_stats_sample.csv"
+        write_cord_region_stats_csv(sample_stats_path, sample_combined)
         maybe_write_top_n_regions_csv(
-            sample_dir,
+            stats_path,
             sample_combined,
             n=config.analysis.top_n_regions,
             rank_by=config.analysis.top_n_rank_by,

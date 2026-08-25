@@ -16,8 +16,10 @@ from lightsuite.analysis.cord_heatmap import (
     default_heatmap_output_path,
     default_paper_segments,
     discover_cord_plot_options,
+    ensure_cord_rollups_in_dataframe,
     metric_label,
     plot_cord_heatmap,
+    resolve_cord_rollup_columns,
     resolve_region_stats_path,
 )
 from lightsuite.config.models import SpinalCordPipelineConfig
@@ -61,10 +63,13 @@ class CordStatsPlotsPanel:
         )
 
         self._config = config
-        self._stats_df = stats_df
         self._stats_path = stats_path
         self._segments = default_paper_segments(config.atlas.atlas_dir)
-        self._options = discover_cord_plot_options(stats_df)
+        self._stats_df, self._regions_df = ensure_cord_rollups_in_dataframe(
+            stats_df,
+            atlas_dir=config.atlas.atlas_dir,
+        )
+        self._options = discover_cord_plot_options(self._stats_df)
         self._figure = None
         self._canvas: FigureCanvasQTAgg | None = None
 
@@ -166,15 +171,32 @@ class CordStatsPlotsPanel:
         if cmap_index >= 0:
             self._cmap_combo.setCurrentIndex(cmap_index)
 
-    def _build_matrix(self) -> pd.DataFrame:
-        return cord_stats_to_matrix(
+    def _build_matrix(self) -> tuple[pd.DataFrame, list[str], str]:
+        rollup_level = str(self._rollup_combo.currentText())
+        matrix = cord_stats_to_matrix(
             self._stats_df,
             metric=self._current_metric(),  # type: ignore[arg-type]
             channel=self._current_channel(),
-            rollup_level=str(self._rollup_combo.currentText()),
+            rollup_level=rollup_level,
             hemisphere=str(self._hemisphere_combo.currentText()),
             segments=self._segments,
+            regions_df=self._regions_df,
         )
+        _, column_labels = resolve_cord_rollup_columns(
+            rollup_level,
+            self._stats_df[self._stats_df["rollup_level"] == rollup_level]
+            if "rollup_level" in self._stats_df.columns
+            else self._stats_df,
+            regions_df=self._regions_df,
+        )
+        x_labels_by_rollup = {
+            "structure": "Lamina / white matter",
+            "division": "Division",
+            "horn": "Horn",
+            "region": "Atlas region",
+        }
+        x_label = x_labels_by_rollup.get(rollup_level.lower(), "Region")
+        return matrix, column_labels, x_label
 
     def _plot_title(self) -> str:
         metric = self._current_metric()
@@ -189,13 +211,15 @@ class CordStatsPlotsPanel:
         from qtpy.QtWidgets import QMessageBox
 
         try:
-            matrix = self._build_matrix()
+            matrix, column_labels, x_label = self._build_matrix()
             fig = build_cord_heatmap_figure(
                 matrix,
+                column_labels=column_labels,
                 title=self._plot_title(),
                 cmap=str(self._cmap_combo.currentText()),
                 log_scale=self._log_scale_check.isChecked(),
                 normalize=str(self._normalize_combo.currentData()),
+                x_label=x_label,
             )
         except (ValueError, KeyError) as exc:
             self._status_label.setText(str(exc))
@@ -235,14 +259,16 @@ class CordStatsPlotsPanel:
         if not path:
             return
         try:
-            matrix = self._build_matrix()
+            matrix, column_labels, x_label = self._build_matrix()
             saved = plot_cord_heatmap(
                 matrix,
                 Path(path),
+                column_labels=column_labels,
                 title=self._plot_title(),
                 cmap=str(self._cmap_combo.currentText()),
                 log_scale=self._log_scale_check.isChecked(),
                 normalize=str(self._normalize_combo.currentData()),
+                x_label=x_label,
             )
         except (ValueError, OSError) as exc:
             QMessageBox.warning(self.widget, "Could not save", str(exc))

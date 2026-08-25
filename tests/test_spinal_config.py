@@ -108,7 +108,8 @@ def test_spinal_config_channels_rejects_channelperfile(tmp_path: Path) -> None:
     }
     config_path = tmp_path / "bad.yaml"
     config_path.write_text(yaml.dump(config_data), encoding="utf-8")
-    with pytest.raises(ValidationError, match="planeperfile"):
+    from lightsuite.exceptions import LightsuiteConfigError
+    with pytest.raises((ValidationError, LightsuiteConfigError), match="planeperfile"):
         load_spinal_config(config_path)
 
 

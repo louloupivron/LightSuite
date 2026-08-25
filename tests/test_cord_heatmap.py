@@ -246,3 +246,62 @@ def test_discover_cord_plot_options_includes_whole_hemisphere() -> None:
     df = _split_hemisphere_stats_frame()
     options = discover_cord_plot_options(df)
     assert options["hemispheres"][0] == "whole"
+
+
+def test_cord_stats_to_matrix_dynamic_rollup_levels() -> None:
+    from lightsuite.analysis.cord_heatmap import resolve_cord_rollup_columns
+
+    rows = [
+        # division level
+        dict(sample="s1", channel=1, atlas="fiederling", parcellation_index=71, acronym="GM", name="Gray Matter", structure="GM", division="GM", segment="C1", rollup_level="division", hemisphere="whole", metric="volume_mm3", value=10.0),
+        dict(sample="s1", channel=1, atlas="fiederling", parcellation_index=130, acronym="WM", name="White Matter", structure="WM", division="WM", segment="C1", rollup_level="division", hemisphere="whole", metric="volume_mm3", value=20.0),
+        # horn level
+        dict(sample="s1", channel=1, atlas="fiederling", parcellation_index=90, acronym="DH", name="Dorsal Horn", structure="DH", division="GM", segment="C1", rollup_level="horn", hemisphere="whole", metric="volume_mm3", value=5.0),
+        dict(sample="s1", channel=1, atlas="fiederling", parcellation_index=110, acronym="VH", name="Ventral Horn", structure="VH", division="GM", segment="C1", rollup_level="horn", hemisphere="whole", metric="volume_mm3", value=4.0),
+        dict(sample="s1", channel=1, atlas="fiederling", parcellation_index=210, acronym="C", name="Central", structure="C", division="GM", segment="C1", rollup_level="horn", hemisphere="whole", metric="volume_mm3", value=1.0),
+    ]
+    df = pd.DataFrame(rows).reindex(columns=CORD_TIDY_COLUMNS)
+
+    # division
+    mat_div = cord_stats_to_matrix(df, metric="volume_mm3", channel=1, rollup_level="division", segments=["C1"])
+    assert list(mat_div.columns) == ["GM", "WM"]
+    assert mat_div.loc["C1", "GM"] == 10.0
+    assert mat_div.loc["C1", "WM"] == 20.0
+
+    cols_div, labels_div = resolve_cord_rollup_columns("division", df[df["rollup_level"] == "division"])
+    assert cols_div == ["GM", "WM"]
+    assert labels_div == ["GM", "WM"]
+
+    # horn
+    mat_horn = cord_stats_to_matrix(df, metric="volume_mm3", channel=1, rollup_level="horn", segments=["C1"])
+    assert list(mat_horn.columns) == ["DH", "VH", "C"]
+    assert mat_horn.loc["C1", "DH"] == 5.0
+    assert mat_horn.loc["C1", "VH"] == 4.0
+    assert mat_horn.loc["C1", "C"] == 1.0
+
+
+def test_ensure_cord_rollups_in_dataframe(tmp_path: Path) -> None:
+    from lightsuite.analysis.cord_heatmap import ensure_cord_rollups_in_dataframe
+
+    atlas_dir = tmp_path / "atlas"
+    atlas_dir.mkdir()
+    regions_df = pd.DataFrame({
+        "id": [1, 2, 71, 90, 130, 201],
+        "name": ["Lamina1", "Lamina2", "Gray Matter", "Dorsal horn", "White matter", "Lamina I Combined"],
+        "acronym": ["1Sp", "2Ssp", "GM", "DH", "WM", "Lamina_I"],
+        "parent_ID": [90, 90, 250, 71, 250, 90],
+        "parent_acronym": ["DH", "DH", "SC", "GM", "SC", "DH"],
+        "children_IDs": ["", "", "1,2", "", "", "1,2"],
+    })
+    regions_df.to_csv(atlas_dir / "Atlas_Regions.csv", index=False)
+
+    rows = [
+        dict(sample="s1", channel=1, atlas="fiederling", parcellation_index=1, acronym="1Sp", name="Lamina1", structure="DH", division="GM", segment="C1", rollup_level="region", hemisphere="whole", metric="volume_mm3", value=10.0),
+        dict(sample="s1", channel=1, atlas="fiederling", parcellation_index=2, acronym="2Ssp", name="Lamina2", structure="DH", division="GM", segment="C1", rollup_level="region", hemisphere="whole", metric="volume_mm3", value=30.0),
+    ]
+    df = pd.DataFrame(rows).reindex(columns=CORD_TIDY_COLUMNS)
+
+    updated_df, loaded_regions = ensure_cord_rollups_in_dataframe(df, atlas_dir=atlas_dir)
+    assert loaded_regions is not None
+    assert set(updated_df["rollup_level"].unique()) >= {"region", "division", "structure"}
+
